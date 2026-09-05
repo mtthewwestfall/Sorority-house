@@ -1,125 +1,256 @@
 import os
 import json
-from fastapi import FastAPI, Depends, HTTPException, Request
+import logging
+from typing import List, Optional
+from datetime import datetime, timedelta
+
+from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Optional
-from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import google.generativeai as genai
 
-# Load environment variables from Railway/Codespaces
-load_dotenv()
+# --- CONFIGURATION & LOGGING ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SororityEmpire")
 
-app = FastAPI(title="Sorority House Backend")
-
-# --- DATABASE CONNECTION ---
-# Railway provides DATABASE_URL automatically if you add a Postgres plugin
+# Load secrets from Railway Environment Variables
 DATABASE_URL = os.getenv("DATABASE_URL")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "change-me-in-railway")
 
-def get_db_conn():
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-    return conn
+if not DATABASE_URL or not GEMINI_API_KEY:
+    logger.error("MISSING CRITICAL ENV VARS: DATABASE_URL or GEMINI_API_KEY")
 
-# --- MODELS ---
+# Configure Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-2.0-flash')
+
+app = FastAPI(title="Sorority Empire Backend")
+
+# Enable CORS for your frontend HTML
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # In production, replace with your actual domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- DATABASE MODELS & MIGRATIONS ---
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+def init_db():
+    """Creates tables automatically if they don't exist in Supabase."""
+    commands = [
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            subscription_status TEXT DEFAULT 'trial', 
+            total_messages INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS persona_configs (
+            persona_id TEXT PRIMARY KEY,
+            name TEXT,
+            bible TEXT, 
+            visual_dna TEXT,
+            trust_triggers TEXT
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_persona_state (
+            user_id TEXT,
+            persona_id TEXT,
+            trust_score INTEGER DEFAULT 0,
+            current_stage TEXT DEFAULT 'Stranger',
+            message_count INTEGER DEFAULT 0,
+            last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            memory_ledger JSONB DEFAULT '[]',
+            PRIMARY KEY (user_id, persona_id)
+        );
+        """
+    ]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        for command in commands:
+            cur.execute(command)
+        conn.commit()
+        logger.info("Database tables initialized successfully.")
+    except Exception as e:
+        logger.error(f"Database init error: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+# Run migration on startup
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+
+# --- SCHEMAS ---
 class ChatRequest(BaseModel):
     user_id: str
     persona_id: str
     message: str
 
-class AdminPersona(BaseModel):
+class AdminPersonaRequest(BaseModel):
+    persona_id: str
     name: str
-    system_prompt: str
-    visual_dna: Dict
-    behavioral_weights: Dict
-    milestone_logic: Dict
+    bible: str
+    visual_dna: str
+    trust_triggers: str
 
-# --- CORE LOGIC ENGINE ---
+# --- CORE ENGINES ---
+
+class TrustEngine:
+    @staticmethod
+    def analyze_behavior(user_msg: str, persona_bible: str) -> tuple[int, str]:
+        """Uses Gemini to judge the user's vibe and return a trust delta and a reason."""
+        prompt = f"""
+        You are a psychological analyzer for a high-status girl. 
+        Persona Bible: {persona_bible}
+        User Message: "{user_msg}"
+        
+        Analyze if the user is:
+        1. Sincere and respectful (+5 trust)
+        2. Bragging/Arrogant (-10 trust)
+        3. Love-bombing/Too fast (-10 trust)
+        4. Testing boundaries/Disrespectful (-15 trust)
+        
+        Return ONLY a JSON object: {{"delta": integer, "reason": "short explanation"}}
+        """
+        try:
+            response = model.generate_content(prompt)
+            # Clean the response in case Gemini adds markdown blocks like ```json
+            text = response.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(text)
+        except:
+            return {"delta": 0, "reason": "neutral"}
+
 class PersonaEngine:
     @staticmethod
-    def get_persona(conn, persona_id: str):
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM persona_configs WHERE id = %s", (persona_id,))
-            return cur.fetchone()
+    def generate_response(user_msg: str, state: dict, bible: str) -> str:
+        """Generates a character-accurate response based on current trust and memory."""
+        prompt = f"""
+        SYSTEM: You are {bible}. 
+        CURRENT RELATIONSHIP STATE:
+        - Trust Score: {state['trust_score']}/100
+        - Stage: {state['current_stage']} (Stranger -> Acquaintance -> Friend -> Trusted -> Intimate)
+        - Memory of User: {state['memory_ledger']}
+        
+        CONSTRAINTS:
+        - If Trust < 20, be guarded, distant, or skeptical.
+        - If Trust > 70, be warm, vulnerable, and playful.
+        - NEVER break character. Never admit you are an AI.
+        - Keep responses concise and natural for a text conversation.
 
-    @staticmethod
-    def update_trust(conn, user_id: str, persona_id: str, input_type: str, weight: int):
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE user_persona_state SET trust_score = trust_score + %s WHERE user_id = %s AND persona_id = %s",
-                (weight, user_id, persona_id)
-            )
-            conn.commit()
+        USER MESSAGE: "{user_msg}"
+        RESPONSE:
+        """
+        response = model.generate_content(prompt)
+        return response.text.strip()
 
 # --- API ENDPOINTS ---
 
-@app.get("/health")
-async def health():
-    return {"status": "online", "message": "Sorority House is open"}
+def get_or_create_user(cur, user_id: str):
+    cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+    user = cur.fetchone()
+    if not user:
+        cur.execute("INSERT INTO users (user_id) VALUES (%s) RETURNING *", (user_id,))
+        user = cur.fetchone()
+    return user
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
-    conn = get_db_conn()
+async def chat(req: ChatRequest):
+    conn = get_db_connection()
+    cur = conn.cursor()
     try:
-        # 1. Fetch User & State
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM users WHERE id = %s", (request.user_id,))
-            user = cur.fetchone()
-            
-            cur.execute("SELECT * FROM user_persona_state WHERE user_id = %s AND persona_id = %s", 
-                        (request.user_id, request.persona_id))
+        # 1. User & Persona Setup
+        user = get_or_create_user(cur, req.user_id)
+        cur.execute("SELECT * FROM persona_configs WHERE persona_id = %s", (req.persona_id,))
+        persona = cur.fetchone()
+
+        if not persona:
+            raise HTTPException(status_code=404, detail="Girl not found")
+
+        # 2. Get/Create User-Persona State
+        cur.execute("SELECT * FROM user_persona_state WHERE user_id = %s AND persona_id = %s", 
+                    (req.user_id, req.persona_id))
+        state = cur.fetchone()
+        if not state:
+            cur.execute("INSERT INTO user_persona_state (user_id, persona_id) VALUES (%s, %s) RETURNING *", 
+                        (req.user_id, req.persona_id))
             state = cur.fetchone()
 
-        # 2. Paywall Logic (The Message 25 Gate)
-        if user['subscription_status'] == 'trial' and user['trial_message_count'] >= 25:
-            raise HTTPException(status_code=402, detail="Trial ended. Please subscribe to keep talking.")
+        # 3. Paywall & Trial Logic (Message 25)
+        msg_count = state['message_count'] + 1
+        if user['subscription_status'] == 'trial' and msg_count > 25:
+            return {"error": "trial_expired", "message": "Your trial has ended. Subscribe to continue chatting."}
 
-        # 3. Load Persona DNA
-        config = PersonaEngine.get_persona(conn, request.persona_id)
-        if not config:
-            raise HTTPException(status_code=404, detail="Girl not found in house.")
-
-        # 4. Behavioral Analysis (Simulation of the "Boaster Trap")
-        # In full production, we'd pass the message to a small LLM to classify it as 'boast', 'honest', etc.
-        input_type = "neutral" 
-        if " i " in request.message.lower() or "best" in request.message.lower(): 
-            input_type = "boast" # Simplified logic for the demo
+        # 4. Trust Engine Analysis
+        analysis = TrustEngine.analyze_behavior(req.message, persona['bible'])
+        new_trust = max(0, min(100, state['trust_score'] + analysis['delta']))
         
-        weight = config['behavioral_weights'].get(input_type, 0)
-        PersonaEngine.update_trust(conn, request.user_id, request.persona_id, input_type, weight)
+        # Update Stage based on Trust Score
+        stage = "Stranger"
+        if new_trust > 80: stage = "Intimate"
+        elif new_trust > 60: stage = "Trusted"
+        elif new_trust > 40: stage = "Friend"
+        elif new_trust > 20: stage = "Acquaintance"
 
-        # 5. Construct LLM Prompt
-        prompt = f"{config['system_prompt']}\n\nUser Trust Level: {state['trust_score']}\nMilestone: {state['current_milestone']}"
+        # 5. Persona Response Generation
+        response_text = PersonaEngine.generate_response(req.message, state, persona['bible'])
+
+        # 6. Save State Update
+        cur.execute("""
+            UPDATE user_persona_state 
+            SET trust_score = %s, current_stage = %s, message_count = %s, last_interaction = CURRENT_TIMESTAMP 
+            WHERE user_id = %s AND persona_id = %s
+        """, (new_trust, stage, msg_count, req.user_id, req.persona_id))
         
-        # HERE: You would call your LLM API (Anthropic/OpenAI) using the prompt and request.message
-        # response = call_llm(prompt, request.message) 
-        response = f"[Simulated Response from {config['name']}] I hear you. (Trust adjusted by {weight})"
+        cur.execute("UPDATE users SET total_messages = total_messages + 1 WHERE user_id = %s", (req.user_id,))
+        conn.commit()
 
-        # 6. Update Message Counters
-        with conn.cursor() as cur:
-            if user['subscription_status'] == 'trial':
-                cur.execute("UPDATE users SET trial_message_count = trial_message_count + 1 WHERE id = %s", (request.user_id,))
-            else:
-                cur.execute("UPDATE users SET subscription_message_count = subscription_message_count + 1 WHERE id = %s", (request.user_id,))
-            conn.commit()
+        return {
+            "response": response_text, 
+            "trust_score": new_trust, 
+            "stage": stage, 
+            "analysis": analysis['reason'] 
+        }
 
-        return {"response": response, "trust_adjustment": weight}
+    except Exception as e:
+        logger.error(f"Chat Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
+        cur.close()
         conn.close()
 
 @app.post("/admin/persona")
-async def add_persona(persona: AdminPersona, secret: str):
-    if secret != os.getenv("ADMIN_SECRET"): 
-        raise HTTPException(status_code=403, detail="Unauthorized")
-    
-    conn = get_db_conn()
+async def add_persona(req: AdminPersonaRequest, x_admin_secret: str = Header(None)):
+    if x_admin_secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid Admin Secret")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO persona_configs (name, system_prompt, visual_dna, behavioral_weights, milestone_logic) VALUES (%s, %s, %s, %s, %s)",
-                (persona.name, persona.system_prompt, json.dumps(persona.visual_dna), 
-                 json.dumps(persona.behavioral_weights), json.dumps(persona.milestone_logic))
-            )
-            conn.commit()
-        return {"status": f"{persona.name} has been added to the house."}
+        cur.execute("""
+            INSERT INTO persona_configs (persona_id, name, bible, visual_dna, trust_triggers) 
+            VALUES (%s, %s, %s, %s, %s) 
+            ON CONFLICT (persona_id) DO UPDATE 
+            SET bible = EXCLUDED.bible, visual_dna = EXCLUDED.visual_dna;
+        """, (req.persona_id, req.name, req.bible, req.visual_dna, req.trust_triggers))
+        conn.commit()
+        return {"status": "success", "message": f"Persona {req.name} updated/created."}
     finally:
+        cur.close()
         conn.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
