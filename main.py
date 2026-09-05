@@ -3,10 +3,9 @@ SORORITY HOUSE — main.py
 Chat/AI backend for the companion website (FastAPI on Railway, Supabase/Postgres).
 
 Built to this spec (verified Sept 2026):
-  * ONE provider for everything: DeepSeek (V4 family).
-  * Normal chat replies : DeepSeek V4 Flash, THINKING OFF (cheap + fast).
-  * Psychological Audits: DeepSeek V4 Flash with THINKING ON (R1-style reasoning now
-    ships as a mode on the V4 family, not a separate model). Model is configurable.
+  * ONE provider for everything: Google Gemini, on your existing Google API key.
+  * Normal chat replies : Gemini, no thinking budget (fast + cheap).
+  * Psychological Audits: Gemini WITH a thinking budget ON (deeper analysis).
   * AUDITS ARE A PRODUCT: $0.99 each (USD). Everyone pays for them EXCEPT Senior
     subscribers, who get 2 FREE audits per month. Free ones reset monthly alongside
     the message allowance. Bought credits roll over.
@@ -41,13 +40,11 @@ API CONTRACT implemented here (point your chat app at these):
 
 Env vars (Railway -> Variables):
   DATABASE_URL      Supabase/Postgres connection string (postgres://user:pass@host:5432/db?sslmode=require)
-  DEEPSEEK_API_KEY  your DeepSeek key
-  CHAT_MODEL        deepseek-v4-flash    (chat, thinking OFF)
-  AUDIT_MODEL       deepseek-v4-flash    (audits; if your key needs a SEPARATE reasoning
-                    model name, set it here instead and thinking is not forced)
-  AUDIT_THINKING    true  (only used when AUDIT_MODEL == CHAT_MODEL: adds the thinking
-                    flag so the SAME model runs in reasoning mode for audits. Set false
-                    if your provider flags reasoning differently.)
+  GEMINI_API_KEY    your existing Google (Gemini) API key - the one your bots run on
+  CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
+  AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
+  AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
+                    model rejects the thinking flag.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
@@ -80,13 +77,13 @@ import uvicorn
 # CONFIG — edit here if you change plans/girls (no redeploy needed for persona text)
 # ---------------------------------------------------------------------------
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-CHAT_MODEL = os.environ.get("CHAT_MODEL", "deepseek-v4-flash")     # thinking OFF
-AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "deepseek-v4-flash")   # thinking ON
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
+AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
-DEEPSEEK_BASE = "https://api.deepseek.com/chat/completions"
 PORT = int(os.environ.get("PORT", "8080"))
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
 SUMMARY_EVERY = 8    # Layer 2: refresh the rolling summary every N user messages
@@ -627,7 +624,7 @@ def _summarize(user_id, girl, rel, recent_msgs):
         context.append({"role": "user", "content": "NEW CONVERSATION:\n" + "\n".join(lines)})
     context.append({"role": "user", "content": "Return the updated JSON now.\n" + grading})
 
-    out = _deepseek(context, model=CHAT_MODEL)
+    out = _gemini(context, model=CHAT_MODEL)
     summary = rel["summary"] or ""
     milestone = int(rel["milestone"])
     new_told, new_kept = [], []
@@ -702,32 +699,60 @@ def maybe_refresh_summary(user_id, girl, rel):
 
 
 # ---------------------------------------------------------------------------
-# DEEPSEEK — one provider, one call function. Mode picks the model + thinking.
+# GEMINI — one provider, one call function (your existing Google API key).
+# The layered message list (system blocks + user/assistant turns) is converted
+# to Gemini format: system messages become the system_instruction, the rest
+# become contents. Adjacent same-role turns are merged for Gemini's rules.
 # ---------------------------------------------------------------------------
-def _deepseek(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
-    if not DEEPSEEK_API_KEY:
-        raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY not set")
+def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or CHAT_MODEL
+    system_parts = []
+    contents = []
+    for m in messages:
+        role = m.get("role")
+        text = (m.get("content") or "").strip()
+        if role == "system":
+            system_parts.append(text)
+        else:
+            g_role = "model" if role == "assistant" else "user"
+            if contents and contents[-1]["role"] == g_role:
+                contents[-1]["parts"][0]["text"] += "\n\n" + text
+            else:
+                contents.append({"role": g_role, "parts": [{"text": text}]})
+    if not contents:
+        contents.append({"role": "user", "parts": [{"text": "Hello?"}]})
     payload = {
-        "model": model or CHAT_MODEL,
-        "messages": messages,
-        "stream": False,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
+        "contents": contents,
+        "generationConfig": {"temperature": temperature,
+                             "maxOutputTokens": max_tokens},
     }
-    # Thinking flag is only added when the SAME model runs in reasoning mode
-    # (AUDIT_MODEL == CHAT_MODEL) AND AUDIT_THINKING=true. If you set AUDIT_MODEL to
-    # a separate reasoning model name instead, no flag is forced — the model handles it.
+    if system_parts:
+        payload["system_instruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
     if thinking:
-        payload["thinking"] = True
-    r = requests.post(DEEPSEEK_BASE, json=payload,
-                      headers={"Authorization": "Bearer " + DEEPSEEK_API_KEY,
-                               "Content-Type": "application/json"},
-                      timeout=90)
+        payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 2048}
+
+    def _post(p):
+        return requests.post(
+            f"{GEMINI_BASE}/{model}:generateContent",
+            json=p, params={"key": GEMINI_API_KEY},
+            headers={"Content-Type": "application/json"}, timeout=120)
+
+    r = _post(payload)
+    # A few models reject a thinking budget - retry once without it so audits still run.
+    if r.status_code in (400, 403) and thinking and "thinkingConfig" in payload["generationConfig"]:
+        del payload["generationConfig"]["thinkingConfig"]
+        r = _post(payload)
     if r.status_code != 200:
         raise HTTPException(status_code=502,
                             detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
     try:
-        return r.json()["choices"][0]["message"]["content"].strip()
+        parts = r.json()["candidates"][0]["content"]["parts"]
+        text = "".join(p.get("text", "") for p in parts if p.get("text"))
+        if not text:
+            raise ValueError("no text")
+        return text.strip()
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected model response")
 
@@ -806,7 +831,7 @@ def chat(body: ChatIn):
         msgs.append({"role": m["sender"], "content": m["message"]})
     msgs.append({"role": "user", "content": body.message})
 
-    reply = _deepseek(msgs, model=CHAT_MODEL)   # thinking OFF for chat
+    reply = _gemini(msgs, model=CHAT_MODEL)   # no thinking budget for chat
 
     conn = db()
     try:
@@ -919,8 +944,8 @@ def audit(body: AuditIn):
                 {"role": "user", "content": full_context}]
     # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
     thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
-    report = _deepseek(messages, model=AUDIT_MODEL, thinking=thinking_on,
-                       max_tokens=900, temperature=0.6)
+    report = _gemini(messages, model=AUDIT_MODEL, thinking=thinking_on,
+                     max_tokens=900, temperature=0.6)
 
     # lifetime counter (drives the * on the leaderboard at 5+ audits)
     conn = db()
