@@ -577,7 +577,9 @@ def _ensure_user(user_id, display_name="Player"):
                     UPDATE users SET msg_used=0, free_audits_used=0,
                         plan_reset_at = now() + interval '1 month'
                     WHERE user_id=%s
+                    RETURNING plan_reset_at
                 """, (user_id,))
+                row["plan_reset_at"] = cur.fetchone()["plan_reset_at"]
                 conn.commit()
                 row["msg_used"] = 0
                 row["free_audits_used"] = 0
@@ -997,15 +999,30 @@ tr.row{cursor:pointer}tr.row:hover{background:#1e1e28}
 #toast{position:fixed;bottom:20px;right:20px;background:#222;border:1px solid var(--line);padding:10px 14px;border-radius:8px;display:none}
 .hid{display:none}.stat{font-size:22px;font-weight:600}.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px}.kv div:nth-child(odd){color:var(--mut)}
 pre{white-space:pre-wrap;margin:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.stats .card{margin:0}.stats .lbl{color:var(--mut);font-size:12px}
+.bars{display:flex;align-items:flex-end;gap:4px;height:90px;margin-top:8px}.bars div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;min-height:2px;position:relative}.bars div span{position:absolute;bottom:-18px;left:0;right:0;text-align:center;font-size:10px;color:var(--mut)}
+.chat{max-height:420px;overflow:auto;background:#0c0c10;border:1px solid var(--line);border-radius:8px;padding:10px}.msg{margin:6px 0;padding:6px 10px;border-radius:8px;max-width:80%}.msg.user{background:#242433;margin-left:auto}.msg.assistant{background:#2b1a24}.msg .t{font-size:10px;color:var(--mut)}
+.plist{display:flex;gap:6px;flex-wrap:wrap}.plist button.on{border-color:var(--acc);color:var(--acc)}
 </style></head><body>
 <header><h1>Sorority House · Admin</h1>
-<nav><button id="tabAcc" class="on" onclick="show('acc')">Accounts</button>
-<button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button></nav>
+<nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
+<button id="tabAcc" onclick="show('acc')">Accounts</button>
+<button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
+<button id="tabPer" onclick="show('per')">Personas</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
 <div class="row2"><input id="secret" type="password" placeholder="ADMIN_SECRET" style="min-width:280px">
 <button class="p" onclick="login()">Unlock</button></div><div class="mut">Set ADMIN_SECRET on the server; it is required for every action here.</div></div>
+
+<section id="ovw" class="hid">
+<div class="row2" style="justify-content:flex-end"><button class="s" onclick="loadOverview()">Refresh</button></div>
+<div id="stats" class="stats"></div>
+<div class="grid" style="margin-top:16px">
+<div class="card"><h4 style="margin-top:0">Messages per day (14d)</h4><div id="daily" class="bars"></div><div style="height:18px"></div></div>
+<div class="card"><h4 style="margin-top:0">Girls</h4><table><thead><tr><th>Girl</th><th>Players</th><th>M5+</th><th>Avg stage</th></tr></thead><tbody id="girlRows"></tbody></table></div>
+</div>
+</section>
 
 <section id="acc" class="hid">
 <div class="card"><div class="row2"><input id="q" placeholder="Search email, name or user id" style="min-width:300px" onkeydown="if(event.key==='Enter')loadAccounts()">
@@ -1021,6 +1038,12 @@ pre{white-space:pre-wrap;margin:0}
 <button class="s" onclick="loadComplaints()">Refresh</button></div>
 <div id="cmpList"></div></div>
 </section>
+
+<section id="per" class="hid">
+<div class="card"><div class="plist" id="plist"></div>
+<div class="mut" style="margin-top:8px">The persona text is the girl's Layer-1 system block. Paste her FULL character doc; unseeded girls run on the short built-in fallback.</div></div>
+<div id="pedit" class="card hid"></div>
+</section>
 </main>
 <div id="toast"></div>
 <script>
@@ -1030,9 +1053,28 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-function show(t){$('#acc').classList.toggle('hid',t!=='acc');$('#cmp').classList.toggle('hid',t!=='cmp');$('#tabAcc').classList.toggle('on',t==='acc');$('#tabCmp').classList.toggle('on',t==='cmp');if(t==='cmp')loadComplaints()}
-async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('acc');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
-function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');$('#acc').classList.add('hid');$('#cmp').classList.add('hid')}
+const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer'};
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per')loadPersonas()}
+async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
+function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');for(const k in TABS)$('#'+k).classList.add('hid')}
+async function loadOverview(){try{const s=await api('/admin/overview');const st=(l,v,sub)=>`<div class="card"><div class="lbl">${l}</div><div class="stat">${v}</div>${sub?`<div class="mut">${sub}</div>`:''}</div>`;
+ $('#stats').innerHTML=st('Accounts',s.accounts,`+${s.accounts_7d} this week`)+st('Paying',s.tiers.sophomore+s.tiers.junior+s.tiers.senior,`${s.tiers.senior} sr · ${s.tiers.junior} jr · ${s.tiers.sophomore} so`)+st('Trial',s.tiers.freshman)+st('Comped',s.comped)
+  +st('Active 24h',s.active_24h,`${s.active_7d} this week`)+st('Messages 24h',s.messages_24h,`${s.messages} all time`)+st('Audits run',s.audits)+st('Open complaints',s.open_complaints);
+ const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
+ $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
+ $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
+let PERS=[];
+async function loadPersonas(sel){try{PERS=await api('/admin/personas');$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name)} ${p.seeded?'':'<span class="mut">(fallback)</span>'}</button>`).join('');if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
+$('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
+function editPersona(i){const p=PERS[i];if(!p)return;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
+ el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl)}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback'}</span></div>
+ <div class="row2"><label>Name <input id="pName" value="${esc(p.name)}"></label><label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:220px"></label></div>
+ <textarea id="pDoc" style="min-height:320px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
+ <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="savePersona(this.dataset.girl)">Save</button><span class="mut" id="pLen">${p.persona.length} chars</span></div>`;
+ $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
+async function savePersona(girl){try{await api('/admin/console/persona',{method:'POST',body:JSON.stringify({girl,name:$('#pName').value,door_title:$('#pTitle').value,persona:$('#pDoc').value})});toast('Persona saved');loadPersonas(girl)}catch(e){toast(e.message,true)}}
+async function loadChat(girl){const email=CUR;try{const rows=await api('/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl));document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',b.dataset.girl===girl));
+ const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
 async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
  ROWS=rows;$('#accRows').innerHTML=rows.map((a,i)=>`<tr class="row" data-i="${i}"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
@@ -1055,7 +1097,9 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <h4>Audit credits</h4><div class="row2"><input id="gaN" type="number" min=1 value=1 style="width:90px"><button class="s" onclick="grantAudits()">Add</button></div>
   <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote()">Save note</button></div>
  </div></div>
- <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}`;el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
+ <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}
+ <h4>Chat log</h4><div class="plist" id="chatTabs">${a.relationships.map(r=>`<button class="s" data-girl="${esc(r.girl)}">${esc(r.girl)}</button>`).join('')||'<span class="mut">no chats yet</span>'}</div><div id="chat" class="chat" style="margin-top:8px"><span class="mut">Pick a girl to read the latest exchanges.</span></div>`;
+ $('#chatTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-girl]');if(b)loadChat(b.dataset.girl)});el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
 function renderComplaints(list){if(!list.length)return '<div class="mut">None</div>';return list.map(c=>`<div class="card" id="c${c.id}"><div class="row2"><b>${esc(c.subject)}</b><span class="pill ${esc(c.status)}">${esc(c.status)}</span>
  <span class="mut">${esc(c.email||'')} ${c.display_name?'· '+esc(c.display_name):''} ${c.tier?'· '+esc(c.tier):''} · ${dt(c.created_at)}</span></div><pre>${esc(c.body)}</pre>
  <div class="row2" style="margin-top:10px"><input id="cn${c.id}" placeholder="Note / resolution" value="${esc(c.admin_note)}" style="flex:1;min-width:200px">
@@ -1068,7 +1112,7 @@ async function endComp(){const email=CUR;if(!confirm('End free time now?'))retur
 async function setTier(){const email=CUR;try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
 async function grantAudits(){const email=CUR;try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
 async function saveNote(){const email=CUR;try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
-if(SECRET){$('#login').classList.add('hid');show('acc');loadAccounts();countOpen()}
+if(SECRET){$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}
 </script></body></html>"""
 
 
@@ -1155,6 +1199,13 @@ class AdminNoteIn(BaseModel):
 class ComplaintUpdateIn(BaseModel):
     status: str          # open | resolved
     admin_note: str = ""
+
+
+class AdminPersonaIn(BaseModel):
+    girl: str
+    name: str
+    door_title: str = ""
+    persona: str
 
 
 @app.on_event("startup")
@@ -1324,35 +1375,38 @@ def audit(body: AuditIn, user=Depends(current_user)):
         raise HTTPException(status_code=403, detail="This door is locked for your tier")
 
     # --- AUDIT BILLING: free monthly allowance first, then bought credits ---
-    free_left = free_audits_left(user)
-    paid_left = int(user["audit_credits"])
-    if free_left > 0:
-        # Senior freebie: costs nothing, refills next month
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE users SET free_audits_used = free_audits_used + 1 "
-                            "WHERE user_id=%s", (user["user_id"],))
-                conn.commit()
-        finally:
-            conn.close()
-        free_left -= 1
-    elif paid_left > 0:
-        # Paid audit credit (bought via $0.99 charge, granted by /admin/grant-audits)
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE users SET audit_credits = audit_credits - 1 "
-                            "WHERE user_id=%s", (user["user_id"],))
-                conn.commit()
-        finally:
-            conn.close()
-        paid_left -= 1
-    else:
+    # Reserve the entitlement atomically (conditional UPDATEs) so concurrent
+    # requests can't all spend the same credit.
+    allowance = FREE_AUDITS.get(user["tier"], 0)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET free_audits_used = free_audits_used + 1
+                WHERE user_id=%s AND free_audits_used < %s
+                RETURNING free_audits_used, audit_credits
+            """, (user["user_id"], allowance))
+            got = cur.fetchone()
+            if got is not None:
+                spent = "free"
+            else:
+                cur.execute("""
+                    UPDATE users SET audit_credits = audit_credits - 1
+                    WHERE user_id=%s AND audit_credits > 0
+                    RETURNING free_audits_used, audit_credits
+                """, (user["user_id"],))
+                got = cur.fetchone()
+                spent = "paid"
+            conn.commit()
+    finally:
+        conn.close()
+    if got is None:
         raise HTTPException(
             status_code=402,
             detail=("no_audit_credits|Audits cost $%.2f each. Seniors get 2 free per "
                     "month. Buy credits to run an audit." % AUDIT_PRICE_USD))
+    free_left = max(0, allowance - int(got["free_audits_used"]))
+    paid_left = int(got["audit_credits"])
 
     # --- Build the FULL relationship arc for the audit ---
     rel = get_relationship(user["user_id"], girl)
@@ -1368,8 +1422,24 @@ def audit(body: AuditIn, user=Depends(current_user)):
                 {"role": "user", "content": full_context}]
     # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
     thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
-    report = _gemini(messages, model=AUDIT_MODEL, thinking=thinking_on,
-                     max_tokens=900, temperature=0.6)
+    try:
+        report = _gemini(messages, model=AUDIT_MODEL, thinking=thinking_on,
+                         max_tokens=900, temperature=0.6)
+    except Exception:
+        # model call failed: hand the reserved entitlement back
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                if spent == "free":
+                    cur.execute("UPDATE users SET free_audits_used = GREATEST(free_audits_used - 1, 0) "
+                                "WHERE user_id=%s", (user["user_id"],))
+                else:
+                    cur.execute("UPDATE users SET audit_credits = audit_credits + 1 "
+                                "WHERE user_id=%s", (user["user_id"],))
+                conn.commit()
+        finally:
+            conn.close()
+        raise
 
     # lifetime counter (drives the * on the leaderboard at 5+ audits)
     conn = db()
@@ -1752,6 +1822,100 @@ def admin_update_complaint(complaint_id: int, body: ComplaintUpdateIn):
     finally:
         conn.close()
     return {"ok": True, "id": complaint_id, "status": status}
+
+
+@app.get("/admin/overview", dependencies=[Depends(admin_required)])
+def admin_overview():
+    """Dashboard numbers for the admin console."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT u.tier, count(*) AS n FROM accounts a JOIN users u ON u.user_id=a.user_id
+                GROUP BY u.tier
+            """)
+            tiers = {t: 0 for t in TIERS}
+            for r in cur.fetchall():
+                tiers[r["tier"]] = r["n"]
+            cur.execute("""
+                SELECT
+                  (SELECT count(*) FROM accounts) AS accounts,
+                  (SELECT count(*) FROM accounts WHERE created_at > now() - interval '7 days') AS accounts_7d,
+                  (SELECT count(*) FROM users WHERE comp_until > now()) AS comped,
+                  (SELECT count(*) FROM complaints WHERE status='open') AS open_complaints,
+                  (SELECT count(*) FROM chat_logs WHERE sender='user') AS messages,
+                  (SELECT count(*) FROM chat_logs WHERE sender='user' AND created_at > now() - interval '1 day') AS messages_24h,
+                  (SELECT count(DISTINCT user_id) FROM chat_logs WHERE created_at > now() - interval '1 day') AS active_24h,
+                  (SELECT count(DISTINCT user_id) FROM chat_logs WHERE created_at > now() - interval '7 days') AS active_7d,
+                  (SELECT coalesce(sum(total_audits_used),0) FROM users) AS audits
+            """)
+            stats = dict(cur.fetchone())
+            cur.execute("""
+                SELECT girl, count(*) AS players, count(*) FILTER (WHERE milestone >= 5) AS deep,
+                       round(avg(milestone), 2) AS avg_milestone
+                FROM relationships GROUP BY girl ORDER BY players DESC
+            """)
+            girls = cur.fetchall()
+            cur.execute("""
+                SELECT date_trunc('day', created_at)::date AS day, count(*) AS n
+                FROM chat_logs WHERE sender='user' AND created_at > now() - interval '14 days'
+                GROUP BY day ORDER BY day
+            """)
+            daily = cur.fetchall()
+    finally:
+        conn.close()
+    stats["tiers"] = tiers
+    stats["girls"] = girls
+    stats["daily_messages"] = daily
+    return stats
+
+
+@app.get("/admin/personas", dependencies=[Depends(admin_required)])
+def admin_personas():
+    """Every girl with her seeded doc (or the built-in fallback when none is seeded)."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT girl, name, door_title, persona FROM personas")
+            seeded = {r["girl"]: r for r in cur.fetchall()}
+    finally:
+        conn.close()
+    out = []
+    for girl in GIRL_ACCESS["senior"]:
+        name, title, blurb = DEFAULT_PERSONAS.get(girl, (girl.title(), "New sister", ""))
+        row = seeded.get(girl)
+        out.append({"girl": girl, "seeded": row is not None,
+                    "name": row["name"] if row else name,
+                    "door_title": row["door_title"] if row else title,
+                    "persona": row["persona"] if row else blurb})
+    return out
+
+
+@app.post("/admin/console/persona", dependencies=[Depends(admin_required)])
+def admin_console_persona(body: AdminPersonaIn):
+    if not body.persona.strip() or not body.name.strip():
+        raise HTTPException(status_code=400, detail="name and persona are required")
+    return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
+                                 persona=body.persona, secret=ADMIN_SECRET))
+
+
+@app.get("/admin/accounts/{email}/chat", dependencies=[Depends(admin_required)])
+def admin_account_chat(email: str, girl: str, limit: int = 60):
+    """Latest exchanges between an account and one girl (support / complaint review)."""
+    user = _user_for_email(email)
+    limit = max(1, min(500, limit))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, sender, message, created_at FROM chat_logs
+                WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT %s
+            """, (user["user_id"], girl.strip().lower(), limit))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    rows.reverse()
+    return rows
 
 
 @app.get("/admin", response_class=HTMLResponse)
