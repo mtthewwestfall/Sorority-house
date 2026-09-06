@@ -1140,7 +1140,7 @@ async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+enco
  <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
  <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td><td>${a.verified_at?'<span class="mut">yes</span>':'<span class="pill open">no</span>'}</td></tr>`).join('')||'<tr><td colspan=9 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
 $('#accRows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr)openAccount(ROWS[+tr.dataset.i].email)});
-async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));CUR=a.email;const el=$('#detail');el.classList.remove('hid');
+async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));CUR=a.email;const li=ROWS.find(r=>r.email===a.email);if(li&&(li.tier!==a.tier||li.remaining!==a.remaining||li.comp_until!==a.comp_until))loadAccounts();const el=$('#detail');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(a.email)}</h3><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span><span class="mut">${esc(a.user_id)}</span><button class="s" style="margin-left:auto" onclick="$('#detail').classList.add('hid')">Close</button></div>
  <div class="grid"><div>
   <div class="kv"><div>Name</div><div>${esc(a.display_name)}</div><div>Messages left</div><div>${a.remaining} <span class="mut">(used ${a.msg_used})</span></div>
