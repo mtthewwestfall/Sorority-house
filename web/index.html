@@ -211,6 +211,12 @@
     }
     .chat-form input:focus { outline: none; border-color: rgba(255,181,44,.6); }
     .chat-form .button { padding: 12px 22px; }
+    .chat-photo { border-radius: 16px; overflow: hidden; align-self: flex-start; max-width: 82%; border: 1px solid var(--line); }
+    .chat-photo img { display: block; width: 100%; }
+    .chat-photo figcaption { padding: 6px 10px; color: var(--muted); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; background: rgba(9,7,17,.7); }
+    #chat-photo-btn { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 11px 16px; font: inherit; font-size: .85rem; cursor: pointer; }
+    #chat-photo-btn:hover:not([disabled]) { color: var(--white); border-color: rgba(255,181,44,.6); }
+    #chat-photo-btn[disabled] { opacity: .5; cursor: not-allowed; }
     .chat-form .button[disabled] { opacity: .5; cursor: not-allowed; }
     .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; }
 
@@ -367,6 +373,7 @@
       <div class="chat-foot">
         <form class="chat-form" id="chat-form">
           <input id="chat-input" type="text" autocomplete="off" placeholder="Say something…" aria-label="Message" />
+          <button id="chat-photo-btn" type="button">See her</button>
           <button class="button" id="chat-send" type="submit">Send</button>
         </form>
         <div class="chat-meta">
@@ -399,6 +406,7 @@
     const chatInput = document.getElementById('chat-input');
     const chatSend = document.getElementById('chat-send');
     const chatRemaining = document.getElementById('chat-remaining');
+    const chatPhotoBtn = document.getElementById('chat-photo-btn');
     let currentGirl = null;
     let sending = false;
 
@@ -409,6 +417,20 @@
       chatLog.appendChild(el);
       chatLog.scrollTop = chatLog.scrollHeight;
       return el;
+    }
+
+    function addPhoto(mime, base64, caption) {
+      const figure = document.createElement('figure');
+      figure.className = 'chat-photo';
+      figure.style.margin = '0';
+      const img = document.createElement('img');
+      img.src = 'data:' + mime + ';base64,' + base64;
+      img.alt = caption;
+      const cap = document.createElement('figcaption');
+      cap.textContent = caption;
+      figure.append(img, cap);
+      chatLog.appendChild(figure);
+      chatLog.scrollTop = chatLog.scrollHeight;
     }
 
     function openChat(card) {
@@ -437,6 +459,31 @@
     document.getElementById('chat-close').addEventListener('click', closeChat);
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeChat(); });
+
+    chatPhotoBtn.addEventListener('click', async () => {
+      if (!currentGirl || chatPhotoBtn.disabled) return;
+      chatPhotoBtn.disabled = true;
+      const pending = addMessage('typing', 'she’s finding a photo…');
+      try {
+        const response = await fetch(API_BASE_URL + '/image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: getUserId(), girl: currentGirl }),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        if (!response.ok || !data || data.ok === false || !data.image_b64) {
+          addMessage('error', (data && (data.error || data.detail)) || 'No photo right now. Try again in a moment.');
+        } else {
+          addPhoto(data.mime, data.image_b64, data.disclosure || 'AI-generated image');
+        }
+      } catch (error) {
+        pending.remove();
+        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+      } finally {
+        chatPhotoBtn.disabled = false;
+      }
+    });
 
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();

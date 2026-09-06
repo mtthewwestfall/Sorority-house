@@ -43,6 +43,7 @@ Env vars (Railway -> Variables):
   GEMINI_API_KEY    your existing Google (Gemini) API key - the one your bots run on
   CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
+  IMAGE_MODEL       gemini-2.5-flash-image (default; the model /image renders portraits with)
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
@@ -80,6 +81,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
+IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")  # portraits (/image)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
@@ -126,6 +128,22 @@ DEFAULT_PERSONAS = {
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
     "veronica": ("Veronica", "The host",       "Senior exclusive. The social chair who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
 }
+
+# Appearance used by /image so a girl looks like herself every time.
+VISUAL_DNA = {
+    "dakota":   "early-20s woman, warm hazel eyes, long dark brown hair with soft waves, light freckles, easy natural smile",
+    "zoe":      "early-20s woman, striking green eyes, long honey-blonde hair, sharp cheekbones, polished and composed",
+    "willow":   "early-20s woman, pale grey eyes, straight auburn hair past her shoulders, quiet watchful expression",
+    "brittany": "early-20s woman, bright blue eyes, shoulder-length golden blonde hair, sunny open smile",
+    "sasha":    "early-20s woman, dark brown eyes, short jet-black bob, confident level gaze",
+    "piper":    "early-20s woman, warm brown eyes, wavy chestnut hair, freckled nose, relaxed free-spirited look",
+    "veronica": "early-20s woman, amber eyes, sleek dark hair worn up, elegant hostess poise",
+}
+
+# Every generated portrait is constrained by this — adult, clothed, non-explicit.
+IMAGE_RULES = ("Photorealistic portrait of a clearly adult woman in her early twenties. "
+               "Fully clothed in everyday casual clothing, tasteful and non-explicit, "
+               "no nudity or suggestive posing. Natural lighting, shallow depth of field.")
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
 HOUSE_RULES = (
@@ -757,6 +775,31 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         raise HTTPException(status_code=502, detail="Unexpected model response")
 
 
+def _gemini_image(prompt, model=None):
+    """Render one image and return (mime_type, base64 data)."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or IMAGE_MODEL
+    r = requests.post(
+        f"{GEMINI_BASE}/{model}:generateContent",
+        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+              "generationConfig": {"responseModalities": ["IMAGE"]}},
+        params={"key": GEMINI_API_KEY},
+        headers={"Content-Type": "application/json"}, timeout=180)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"Image call failed ({r.status_code}): {r.text[:300]}")
+    try:
+        parts = r.json()["candidates"][0]["content"]["parts"]
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected image response")
+    for part in parts:
+        blob = part.get("inlineData") or part.get("inline_data")
+        if blob and blob.get("data"):
+            return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
+    raise HTTPException(status_code=502, detail="Model returned no image")
+
+
 # ---------------------------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------------------------
@@ -770,6 +813,12 @@ class ChatIn(BaseModel):
 class AuditIn(BaseModel):
     user_id: str
     girl: str
+
+
+class ImageIn(BaseModel):
+    user_id: str
+    girl: str
+    scene: str = ""      # optional short setting hint, e.g. "on the porch at sunset"
 
 
 class PersonaIn(BaseModel):
@@ -794,6 +843,7 @@ def _startup():
 @app.get("/health")
 def health():
     return {"ok": True, "model": CHAT_MODEL, "audit_model": AUDIT_MODEL,
+            "image_model": IMAGE_MODEL,
             "audit_thinking": AUDIT_THINKING, "audit_price_usd": AUDIT_PRICE_USD,
             "free_audits": FREE_AUDITS}
 
@@ -861,6 +911,27 @@ def chat(body: ChatIn):
 
     return {"ok": True, "reply": reply, "remaining": remaining - 1,
             "milestone": state["milestone"]}
+
+
+@app.post("/image")
+def image(body: ImageIn):
+    user = _ensure_user(body.user_id)
+    girl = body.girl.strip().lower()
+
+    if not girl_open(user["user_id"], girl, user["tier"]):
+        raise HTTPException(status_code=403, detail="This door is locked for your tier")
+    if girl not in VISUAL_DNA:
+        raise HTTPException(status_code=404, detail="Unknown girl")
+
+    _, name = get_persona(girl)
+    scene = " ".join((body.scene or "").split())[:200]
+    prompt = f"{IMAGE_RULES} She is {name}: {VISUAL_DNA[girl]}."
+    if scene:
+        prompt += f" Setting: {scene}."
+
+    mime, data = _gemini_image(prompt)
+    return {"ok": True, "girl": girl, "name": name, "mime": mime, "image_b64": data,
+            "disclosure": "AI-generated image"}
 
 
 @app.get("/history")
