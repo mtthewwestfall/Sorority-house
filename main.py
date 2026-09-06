@@ -444,6 +444,9 @@ def init_db():
                 -- then falls back to comp_prev_tier.
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_until TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_tier TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_msg_used INTEGER;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_free_audits INTEGER;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_reset_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
                 CREATE TABLE IF NOT EXISTS complaints (
                     id          BIGSERIAL PRIMARY KEY,
@@ -551,17 +554,22 @@ def _ensure_user(user_id, display_name="Player"):
                 prev = row.get("comp_prev_tier") or "freshman"
                 if prev not in TIERS:
                     prev = "freshman"
-                used = TIERS["freshman"]["limit"] if prev == "freshman" else 0
+                if prev == "freshman":
+                    used, audits, reset_at = TIERS["freshman"]["limit"], 0, row["plan_reset_at"]
+                else:   # paid: pick up exactly where the subscription left off
+                    used = row.get("comp_prev_msg_used") or 0
+                    audits = row.get("comp_prev_free_audits") or 0
+                    reset_at = row.get("comp_prev_reset_at") or row["plan_reset_at"]
                 cur.execute("""
-                    UPDATE users SET tier=%s, msg_used=%s, free_audits_used=0,
-                        plan_reset_at = now() + interval '1 month',
-                        comp_until=NULL, comp_prev_tier=NULL
+                    UPDATE users SET tier=%s, msg_used=%s, free_audits_used=%s, plan_reset_at=%s,
+                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
+                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL
                     WHERE user_id=%s
-                """, (prev, used, user_id))
+                """, (prev, used, audits, reset_at, user_id))
                 conn.commit()
-                row["tier"], row["msg_used"], row["free_audits_used"] = prev, used, 0
+                row["tier"], row["msg_used"], row["free_audits_used"] = prev, used, audits
+                row["plan_reset_at"] = reset_at
                 row["comp_until"], row["comp_prev_tier"] = None, None
-                return row
             # lazy monthly reset: message allowance AND free audits refill together.
             # Freshman is a one-time 25-message trial, so it never refills.
             if row["tier"] != "freshman" and row["plan_reset_at"] < now:
@@ -1016,7 +1024,7 @@ pre{white-space:pre-wrap;margin:0}
 </main>
 <div id="toast"></div>
 <script>
-const $=s=>document.querySelector(s);let SECRET=sessionStorage.getItem('adm')||'';
+const $=s=>document.querySelector(s);let SECRET=sessionStorage.getItem('adm')||'';let ROWS=[],CUR='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLocaleDateString():'—';
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
@@ -1027,38 +1035,39 @@ async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?
 function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');$('#acc').classList.add('hid');$('#cmp').classList.add('hid')}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
 async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
- $('#accRows').innerHTML=rows.map(a=>`<tr class="row" onclick="openAccount('${esc(a.email)}')"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
+ ROWS=rows;$('#accRows').innerHTML=rows.map((a,i)=>`<tr class="row" data-i="${i}"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
  <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
  <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td></tr>`).join('')||'<tr><td colspan=8 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
-async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));const el=$('#detail');el.classList.remove('hid');
+$('#accRows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr)openAccount(ROWS[+tr.dataset.i].email)});
+async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));CUR=a.email;const el=$('#detail');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(a.email)}</h3><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span><span class="mut">${esc(a.user_id)}</span><button class="s" style="margin-left:auto" onclick="$('#detail').classList.add('hid')">Close</button></div>
  <div class="grid"><div>
   <div class="kv"><div>Name</div><div>${esc(a.display_name)}</div><div>Messages left</div><div>${a.remaining} <span class="mut">(used ${a.msg_used})</span></div>
   <div>Resets</div><div>${dt(a.plan_reset_at)}</div><div>Audit credits</div><div>${a.audit_credits} <span class="mut">(${a.total_audits_used} used total)</span></div>
-  <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp('${esc(a.email)}')">End now</button>`:'none'}</div>
+  <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp()">End now</button>`:'none'}</div>
   <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div></div>
   <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">none yet</td></tr>'}</tbody></table>
  </div><div>
   <h4>Give free time</h4><div class="row2"><select id="gtTier"><option value="senior">Senior</option><option value="junior">Junior</option><option value="sophomore">Sophomore</option></select>
-  <input id="gtDays" type="number" min=1 value=30 style="width:90px"> days <button class="p" onclick="grantTime('${esc(a.email)}')">Grant</button></div>
+  <input id="gtDays" type="number" min=1 value=30 style="width:90px"> days <button class="p" onclick="grantTime()">Grant</button></div>
   <div class="mut">Fresh allowance now; falls back to their current tier when it ends. Granting again extends.</div>
-  <h4>Set tier (paid subscription)</h4><div class="row2"><select id="stTier"><option>freshman</option><option>sophomore</option><option>junior</option><option>senior</option></select><button class="s" onclick="setTier('${esc(a.email)}')">Apply</button></div>
-  <h4>Audit credits</h4><div class="row2"><input id="gaN" type="number" min=1 value=1 style="width:90px"><button class="s" onclick="grantAudits('${esc(a.email)}')">Add</button></div>
-  <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote('${esc(a.email)}')">Save note</button></div>
+  <h4>Set tier (paid subscription)</h4><div class="row2"><select id="stTier"><option>freshman</option><option>sophomore</option><option>junior</option><option>senior</option></select><button class="s" onclick="setTier()">Apply</button></div>
+  <h4>Audit credits</h4><div class="row2"><input id="gaN" type="number" min=1 value=1 style="width:90px"><button class="s" onclick="grantAudits()">Add</button></div>
+  <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote()">Save note</button></div>
  </div></div>
  <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}`;el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
 function renderComplaints(list){if(!list.length)return '<div class="mut">None</div>';return list.map(c=>`<div class="card" id="c${c.id}"><div class="row2"><b>${esc(c.subject)}</b><span class="pill ${esc(c.status)}">${esc(c.status)}</span>
  <span class="mut">${esc(c.email||'')} ${c.display_name?'· '+esc(c.display_name):''} ${c.tier?'· '+esc(c.tier):''} · ${dt(c.created_at)}</span></div><pre>${esc(c.body)}</pre>
  <div class="row2" style="margin-top:10px"><input id="cn${c.id}" placeholder="Note / resolution" value="${esc(c.admin_note)}" style="flex:1;min-width:200px">
  ${c.status==='open'?`<button class="p" onclick="setComplaint(${c.id},'resolved')">Resolve</button>`:`<button class="s" onclick="setComplaint(${c.id},'open')">Reopen</button>`}
- <button class="s" onclick="setComplaint(${c.id},'${esc(c.status)}')">Save note</button></div></div>`).join('')}
+ <button class="s" onclick="setComplaint(${c.id},${c.status==='open'?"'open'":"'resolved'"})">Save note</button></div></div>`).join('')}
 async function loadComplaints(){try{const list=await api('/admin/complaints?status='+$('#cstatus').value);$('#cmpList').innerHTML=renderComplaints(list);countOpen()}catch(e){toast(e.message,true)}}
-async function setComplaint(id,status){try{await api('/admin/complaints/'+id,{method:'POST',body:JSON.stringify({status,admin_note:$('#cn'+id).value})});toast('Saved');if(!$('#cmp').classList.contains('hid'))loadComplaints();else{const em=$('#detail h3');if(em)openAccount(em.textContent)}countOpen()}catch(e){toast(e.message,true)}}
-async function grantTime(email){try{const r=await api('/admin/grant-time',{method:'POST',body:JSON.stringify({email,tier:$('#gtTier').value,days:+$('#gtDays').value})});toast(`Comped ${r.tier} until ${d(r.comp_until)}`);openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
-async function endComp(email){if(!confirm('End free time now?'))return;try{await api('/admin/end-comp',{method:'POST',body:JSON.stringify({email})});toast('Comp ended');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
-async function setTier(email){try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
-async function grantAudits(email){try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
-async function saveNote(email){try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
+async function setComplaint(id,status){try{await api('/admin/complaints/'+id,{method:'POST',body:JSON.stringify({status,admin_note:$('#cn'+id).value})});toast('Saved');if(!$('#cmp').classList.contains('hid'))loadComplaints();else if(CUR)openAccount(CUR);countOpen()}catch(e){toast(e.message,true)}}
+async function grantTime(){const email=CUR;try{const r=await api('/admin/grant-time',{method:'POST',body:JSON.stringify({email,tier:$('#gtTier').value,days:+$('#gtDays').value})});toast(`Comped ${r.tier} until ${d(r.comp_until)}`);openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function endComp(){const email=CUR;if(!confirm('End free time now?'))return;try{await api('/admin/end-comp',{method:'POST',body:JSON.stringify({email})});toast('Comp ended');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function setTier(){const email=CUR;try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function grantAudits(){const email=CUR;try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
+async function saveNote(){const email=CUR;try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
 if(SECRET){$('#login').classList.add('hid');show('acc');loadAccounts();countOpen()}
 </script></body></html>"""
 
@@ -1482,14 +1491,16 @@ def set_tier(body: SetTierIn):
             if tier == "freshman":
                 cur.execute("""
                     UPDATE users SET tier='freshman', msg_used=%s,
-                        comp_until=NULL, comp_prev_tier=NULL
+                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
+                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL
                     WHERE user_id=%s
                 """, (TIERS["freshman"]["limit"], user["user_id"]))
             elif tier != user["tier"] or user.get("comp_until") is not None:
                 cur.execute("""
                     UPDATE users SET tier=%s, msg_used=0, free_audits_used=0,
                         plan_reset_at = now() + interval '1 month',
-                        comp_until=NULL, comp_prev_tier=NULL
+                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
+                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL
                     WHERE user_id=%s
                 """, (tier, user["user_id"]))
             conn.commit()
@@ -1626,8 +1637,9 @@ def admin_account(email: str):
 @app.post("/admin/grant-time", dependencies=[Depends(admin_required)])
 def admin_grant_time(body: GrantTimeIn):
     """Comp an account: run it as `tier` for `days` with a fresh allowance, then
-    fall back to the tier it had before (a comped freshman stays used-up after).
-    Granting again while a comp is active extends it and keeps the original prev tier."""
+    fall back to the tier it had before. A paid subscriber resumes exactly where they
+    were (usage + reset date); a comped freshman stays used-up after.
+    Granting again while a comp is active extends it and keeps the original prev state."""
     tier = body.tier.strip().lower()
     if tier not in TIERS or tier == "freshman":
         raise HTTPException(status_code=400, detail="tier must be a paid tier")
@@ -1642,10 +1654,14 @@ def admin_grant_time(body: GrantTimeIn):
                 SET tier=%s, msg_used=0, free_audits_used=0,
                     plan_reset_at = now() + interval '1 month',
                     comp_until = GREATEST(COALESCE(comp_until, now()), now()) + (%s * interval '1 day'),
-                    comp_prev_tier = COALESCE(comp_prev_tier, %s)
+                    comp_prev_tier = COALESCE(comp_prev_tier, %s),
+                    comp_prev_msg_used = COALESCE(comp_prev_msg_used, %s),
+                    comp_prev_free_audits = COALESCE(comp_prev_free_audits, %s),
+                    comp_prev_reset_at = COALESCE(comp_prev_reset_at, %s)
                 WHERE user_id=%s
                 RETURNING comp_until, comp_prev_tier
-            """, (tier, body.days, user["tier"], user["user_id"]))
+            """, (tier, body.days, user["tier"], int(user["msg_used"]),
+                  int(user["free_audits_used"]), user["plan_reset_at"], user["user_id"]))
             row = cur.fetchone()
             conn.commit()
     finally:
@@ -1727,7 +1743,7 @@ def admin_update_complaint(complaint_id: int, body: ComplaintUpdateIn):
             cur.execute("""
                 UPDATE complaints
                 SET status=%s, admin_note=%s,
-                    resolved_at = CASE WHEN %s='resolved' THEN now() ELSE NULL END
+                    resolved_at = CASE WHEN %s='resolved' THEN COALESCE(resolved_at, now()) ELSE NULL END
                 WHERE id=%s RETURNING id
             """, (status, body.admin_note.strip()[:2000], status, complaint_id))
             if cur.fetchone() is None:
