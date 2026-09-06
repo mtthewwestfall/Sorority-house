@@ -71,11 +71,16 @@ Env vars (Railway -> Variables):
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
   RESEND_API_KEY    Resend (resend.com) API key used to send verification emails.
-                    If unset, the verification link is only logged to stdout (dev mode).
+                    If unset, signups succeed but no mail goes out (email_sent=false);
+                    verify users from /admin, or set VERIFY_LOG_LINKS=true in LOCAL DEV
+                    ONLY to print the links to stdout instead.
   MAIL_FROM         sender address, e.g. "Sorority House <no-reply@yourdomain.com>"
   PUBLIC_URL        this backend's public base URL (used to build the verify link),
                     e.g. https://api.yourdomain.com
-  VERIFY_REDIRECT   optional URL to send the user to after a successful verification
+  VERIFY_REDIRECT   optional URL to send the user to after a successful verification,
+                    e.g. https://lockeddoor.netlify.app/?verified=1
+  AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_S
+                    per-IP cap on signup/login/resend (default 10 per 60s; 0 disables)
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
@@ -95,12 +100,15 @@ import json
 import hashlib
 import hmac
 import secrets
+import time
+import threading
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -120,6 +128,13 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", "Sorority House <no-reply@example.com>")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 VERIFY_REDIRECT = os.environ.get("VERIFY_REDIRECT", "")
+# Dev only: with no RESEND_API_KEY, print verify links to stdout. Never enable in prod
+# (the link is a login-equivalent secret and would land in shared logs).
+VERIFY_LOG_LINKS = os.environ.get("VERIFY_LOG_LINKS", "").lower() == "true"
+RESEND_COOLDOWN_S = 60
+# per-IP throttle for the password endpoints (PBKDF2 is deliberately slow)
+AUTH_RATE_LIMIT = int(os.environ.get("AUTH_RATE_LIMIT", "10"))     # requests
+AUTH_RATE_WINDOW_S = int(os.environ.get("AUTH_RATE_WINDOW_S", "60"))
 VERIFY_TTL_HOURS = 24
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -542,12 +557,16 @@ def _verify_link(token):
 
 
 def _send_verification_email(email, display_name, token):
-    """Email the confirm link via Resend. Without RESEND_API_KEY the link is logged
-    instead so local/dev signups can still be completed by hand."""
+    """Email the confirm link via Resend. Raises 502 on any delivery failure;
+    callers must have committed state that lets the user retry via resend."""
     link = _verify_link(token)
     if not RESEND_API_KEY:
-        print(f"[verify] {email} -> {link}", flush=True)
-        return
+        if VERIFY_LOG_LINKS:
+            print(f"[verify] {email} -> {link}", flush=True)
+            return
+        print(f"[verify] RESEND_API_KEY unset; cannot email {email} "
+              "(admin can mark verified in /admin)", flush=True)
+        raise HTTPException(status_code=502, detail="Could not send verification email")
     r = requests.post(
         "https://api.resend.com/emails",
         headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
@@ -562,11 +581,49 @@ def _send_verification_email(email, display_name, token):
         raise HTTPException(status_code=502, detail="Could not send verification email")
 
 
-def _issue_verify_token(cur, email):
+def _issue_verify_token(cur, email, cooldown_s=0):
+    """Rotate the verify token. With cooldown_s > 0 the UPDATE only wins if the last
+    send is older than the cooldown (atomic, so concurrent resends can't all pass).
+    Returns the token or None if throttled."""
     token = secrets.token_urlsafe(32)
-    cur.execute("UPDATE accounts SET verify_token=%s, verify_sent_at=now() WHERE email=%s",
-                (token, email))
-    return token
+    cur.execute("""
+        UPDATE accounts SET verify_token=%s, verify_sent_at=now()
+        WHERE email=%s AND verified_at IS NULL
+          AND (verify_sent_at IS NULL OR verify_sent_at <= now() - (%s * interval '1 second'))
+        RETURNING email
+    """, (token, email, cooldown_s))
+    return token if cur.fetchone() is not None else None
+
+
+_rate_lock = threading.Lock()
+_rate_hits = defaultdict(deque)
+
+
+def _client_ip(request: Request):
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def auth_rate_limit(request: Request):
+    """Sliding-window per-IP limiter for signup/login/resend. In-process only
+    (good enough for a single Railway instance; swap for Redis if we scale out)."""
+    if AUTH_RATE_LIMIT <= 0:
+        return
+    ip = _client_ip(request)
+    now = time.monotonic()
+    with _rate_lock:
+        q = _rate_hits[ip]
+        while q and q[0] <= now - AUTH_RATE_WINDOW_S:
+            q.popleft()
+        if len(q) >= AUTH_RATE_LIMIT:
+            raise HTTPException(status_code=429,
+                                detail="Too many attempts. Try again in a minute.")
+        q.append(now)
+        if len(_rate_hits) > 10000:   # bound memory: drop idle IPs
+            for k in [k for k, v in _rate_hits.items() if not v or v[-1] <= now - AUTH_RATE_WINDOW_S]:
+                del _rate_hits[k]
 
 
 def current_user(authorization: str = Header(default="")):
@@ -613,16 +670,24 @@ def _ensure_user(user_id, display_name="Player"):
                     used = row.get("comp_prev_msg_used") or 0
                     audits = row.get("comp_prev_free_audits") or 0
                     reset_at = row.get("comp_prev_reset_at") or row["plan_reset_at"]
+                # compare-and-swap on comp_until: if an admin/webhook changed the
+                # comp (or cleared it) since our SELECT, our restore is stale — skip it
+                # and re-read rather than clobber the newer state.
                 cur.execute("""
                     UPDATE users SET tier=%s, msg_used=%s, free_audits_used=%s, plan_reset_at=%s,
                         comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
                         comp_prev_free_audits=NULL, comp_prev_reset_at=NULL
-                    WHERE user_id=%s
-                """, (prev, used, audits, reset_at, user_id))
+                    WHERE user_id=%s AND comp_until=%s
+                """, (prev, used, audits, reset_at, user_id, row["comp_until"]))
+                swapped = cur.rowcount == 1
                 conn.commit()
-                row["tier"], row["msg_used"], row["free_audits_used"] = prev, used, audits
-                row["plan_reset_at"] = reset_at
-                row["comp_until"], row["comp_prev_tier"] = None, None
+                if swapped:
+                    row["tier"], row["msg_used"], row["free_audits_used"] = prev, used, audits
+                    row["plan_reset_at"] = reset_at
+                    row["comp_until"], row["comp_prev_tier"] = None, None
+                else:
+                    cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+                    row = cur.fetchone()
             # lazy monthly reset: message allowance AND free audits refill together.
             # Freshman is a one-time 25-message trial, so it never refills.
             if row["tier"] != "freshman" and row["plan_reset_at"] < now:
@@ -1285,7 +1350,7 @@ def health():
             "free_audits": FREE_AUDITS}
 
 
-@app.post("/auth/signup")
+@app.post("/auth/signup", dependencies=[Depends(auth_rate_limit)])
 def signup(body: SignupIn):
     email = _norm_email(body.email)
     if len(body.password) < 8:
@@ -1310,8 +1375,14 @@ def signup(body: SignupIn):
                 raise HTTPException(status_code=409, detail="An account with this email already exists")
     finally:
         conn.close()
-    _send_verification_email(email, body.display_name.strip() or "there", token)
-    return {"ok": True, "needs_verification": True, "email": email}
+    # account is committed; a mail failure must not 5xx (the client would think
+    # signup failed, then get 409 on retry). Report it so the UI offers Resend.
+    try:
+        _send_verification_email(email, body.display_name.strip() or "there", token)
+        email_sent = True
+    except (HTTPException, requests.RequestException):
+        email_sent = False
+    return {"ok": True, "needs_verification": True, "email": email, "email_sent": email_sent}
 
 
 @app.get("/auth/verify", response_class=HTMLResponse)
@@ -1339,7 +1410,7 @@ def verify_email(token: str):
     return HTMLResponse("<h2>Email confirmed.</h2><p>You can log in now.</p>")
 
 
-@app.post("/auth/resend-verification")
+@app.post("/auth/resend-verification", dependencies=[Depends(auth_rate_limit)])
 def resend_verification(body: ResendVerifyIn):
     email = _norm_email(body.email)
     conn = db()
@@ -1349,20 +1420,19 @@ def resend_verification(body: ResendVerifyIn):
             # same answer whether or not the account exists (no enumeration)
             if acct is None or acct["verified_at"] is not None:
                 return {"ok": True}
-            sent = acct.get("verify_sent_at")
-            if sent is not None and (datetime.now(timezone.utc) - sent).total_seconds() < 60:
-                raise HTTPException(status_code=429, detail="Please wait a minute before resending")
             cur.execute("SELECT display_name FROM users WHERE user_id=%s", (acct["user_id"],))
             u = cur.fetchone()
-            token = _issue_verify_token(cur, email)
+            token = _issue_verify_token(cur, email, cooldown_s=RESEND_COOLDOWN_S)
             conn.commit()
+            if token is None:
+                raise HTTPException(status_code=429, detail="Please wait a minute before resending")
     finally:
         conn.close()
     _send_verification_email(email, (u or {}).get("display_name") or "there", token)
     return {"ok": True}
 
 
-@app.post("/auth/login")
+@app.post("/auth/login", dependencies=[Depends(auth_rate_limit)])
 def login(body: LoginIn):
     email = _norm_email(body.email)
     conn = db()
@@ -1562,15 +1632,20 @@ def audit(body: AuditIn, user=Depends(current_user)):
             conn.close()
         raise
 
-    # lifetime counter (drives the * on the leaderboard at 5+ audits)
-    conn = db()
+    # lifetime counter (drives the * on the leaderboard at 5+ audits). The report is
+    # already generated and the entitlement spent; a failure here must not turn a
+    # delivered audit into a 500, so log and carry on.
     try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE users SET total_audits_used = total_audits_used + 1 "
-                        "WHERE user_id=%s", (user["user_id"],))
-            conn.commit()
-    finally:
-        conn.close()
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET total_audits_used = total_audits_used + 1 "
+                            "WHERE user_id=%s", (user["user_id"],))
+                conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[audit] total_audits_used bump failed for {user['user_id']}: {e}", flush=True)
 
     return {"ok": True, "audit": report,
             "audit_count": int(user["total_audits_used"]) + 1,
