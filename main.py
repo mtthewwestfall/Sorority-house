@@ -66,6 +66,8 @@ requirements.txt for Railway:
 """
 
 import base64
+import hashlib
+import hmac
 import os
 import json
 from datetime import datetime, timezone
@@ -73,7 +75,7 @@ from datetime import datetime, timezone
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -90,6 +92,15 @@ IMAGE_FIRST_AT = int(os.environ.get("IMAGE_FIRST_AT", "10"))   # PAID message he
 IMAGE_EVERY = int(os.environ.get("IMAGE_EVERY", "200"))        # paid messages between photos after that
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+
+# Billing. Subscriptions are sold with Stripe Payment Links; /stripe/webhook grants the
+# plan. STRIPE_PRICE_TIERS maps a Stripe price or payment-link id to a tier, as JSON:
+#   {"price_1abc": "junior", "plink_1xyz": "senior"}
+# A paid event whose id is not listed grants DEFAULT_PAID_TIER, so a single-plan store
+# needs no mapping at all.
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_TIERS = json.loads(os.environ.get("STRIPE_PRICE_TIERS", "{}"))
+DEFAULT_PAID_TIER = os.environ.get("DEFAULT_PAID_TIER", "sophomore")
 PORT = int(os.environ.get("PORT", "8080"))
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -386,11 +397,19 @@ def init_db():
                     free_audits_used INTEGER NOT NULL DEFAULT 0,
                     total_audits_used INTEGER NOT NULL DEFAULT 0,
                     plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    paid_since       TIMESTAMPTZ
+                    paid_since       TIMESTAMPTZ,
+                    billing_email    TEXT,
+                    stripe_customer_id TEXT
                 );
                 -- paid_since marks when the trial ended, so photo progress can count
                 -- paid messages only. Safe to run on an existing users table.
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_since TIMESTAMPTZ;
+                -- Billing identity from Stripe: lets renewals/cancellations find the user
+                -- and lets someone recover a plan after clearing their browser.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_email TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+                CREATE INDEX IF NOT EXISTS users_stripe_customer_idx
+                    ON users (stripe_customer_id);
                 -- If you already had the old users table, uncomment to add the
                 -- new audit columns without dropping anything:
                 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS audit_credits INTEGER NOT NULL DEFAULT 0;
@@ -1203,32 +1222,123 @@ def set_persona(body: PersonaIn):
     return {"ok": True, "girl": girl}
 
 
-@app.post("/admin/tier")
-def set_tier(body: TierIn):
-    """Move a user between plans. Leaving the trial stamps paid_since, which is what
-    photo progress counts from — so trial messages never earn a photo."""
-    _check_admin(body.secret)
-    tier = body.tier.strip().lower()
+def apply_tier(user_id, tier, email=None, customer_id=None):
+    """Move a user onto a plan. Leaving the trial stamps paid_since, which is what photo
+    progress counts from — so trial messages never earn a photo. Dropping back to the trial
+    clears it, and email/customer_id are kept so a subscription can be found again if the
+    browser ID is lost."""
     if tier not in TIERS:
         raise HTTPException(status_code=400, detail=f"Unknown tier: {tier}")
-    _ensure_user(body.user_id)
+    _ensure_user(user_id)
     conn = db()
     try:
         with conn.cursor() as cur:
             if tier == "freshman":
                 cur.execute("UPDATE users SET tier=%s, paid_since=NULL WHERE user_id=%s",
-                            (tier, body.user_id))
+                            (tier, user_id))
             else:
                 cur.execute("UPDATE users SET tier=%s, "
                             "paid_since=COALESCE(paid_since, now()) WHERE user_id=%s",
-                            (tier, body.user_id))
+                            (tier, user_id))
+            if email:
+                cur.execute("UPDATE users SET billing_email=%s WHERE user_id=%s",
+                            (email.strip().lower(), user_id))
+            if customer_id:
+                cur.execute("UPDATE users SET stripe_customer_id=%s WHERE user_id=%s",
+                            (customer_id, user_id))
             conn.commit()
-            cur.execute("SELECT tier, paid_since FROM users WHERE user_id=%s", (body.user_id,))
+            cur.execute("SELECT tier, paid_since FROM users WHERE user_id=%s", (user_id,))
             row = cur.fetchone()
     finally:
         conn.close()
-    return {"ok": True, "user_id": body.user_id, "tier": row["tier"],
+    return {"ok": True, "user_id": user_id, "tier": row["tier"],
             "paid_since": row["paid_since"]}
+
+
+@app.post("/admin/tier")
+def set_tier(body: TierIn):
+    """Move a user between plans by hand (the Stripe webhook does this automatically)."""
+    _check_admin(body.secret)
+    return apply_tier(body.user_id, body.tier.strip().lower())
+
+
+def _stripe_signature_ok(payload: bytes, header: str):
+    """Verify Stripe's Signature header: t=<ts>,v1=<hmac of "ts.payload">.
+
+    Rejects timestamps older than five minutes so a captured request cannot be replayed."""
+    if not STRIPE_WEBHOOK_SECRET or not header:
+        return False
+    parts = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    ts, sent = parts.get("t"), parts.get("v1")
+    if not ts or not sent:
+        return False
+    try:
+        if abs(datetime.now(timezone.utc).timestamp() - int(ts)) > 300:
+            return False
+    except ValueError:
+        return False
+    expected = hmac.new(STRIPE_WEBHOOK_SECRET.encode(),
+                        f"{ts}.".encode() + payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sent)
+
+
+def _tier_for_stripe(obj):
+    """Which plan a paid Stripe object grants, by payment-link, plan or line-item price id.
+    Anything unmapped falls back to DEFAULT_PAID_TIER — see STRIPE_PRICE_TIERS."""
+    for key in (obj.get("payment_link"), obj.get("plan", {}).get("id") if
+                isinstance(obj.get("plan"), dict) else None):
+        if key and key in STRIPE_PRICE_TIERS:
+            return STRIPE_PRICE_TIERS[key]
+    for item in (obj.get("lines", {}) or {}).get("data", []) or []:
+        price = (item.get("price") or {}).get("id")
+        if price in STRIPE_PRICE_TIERS:
+            return STRIPE_PRICE_TIERS[price]
+    return DEFAULT_PAID_TIER
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Flip a user's plan when Stripe reports a payment or a cancellation.
+
+    The user is identified by client_reference_id, which the plan buttons append to the
+    Payment Link as the browser's user_id. Unsigned or unknown-user events are ignored
+    rather than failing, so Stripe does not retry them forever."""
+    payload = await request.body()
+    if not _stripe_signature_ok(payload, request.headers.get("stripe-signature", "")):
+        raise HTTPException(status_code=400, detail="Bad Stripe signature")
+    event = json.loads(payload or b"{}")
+    obj = event.get("data", {}).get("object", {}) or {}
+    kind = event.get("type", "")
+
+    user_id = obj.get("client_reference_id")
+    customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else None
+    if not user_id and customer_id:
+        user_id = _user_for_customer(customer_id)
+    if not user_id:
+        return {"ok": True, "ignored": kind, "reason": "no client_reference_id"}
+
+    if kind in ("checkout.session.completed", "invoice.payment_succeeded"):
+        email = ((obj.get("customer_details") or {}).get("email")
+                 or obj.get("customer_email"))
+        return apply_tier(user_id, _tier_for_stripe(obj), email=email,
+                          customer_id=customer_id)
+    if kind in ("customer.subscription.deleted", "charge.refunded"):
+        return apply_tier(user_id, "freshman")
+    return {"ok": True, "ignored": kind}
+
+
+def _user_for_customer(customer_id):
+    """Find a user by Stripe customer, so renewals and cancellations land on the right
+    account even though only the first checkout carries client_reference_id."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users WHERE stripe_customer_id=%s LIMIT 1",
+                        (customer_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return row["user_id"] if row else None
 
 
 @app.post("/admin/grant-audits")
