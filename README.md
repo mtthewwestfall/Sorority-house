@@ -28,7 +28,8 @@ Each girl has a "Development Bible" containing:
 - **Visual DNA:** Specific prompts and ID references for consistent image generation.
 
 ### 3. The Payment & Trial Flow
-- **Free Trial:** Ends at message 25.
+- **Accounts:** Every player signs up with email + password (`/auth/signup`, `/auth/login`) and sends the returned token as `Authorization: Bearer <token>`. The free trial and all subscriptions are bound to that account, so allowances cannot be reset by clearing the browser or inventing a new id. Stripe webhooks link subscriptions via `/admin/set-tier {email, tier}`.
+- **Free Trial:** One per account. Ends at message 25 and never refills.
 - **The Promise:** At message 23, the AI promises a photo.
 - **The Paywall:** Triggered at message 25.
 - **The Delivery:** Once subscribed, the promised photo is delivered at message 10 of the paid tier.

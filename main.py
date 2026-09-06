@@ -23,14 +23,26 @@ Built to this spec (verified Sept 2026):
   * Audits read the FULL arc (rolling summary + a wide recent window), not 5 lines.
 
 API CONTRACT implemented here (point your chat app at these):
-  POST /chat        {"user_id","girl","message"}        -> {"reply","remaining","milestone","ok"}
-  GET  /history     ?user_id=&girl=                     -> {"messages":[{...}]}
-  GET  /state       ?user_id=                           -> {"tier","remaining","audit_count",
+  Every user endpoint requires an account. Sign up / log in to get a token, then send
+  it as  Authorization: Bearer <token>  on /chat, /history, /state, /audit, /auth/logout.
+  The free trial and every subscription are tied to that account (email), so a client
+  can no longer reset its allowance by inventing a new user_id.
+
+  POST /auth/signup {"email","password","display_name"} -> {"token","user_id","tier"}
+  POST /auth/login  {"email","password"}                -> {"token","user_id","tier"}
+  POST /auth/logout  (bearer)                            -> {"ok"}
+  POST /chat        {"girl","message"}  (bearer)        -> {"reply","remaining","milestone","ok"}
+  GET  /history     ?girl=              (bearer)        -> {"messages":[{...}]}
+  GET  /state                           (bearer)        -> {"tier","remaining","audit_count",
                                                             "free_audits_left","audit_credits",
                                                             "girls":{girl:{open,milestone}}}
-  POST /audit       {"user_id","girl"}                  -> {"audit","audit_count",
+  POST /audit       {"girl"}            (bearer)        -> {"audit","audit_count",
                                                             "free_left","paid_left"}
-  POST /admin/grant-audits {"user_id","amount","secret"}-> add bought audit credits
+  POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
+                                                            (call from your Stripe webhook on
+                                                            subscription created/updated/cancelled;
+                                                            tier 'freshman' = cancelled)
+  POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
                                                             webhook after a $0.99 charge)
   GET  /leaderboard                                     -> [ {name,milestone,audit_count,...} ]
@@ -63,12 +75,15 @@ requirements.txt for Railway:
 
 import os
 import json
+import hashlib
+import hmac
+import secrets
 from datetime import datetime, timezone
 
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -393,6 +408,17 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_chat_user_girl
                     ON chat_logs (user_id, girl, id);
+                CREATE TABLE IF NOT EXISTS accounts (
+                    email         TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL UNIQUE REFERENCES users(user_id),
+                    password_hash TEXT NOT NULL,
+                    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token      TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL REFERENCES users(user_id),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
             """)
         conn.commit()
     finally:
@@ -403,6 +429,59 @@ def _check_admin(secret: str):
     """If ADMIN_SECRET is set, /admin/* calls must send it. Unset => open (dev/personal)."""
     if ADMIN_SECRET and secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Invalid admin secret")
+
+
+# ---------------------------------------------------------------------------
+# ACCOUNTS / AUTH
+# ---------------------------------------------------------------------------
+_PW_ITER = 200_000
+
+
+def _hash_pw(password):
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _PW_ITER)
+    return f"{salt}${digest.hex()}"
+
+
+def _verify_pw(password, stored):
+    salt, digest = stored.split("$", 1)
+    check = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _PW_ITER)
+    return hmac.compare_digest(check.hex(), digest)
+
+
+def _norm_email(email):
+    email = email.strip().lower()
+    if "@" not in email or len(email) > 254:
+        raise HTTPException(status_code=400, detail="Invalid email")
+    return email
+
+
+def _new_session(cur, user_id):
+    token = secrets.token_urlsafe(32)
+    cur.execute("INSERT INTO sessions (token, user_id) VALUES (%s,%s)", (token, user_id))
+    return token
+
+
+def _account_by_email(cur, email):
+    cur.execute("SELECT * FROM accounts WHERE email=%s", (email,))
+    return cur.fetchone()
+
+
+def current_user(authorization: str = Header(default="")):
+    """FastAPI dependency: resolves  Authorization: Bearer <token>  to the users row."""
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Login required")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM sessions WHERE token=%s", (token,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(status_code=401, detail="Session expired, log in again")
+    return _ensure_user(row["user_id"])
 
 
 def _ensure_user(user_id, display_name="Player"):
@@ -761,16 +840,30 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
 # ---------------------------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------------------------
-class ChatIn(BaseModel):
-    user_id: str
-    girl: str
-    message: str
+class SignupIn(BaseModel):
+    email: str
+    password: str
     display_name: str = "Player"
 
 
-class AuditIn(BaseModel):
-    user_id: str
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class ChatIn(BaseModel):
     girl: str
+    message: str
+
+
+class AuditIn(BaseModel):
+    girl: str
+
+
+class SetTierIn(BaseModel):
+    email: str
+    tier: str            # freshman | sophomore | junior | senior (call from Stripe webhook)
+    secret: str = ""
 
 
 class PersonaIn(BaseModel):
@@ -782,7 +875,7 @@ class PersonaIn(BaseModel):
 
 
 class GrantAuditsIn(BaseModel):
-    user_id: str
+    email: str
     amount: int          # number of $0.99 audits to credit (call from Stripe webhook)
     secret: str = ""
 
@@ -799,9 +892,62 @@ def health():
             "free_audits": FREE_AUDITS}
 
 
+@app.post("/auth/signup")
+def signup(body: SignupIn):
+    email = _norm_email(body.email)
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if _account_by_email(cur, email):
+                raise HTTPException(status_code=409, detail="An account with this email already exists")
+            user_id = "u_" + secrets.token_hex(12)
+            cur.execute("""
+                INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                VALUES (%s,%s,'freshman', now() + interval '1 month')
+            """, (user_id, body.display_name.strip()[:40] or "Player"))
+            cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
+                        (email, user_id, _hash_pw(body.password)))
+            token = _new_session(cur, user_id)
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "token": token, "user_id": user_id, "tier": "freshman"}
+
+
+@app.post("/auth/login")
+def login(body: LoginIn):
+    email = _norm_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            acct = _account_by_email(cur, email)
+            if acct is None or not _verify_pw(body.password, acct["password_hash"]):
+                raise HTTPException(status_code=401, detail="Wrong email or password")
+            token = _new_session(cur, acct["user_id"])
+            conn.commit()
+    finally:
+        conn.close()
+    user = _ensure_user(acct["user_id"])
+    return {"ok": True, "token": token, "user_id": user["user_id"], "tier": user["tier"]}
+
+
+@app.post("/auth/logout")
+def logout(authorization: str = Header(default=""), user=Depends(current_user)):
+    token = authorization.partition(" ")[2]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE token=%s", (token,))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 @app.post("/chat")
-def chat(body: ChatIn):
-    user = _ensure_user(body.user_id, body.display_name)
+def chat(body: ChatIn, user=Depends(current_user)):
     tier = user["tier"]
     girl = body.girl.strip().lower()
 
@@ -865,18 +1011,17 @@ def chat(body: ChatIn):
 
 
 @app.get("/history")
-def history(user_id: str, girl: str):
+def history(girl: str, user=Depends(current_user)):
     girl = girl.strip().lower()
-    msgs = last_messages(user_id, girl, 100)
+    msgs = last_messages(user["user_id"], girl, 100)
     return {"messages": [{"sender": m["sender"], "message": m["message"]} for m in msgs]}
 
 
 @app.get("/state")
-def state(user_id: str):
-    user = _ensure_user(user_id)
+def state(user=Depends(current_user)):
     girls = {}
     for g in GIRL_ACCESS.get(user["tier"], []):
-        rel = get_relationship(user_id, g)
+        rel = get_relationship(user["user_id"], g)
         band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
         girls[g] = {"open": True, "milestone": rel["milestone"], "band": band,
                     "kept": len(rel.get("pinned_kept") or [])}
@@ -893,8 +1038,7 @@ def state(user_id: str):
 
 
 @app.post("/audit")
-def audit(body: AuditIn):
-    user = _ensure_user(body.user_id)
+def audit(body: AuditIn, user=Depends(current_user)):
     girl = body.girl.strip().lower()
 
     if not girl_open(user["user_id"], girl, user["tier"]):
@@ -1009,6 +1153,49 @@ def set_persona(body: PersonaIn):
     return {"ok": True, "girl": girl}
 
 
+def _user_for_email(email):
+    """Admin/webhook helper: the users row behind an account email (404 if none)."""
+    email = _norm_email(email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            acct = _account_by_email(cur, email)
+    finally:
+        conn.close()
+    if acct is None:
+        raise HTTPException(status_code=404, detail="No account with that email")
+    return _ensure_user(acct["user_id"])
+
+
+@app.post("/admin/set-tier")
+def set_tier(body: SetTierIn):
+    """Links a subscription to an account. Call from your Stripe webhook with the
+    customer's email: upgrade on checkout/renewal, set 'freshman' on cancellation.
+    A new paid tier starts a fresh monthly allowance; downgrading to freshman does
+    NOT restore the one-time trial."""
+    _check_admin(body.secret)
+    tier = body.tier.strip().lower()
+    if tier not in TIERS:
+        raise HTTPException(status_code=400, detail=f"tier must be one of {list(TIERS)}")
+    user = _user_for_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if tier == "freshman":
+                cur.execute("UPDATE users SET tier='freshman', msg_used=%s WHERE user_id=%s",
+                            (TIERS["freshman"]["limit"], user["user_id"]))
+            elif tier != user["tier"]:
+                cur.execute("""
+                    UPDATE users SET tier=%s, msg_used=0, free_audits_used=0,
+                        plan_reset_at = now() + interval '1 month'
+                    WHERE user_id=%s
+                """, (tier, user["user_id"]))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": user["user_id"], "tier": tier}
+
+
 @app.post("/admin/grant-audits")
 def grant_audits(body: GrantAuditsIn):
     """Credits audit_credits after a successful $0.99 payment. Wire this to your
@@ -1016,7 +1203,7 @@ def grant_audits(body: GrantAuditsIn):
     _check_admin(body.secret)
     if body.amount <= 0 or body.amount > 1000:
         raise HTTPException(status_code=400, detail="amount must be 1..1000")
-    user = _ensure_user(body.user_id)
+    user = _user_for_email(body.email)
     conn = db()
     try:
         with conn.cursor() as cur:
