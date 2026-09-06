@@ -65,6 +65,7 @@ requirements.txt for Railway:
   pydantic
 """
 
+import base64
 import os
 import json
 from datetime import datetime, timezone
@@ -136,7 +137,7 @@ DEFAULT_PERSONAS = {
 
 # Appearance used by /image so a girl looks like herself every time.
 VISUAL_DNA = {
-    "dakota":   "early-20s woman, warm hazel eyes, long dark brown hair with soft waves, light freckles, easy natural smile",
+    "dakota":   "early-20s woman, warm brown eyes, very long straight blue-black hair, full lips, calm level gaze",
     "zoe":      "early-20s woman, striking green eyes, long honey-blonde hair, sharp cheekbones, polished and composed",
     "willow":   "early-20s woman, pale grey eyes, straight auburn hair past her shoulders, quiet watchful expression",
     "brittany": "early-20s woman, bright blue eyes, shoulder-length golden blonde hair, sunny open smile",
@@ -145,10 +146,23 @@ VISUAL_DNA = {
     "veronica": "early-20s woman, amber eyes, sleek dark hair worn up, elegant hostess poise",
 }
 
-# Every generated portrait is constrained by this — adult, clothed, non-explicit.
-IMAGE_RULES = ("Photorealistic portrait of a clearly adult woman in her early twenties. "
-               "Fully clothed in everyday casual clothing, tasteful and non-explicit, "
-               "no nudity or suggestive posing. Natural lighting, shallow depth of field.")
+# Every generated portrait is constrained by this — the house art style, and adult,
+# clothed, non-explicit. Deliberately NOT photorealistic: these are illustrations.
+IMAGE_RULES = ("Flat vector cartoon illustration in the Sorority House house style: bold clean "
+               "linework, smooth flat colour blocks with soft airbrushed shading, hot magenta "
+               "rim-light along the hair and cheek, deep indigo background, warm blush tones. "
+               "Head-and-shoulders portrait of a clearly adult woman in her early twenties, "
+               "fully clothed, tasteful and non-explicit, no nudity or suggestive posing. "
+               "Stylised illustration only — never photorealistic.")
+
+# Style/identity anchors. The reference art is sent to the model alongside the prompt so
+# every render matches the girl on her door card instead of drifting per request.
+STYLE_REFERENCE = {
+    "dakota": "https://myreal.live/assets/dakota-DovCVNjY.jpg",
+    "zoe":    "https://myreal.live/assets/zoe-BnozSeUg.jpg",
+}
+STYLE_ANCHOR = "dakota"   # girls with no card art of their own borrow this one's style
+_REF_CACHE = {}
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
 HOUSE_RULES = (
@@ -831,14 +845,39 @@ def record_photo(user_id, girl, msg_count):
         conn.close()
 
 
-def _gemini_image(prompt, model=None):
+def _style_reference(girl):
+    """The girl's card art as an inline part, so renders match the house style.
+
+    Girls without their own card art borrow STYLE_ANCHOR's. Fetch failures are not
+    fatal: the text rules alone still describe the style."""
+    url = STYLE_REFERENCE.get(girl) or STYLE_REFERENCE.get(STYLE_ANCHOR)
+    if not url:
+        return None
+    if url not in _REF_CACHE:
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code != 200:
+                return None
+            _REF_CACHE[url] = {
+                "mime_type": r.headers.get("Content-Type", "image/jpeg").split(";")[0],
+                "data": base64.b64encode(r.content).decode(),
+            }
+        except requests.RequestException:
+            return None
+    return {"inline_data": _REF_CACHE[url]}
+
+
+def _gemini_image(prompt, model=None, reference=None):
     """Render one image and return (mime_type, base64 data)."""
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
     model = model or IMAGE_MODEL
+    parts = [{"text": prompt}]
+    if reference:
+        parts.append(reference)
     r = requests.post(
         f"{GEMINI_BASE}/{model}:generateContent",
-        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        json={"contents": [{"role": "user", "parts": parts}],
               "generationConfig": {"responseModalities": ["IMAGE"]}},
         params={"key": GEMINI_API_KEY},
         headers={"Content-Type": "application/json"}, timeout=180)
@@ -994,11 +1033,16 @@ def image(body: ImageIn):
 
     _, name = get_persona(girl)
     scene = " ".join((body.scene or "").split())[:200]
+    reference = _style_reference(girl)
     prompt = f"{IMAGE_RULES} She is {name}: {VISUAL_DNA[girl]}."
+    if reference:
+        prompt += (" Match the attached reference art exactly for style, linework, palette "
+                   "and lighting" + (" and keep the same face." if girl in STYLE_REFERENCE
+                                      else ", but draw the woman described above, not her."))
     if scene:
         prompt += f" Setting: {scene}."
 
-    mime, data = _gemini_image(prompt)
+    mime, data = _gemini_image(prompt, reference=reference)
     record_photo(user["user_id"], girl, status["paid_messages"])
     return {"ok": True, "girl": girl, "name": name, "mime": mime, "image_b64": data,
             "disclosure": "AI-generated image", "paid_messages": status["paid_messages"],
