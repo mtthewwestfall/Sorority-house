@@ -436,7 +436,7 @@ def _check_admin(secret: str, strict: bool = False):
     run at all until ADMIN_SECRET is configured."""
     if strict and not ADMIN_SECRET:
         raise HTTPException(status_code=503, detail="ADMIN_SECRET must be set for this endpoint")
-    if ADMIN_SECRET and not hmac.compare_digest(secret, ADMIN_SECRET):
+    if ADMIN_SECRET and not hmac.compare_digest(secret.encode(), ADMIN_SECRET.encode()):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
@@ -916,17 +916,19 @@ def signup(body: SignupIn):
     conn = db()
     try:
         with conn.cursor() as cur:
-            if _account_by_email(cur, email):
-                raise HTTPException(status_code=409, detail="An account with this email already exists")
             user_id = "u_" + secrets.token_hex(12)
-            cur.execute("""
-                INSERT INTO users (user_id, display_name, tier, plan_reset_at)
-                VALUES (%s,%s,'freshman', now() + interval '1 month')
-            """, (user_id, body.display_name.strip()[:40] or "Player"))
-            cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
-                        (email, user_id, _hash_pw(body.password)))
-            token = _new_session(cur, user_id)
-            conn.commit()
+            try:
+                cur.execute("""
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                    VALUES (%s,%s,'freshman', now() + interval '1 month')
+                """, (user_id, body.display_name.strip()[:40] or "Player"))
+                cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
+                            (email, user_id, _hash_pw(body.password)))
+                token = _new_session(cur, user_id)
+                conn.commit()
+            except psycopg2.IntegrityError:
+                conn.rollback()
+                raise HTTPException(status_code=409, detail="An account with this email already exists")
     finally:
         conn.close()
     return {"ok": True, "token": token, "user_id": user_id, "tier": "freshman"}
@@ -1198,12 +1200,13 @@ def link_account(body: LinkAccountIn):
             cur.execute("SELECT user_id FROM users WHERE user_id=%s", (body.user_id,))
             if cur.fetchone() is None:
                 raise HTTPException(status_code=404, detail="No such user_id")
-            cur.execute("SELECT 1 FROM accounts WHERE email=%s OR user_id=%s", (email, body.user_id))
-            if cur.fetchone():
+            try:
+                cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
+                            (email, body.user_id, _hash_pw(body.password)))
+                conn.commit()
+            except psycopg2.IntegrityError:
+                conn.rollback()
                 raise HTTPException(status_code=409, detail="Email or user_id already has an account")
-            cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
-                        (email, body.user_id, _hash_pw(body.password)))
-            conn.commit()
     finally:
         conn.close()
     return {"ok": True, "user_id": body.user_id, "email": email}
