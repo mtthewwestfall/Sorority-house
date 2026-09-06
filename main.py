@@ -440,11 +440,14 @@ def _ensure_user(user_id, display_name="Player"):
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0, plan_reset_at=%s
                     WHERE user_id=%s AND plan_reset_at=%s
+                    RETURNING *
                 """, (next_reset, user_id, row["plan_reset_at"]))
+                updated = cur.fetchone()
                 conn.commit()
-                row["msg_used"] = 0
-                row["free_audits_used"] = 0
-                row["plan_reset_at"] = next_reset
+                if updated is None:   # a concurrent request already rolled over
+                    cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+                    updated = cur.fetchone()
+                row = updated
             return row
     finally:
         conn.close()
