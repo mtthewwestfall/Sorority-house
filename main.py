@@ -28,8 +28,12 @@ API CONTRACT implemented here (point your chat app at these):
   The free trial and every subscription are tied to that account (email), so a client
   can no longer reset its allowance by inventing a new user_id.
 
-  POST /auth/signup {"email","password","display_name"} -> {"token","user_id","tier"}
+  POST /auth/signup {"email","password","display_name"} -> {"ok","needs_verification":true}
+                    (a verification link is emailed; no token until the email is confirmed)
+  GET  /auth/verify ?token=                              -> confirms the email (HTML page)
+  POST /auth/resend-verification {"email"}              -> {"ok"} (re-sends the link)
   POST /auth/login  {"email","password"}                -> {"token","user_id","tier"}
+                    (403 email_unverified until the link is clicked)
   POST /auth/logout  (bearer)                            -> {"ok"}
   POST /chat        {"girl","message"}  (bearer)        -> {"reply","remaining","milestone","ok"}
   GET  /history     ?girl=              (bearer)        -> {"messages":[{...}]}
@@ -52,7 +56,8 @@ API CONTRACT implemented here (point your chat app at these):
    with 503 otherwise, so entitlements are never publicly mutable.)
   GET  /leaderboard                                     -> [ {name,milestone,audit_count,...} ]
                                                             frontend shows * when audit_count>=5
-  POST /admin/persona {"girl","name","door_title","persona"} (upsert; paste full doc)
+  POST /admin/persona {"girl","name","door_title","persona","secret"} (upsert; paste full
+                                                            doc; REQUIRES ADMIN_SECRET)
   GET  /health
 
 Env vars (Railway -> Variables):
@@ -65,6 +70,12 @@ Env vars (Railway -> Variables):
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
+  RESEND_API_KEY    Resend (resend.com) API key used to send verification emails.
+                    If unset, the verification link is only logged to stdout (dev mode).
+  MAIL_FROM         sender address, e.g. "Sorority House <no-reply@yourdomain.com>"
+  PUBLIC_URL        this backend's public base URL (used to build the verify link),
+                    e.g. https://api.yourdomain.com
+  VERIFY_REDIRECT   optional URL to send the user to after a successful verification
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
@@ -105,6 +116,11 @@ AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits 
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+MAIL_FROM = os.environ.get("MAIL_FROM", "Sorority House <no-reply@example.com>")
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
+VERIFY_REDIRECT = os.environ.get("VERIFY_REDIRECT", "")
+VERIFY_TTL_HOURS = 24
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -448,6 +464,11 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_free_audits INTEGER;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_reset_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
+                -- accounts that pre-date verification are grandfathered in as verified
+                ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ DEFAULT now();
+                ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verify_token TEXT;
+                ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verify_sent_at TIMESTAMPTZ;
+                CREATE INDEX IF NOT EXISTS idx_accounts_verify_token ON accounts(verify_token);
                 CREATE TABLE IF NOT EXISTS complaints (
                     id          BIGSERIAL PRIMARY KEY,
                     user_id     TEXT NOT NULL REFERENCES users(user_id),
@@ -516,6 +537,38 @@ def _account_by_email(cur, email):
     return cur.fetchone()
 
 
+def _verify_link(token):
+    return f"{PUBLIC_URL}/auth/verify?token={token}"
+
+
+def _send_verification_email(email, display_name, token):
+    """Email the confirm link via Resend. Without RESEND_API_KEY the link is logged
+    instead so local/dev signups can still be completed by hand."""
+    link = _verify_link(token)
+    if not RESEND_API_KEY:
+        print(f"[verify] {email} -> {link}", flush=True)
+        return
+    r = requests.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+        json={"from": MAIL_FROM, "to": [email],
+              "subject": "Confirm your Sorority House account",
+              "text": (f"Hi {display_name},\n\nConfirm your email to start your free trial:\n"
+                       f"{link}\n\nThis link expires in {VERIFY_TTL_HOURS} hours. "
+                       "If you didn't sign up, ignore this message.")},
+        timeout=15)
+    if r.status_code >= 300:
+        print(f"[verify] resend failed {r.status_code}: {r.text[:200]}", flush=True)
+        raise HTTPException(status_code=502, detail="Could not send verification email")
+
+
+def _issue_verify_token(cur, email):
+    token = secrets.token_urlsafe(32)
+    cur.execute("UPDATE accounts SET verify_token=%s, verify_sent_at=now() WHERE email=%s",
+                (token, email))
+    return token
+
+
 def current_user(authorization: str = Header(default="")):
     """FastAPI dependency: resolves  Authorization: Bearer <token>  to the users row."""
     scheme, _, token = authorization.partition(" ")
@@ -573,16 +626,22 @@ def _ensure_user(user_id, display_name="Player"):
             # lazy monthly reset: message allowance AND free audits refill together.
             # Freshman is a one-time 25-message trial, so it never refills.
             if row["tier"] != "freshman" and row["plan_reset_at"] < now:
+                # conditional so two concurrent callers can't both reset (the loser
+                # would wipe usage recorded after the first reset)
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0,
                         plan_reset_at = now() + interval '1 month'
-                    WHERE user_id=%s
-                    RETURNING plan_reset_at
+                    WHERE user_id=%s AND tier <> 'freshman' AND plan_reset_at < now()
+                    RETURNING msg_used, free_audits_used, plan_reset_at
                 """, (user_id,))
-                row["plan_reset_at"] = cur.fetchone()["plan_reset_at"]
+                fresh = cur.fetchone()
                 conn.commit()
-                row["msg_used"] = 0
-                row["free_audits_used"] = 0
+                if fresh is None:   # someone else reset first: reload the authoritative row
+                    cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+                    fresh = cur.fetchone()
+                row["msg_used"] = fresh["msg_used"]
+                row["free_audits_used"] = fresh["free_audits_used"]
+                row["plan_reset_at"] = fresh["plan_reset_at"]
             return row
     finally:
         conn.close()
@@ -1027,7 +1086,7 @@ pre{white-space:pre-wrap;margin:0}
 <section id="acc" class="hid">
 <div class="card"><div class="row2"><input id="q" placeholder="Search email, name or user id" style="min-width:300px" onkeydown="if(event.key==='Enter')loadAccounts()">
 <button class="p" onclick="loadAccounts()">Search</button><span id="accN" class="mut"></span></div>
-<table><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Left</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th></tr></thead>
+<table><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Left</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th><th>Verified</th></tr></thead>
 <tbody id="accRows"></tbody></table></div>
 <div id="detail" class="card hid"></div>
 </section>
@@ -1079,7 +1138,7 @@ async function countOpen(){try{const c=await api('/admin/complaints?status=open&
 async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
  ROWS=rows;$('#accRows').innerHTML=rows.map((a,i)=>`<tr class="row" data-i="${i}"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
  <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
- <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td></tr>`).join('')||'<tr><td colspan=8 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
+ <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td><td>${a.verified_at?'<span class="mut">yes</span>':'<span class="pill open">no</span>'}</td></tr>`).join('')||'<tr><td colspan=9 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
 $('#accRows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr)openAccount(ROWS[+tr.dataset.i].email)});
 async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));CUR=a.email;const el=$('#detail');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(a.email)}</h3><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span><span class="mut">${esc(a.user_id)}</span><button class="s" style="margin-left:auto" onclick="$('#detail').classList.add('hid')">Close</button></div>
@@ -1087,7 +1146,8 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <div class="kv"><div>Name</div><div>${esc(a.display_name)}</div><div>Messages left</div><div>${a.remaining} <span class="mut">(used ${a.msg_used})</span></div>
   <div>Resets</div><div>${dt(a.plan_reset_at)}</div><div>Audit credits</div><div>${a.audit_credits} <span class="mut">(${a.total_audits_used} used total)</span></div>
   <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp()">End now</button>`:'none'}</div>
-  <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div></div>
+  <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div>
+  <div>Email</div><div>${a.verified_at?`verified ${dt(a.verified_at)}`:`<span class="pill open">unverified</span> <button class="s" onclick="markVerified()">Mark verified</button>`}</div></div>
   <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">none yet</td></tr>'}</tbody></table>
  </div><div>
   <h4>Give free time</h4><div class="row2"><select id="gtTier"><option value="senior">Senior</option><option value="junior">Junior</option><option value="sophomore">Sophomore</option></select>
@@ -1108,6 +1168,7 @@ function renderComplaints(list){if(!list.length)return '<div class="mut">None</d
 async function loadComplaints(){try{const list=await api('/admin/complaints?status='+$('#cstatus').value);$('#cmpList').innerHTML=renderComplaints(list);countOpen()}catch(e){toast(e.message,true)}}
 async function setComplaint(id,status){try{await api('/admin/complaints/'+id,{method:'POST',body:JSON.stringify({status,admin_note:$('#cn'+id).value})});toast('Saved');if(!$('#cmp').classList.contains('hid'))loadComplaints();else if(CUR)openAccount(CUR);countOpen()}catch(e){toast(e.message,true)}}
 async function grantTime(){const email=CUR;try{const r=await api('/admin/grant-time',{method:'POST',body:JSON.stringify({email,tier:$('#gtTier').value,days:+$('#gtDays').value})});toast(`Comped ${r.tier} until ${d(r.comp_until)}`);openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function markVerified(){const email=CUR;try{await api('/admin/console/verify',{method:'POST',body:JSON.stringify({email})});toast('Email marked verified');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
 async function endComp(){const email=CUR;if(!confirm('End free time now?'))return;try{await api('/admin/end-comp',{method:'POST',body:JSON.stringify({email})});toast('Comp ended');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
 async function setTier(){const email=CUR;try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
 async function grantAudits(){const email=CUR;try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
@@ -1128,6 +1189,10 @@ class SignupIn(BaseModel):
 class LoginIn(BaseModel):
     email: str
     password: str
+
+
+class ResendVerifyIn(BaseModel):
+    email: str
 
 
 class ChatIn(BaseModel):
@@ -1234,16 +1299,67 @@ def signup(body: SignupIn):
                     INSERT INTO users (user_id, display_name, tier, plan_reset_at)
                     VALUES (%s,%s,'freshman', now() + interval '1 month')
                 """, (user_id, body.display_name.strip()[:40] or "Player"))
-                cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
-                            (email, user_id, _hash_pw(body.password)))
-                token = _new_session(cur, user_id)
+                cur.execute("""
+                    INSERT INTO accounts (email, user_id, password_hash, verified_at)
+                    VALUES (%s,%s,%s,NULL)
+                """, (email, user_id, _hash_pw(body.password)))
+                token = _issue_verify_token(cur, email)
                 conn.commit()
             except psycopg2.IntegrityError:
                 conn.rollback()
                 raise HTTPException(status_code=409, detail="An account with this email already exists")
     finally:
         conn.close()
-    return {"ok": True, "token": token, "user_id": user_id, "tier": "freshman"}
+    _send_verification_email(email, body.display_name.strip() or "there", token)
+    return {"ok": True, "needs_verification": True, "email": email}
+
+
+@app.get("/auth/verify", response_class=HTMLResponse)
+def verify_email(token: str):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE accounts SET verified_at=now(), verify_token=NULL
+                WHERE verify_token=%s AND verified_at IS NULL
+                  AND verify_sent_at > now() - (%s * interval '1 hour')
+                RETURNING email
+            """, (token, VERIFY_TTL_HOURS))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if row is None:
+        return HTMLResponse(
+            "<h2>That link is invalid or has expired.</h2>"
+            "<p>Log in and request a new verification email.</p>", status_code=400)
+    if VERIFY_REDIRECT:
+        return HTMLResponse(f'<meta http-equiv="refresh" content="0;url={VERIFY_REDIRECT}">'
+                            "<p>Email confirmed. Redirecting...</p>")
+    return HTMLResponse("<h2>Email confirmed.</h2><p>You can log in now.</p>")
+
+
+@app.post("/auth/resend-verification")
+def resend_verification(body: ResendVerifyIn):
+    email = _norm_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            acct = _account_by_email(cur, email)
+            # same answer whether or not the account exists (no enumeration)
+            if acct is None or acct["verified_at"] is not None:
+                return {"ok": True}
+            sent = acct.get("verify_sent_at")
+            if sent is not None and (datetime.now(timezone.utc) - sent).total_seconds() < 60:
+                raise HTTPException(status_code=429, detail="Please wait a minute before resending")
+            cur.execute("SELECT display_name FROM users WHERE user_id=%s", (acct["user_id"],))
+            u = cur.fetchone()
+            token = _issue_verify_token(cur, email)
+            conn.commit()
+    finally:
+        conn.close()
+    _send_verification_email(email, (u or {}).get("display_name") or "there", token)
+    return {"ok": True}
 
 
 @app.post("/auth/login")
@@ -1255,6 +1371,10 @@ def login(body: LoginIn):
             acct = _account_by_email(cur, email)
             if acct is None or not _verify_pw(body.password, acct["password_hash"]):
                 raise HTTPException(status_code=401, detail="Wrong email or password")
+            if acct["verified_at"] is None:
+                raise HTTPException(status_code=403,
+                                    detail="email_unverified|Check your inbox and confirm "
+                                           "your email before logging in")
             token = _new_session(cur, acct["user_id"])
             conn.commit()
     finally:
@@ -1408,25 +1528,26 @@ def audit(body: AuditIn, user=Depends(current_user)):
     free_left = max(0, allowance - int(got["free_audits_used"]))
     paid_left = int(got["audit_credits"])
 
-    # --- Build the FULL relationship arc for the audit ---
-    rel = get_relationship(user["user_id"], girl)
-    persona_text, name = get_persona(girl)
-
-    recent = last_messages(user["user_id"], girl, AUDIT_WINDOW)
-    record = [f"{m['sender']}: {m['message']}" for m in recent]
-    full_context = ("Character: " + name + " - " + persona_text +
-                    "\n\nROLLING MEMORY:\n" + (rel["summary"] or "(none yet)") +
-                    "\n\nRECENT EXCHANGES:\n" + ("\n".join(record) if record else "(none)"))
-
-    messages = [{"role": "system", "content": AUDIT_INSTRUCTION},
-                {"role": "user", "content": full_context}]
-    # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
-    thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
+    # Everything from here until the report exists is covered by the refund below.
     try:
+        # --- Build the FULL relationship arc for the audit ---
+        rel = get_relationship(user["user_id"], girl)
+        persona_text, name = get_persona(girl)
+
+        recent = last_messages(user["user_id"], girl, AUDIT_WINDOW)
+        record = [f"{m['sender']}: {m['message']}" for m in recent]
+        full_context = ("Character: " + name + " - " + persona_text +
+                        "\n\nROLLING MEMORY:\n" + (rel["summary"] or "(none yet)") +
+                        "\n\nRECENT EXCHANGES:\n" + ("\n".join(record) if record else "(none)"))
+
+        messages = [{"role": "system", "content": AUDIT_INSTRUCTION},
+                    {"role": "user", "content": full_context}]
+        # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
+        thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
         report = _gemini(messages, model=AUDIT_MODEL, thinking=thinking_on,
                          max_tokens=900, temperature=0.6)
     except Exception:
-        # model call failed: hand the reserved entitlement back
+        # no audit delivered: hand the reserved entitlement back
         conn = db()
         try:
             with conn.cursor() as cur:
@@ -1481,8 +1602,9 @@ def leaderboard():
 
 @app.post("/admin/persona")
 def set_persona(body: PersonaIn):
-    """Paste a girl's FULL character doc here once and it becomes her Layer-1 block."""
-    _check_admin(body.secret)
+    """Paste a girl's FULL character doc here once and it becomes her Layer-1 block.
+    Strict: personas are the model's system prompt, so this must never be public."""
+    _check_admin(body.secret, strict=True)
     girl = body.girl.strip().lower()
     if girl not in GIRL_ACCESS["senior"]:
         raise HTTPException(status_code=400, detail="Unknown girl slug")
@@ -1641,7 +1763,7 @@ def my_complaints(user=Depends(current_user)):
 # ADMIN CONSOLE  (GET /admin serves the page; JSON endpoints take X-Admin-Secret)
 # ---------------------------------------------------------------------------
 _ACCOUNT_COLS = """
-    a.email, a.created_at, u.user_id, u.display_name, u.tier, u.msg_used,
+    a.email, a.created_at, a.verified_at, u.user_id, u.display_name, u.tier, u.msg_used,
     u.audit_credits, u.total_audits_used, u.plan_reset_at, u.comp_until,
     u.comp_prev_tier, u.admin_note,
     (SELECT count(*) FROM complaints c WHERE c.user_id=u.user_id AND c.status='open') AS open_complaints
@@ -1761,6 +1883,25 @@ def admin_end_comp(body: AdminEmailIn):
 def admin_console_set_tier(body: AdminSetTierIn):
     """Same semantics as /admin/set-tier, authenticated via X-Admin-Secret."""
     return set_tier(SetTierIn(email=body.email, tier=body.tier, secret=ADMIN_SECRET))
+
+
+@app.post("/admin/console/verify", dependencies=[Depends(admin_required)])
+def admin_console_verify(body: AdminEmailIn):
+    """Manually confirm an account's email (mail bounced, user stuck, etc)."""
+    email = _norm_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE accounts SET verified_at=COALESCE(verified_at, now()), verify_token=NULL
+                WHERE email=%s RETURNING email
+            """, (email,))
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="No account with that email")
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "email": email}
 
 
 @app.post("/admin/console/grant-audits", dependencies=[Depends(admin_required)])
