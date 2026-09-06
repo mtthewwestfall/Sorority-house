@@ -63,6 +63,7 @@ requirements.txt for Railway:
 
 import os
 import json
+import calendar
 from datetime import datetime, timezone
 
 import requests
@@ -405,6 +406,18 @@ def _check_admin(secret: str):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
+def _add_month(dt):
+    """Calendar-aware +1 month (Jan 31 -> Feb 28/29)."""
+    y, m = (dt.year + 1, 1) if dt.month == 12 else (dt.year, dt.month + 1)
+    return dt.replace(year=y, month=m, day=min(dt.day, calendar.monthrange(y, m)[1]))
+
+
+def _next_reset_after(reset_at, now):
+    while reset_at <= now:
+        reset_at = _add_month(reset_at)
+    return reset_at
+
+
 def _ensure_user(user_id, display_name="Player"):
     conn = db()
     try:
@@ -421,17 +434,17 @@ def _ensure_user(user_id, display_name="Player"):
                         "audit_credits": 0, "free_audits_used": 0,
                         "total_audits_used": 0, "display_name": display_name}
             # lazy monthly reset: message allowance AND free audits refill together
-            if row["plan_reset_at"] < datetime.now(timezone.utc):
+            now = datetime.now(timezone.utc)
+            if row["plan_reset_at"] < now:
+                next_reset = _next_reset_after(row["plan_reset_at"], now)
                 cur.execute("""
-                    UPDATE users SET msg_used=0, free_audits_used=0,
-                        plan_reset_at = plan_reset_at + interval '1 month'
-                            * (floor(extract(epoch from (now() - plan_reset_at))
-                                     / extract(epoch from interval '1 month')) + 1)
+                    UPDATE users SET msg_used=0, free_audits_used=0, plan_reset_at=%s
                     WHERE user_id=%s
-                """, (user_id,))
+                """, (next_reset, user_id))
                 conn.commit()
                 row["msg_used"] = 0
                 row["free_audits_used"] = 0
+                row["plan_reset_at"] = next_reset
             return row
     finally:
         conn.close()
