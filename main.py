@@ -806,9 +806,9 @@ def _summarize(user_id, girl, rel, recent_msgs):
         pass
 
     def _merge(existing, items, canon, cap=12):
-        out = list(existing)
-        seen = {s.casefold() for s in out}
-        for it in items:
+        # legacy rows may hold free-text paraphrases; fold them onto canon too
+        out, seen = [], set()
+        for it in list(existing) + list(items):
             it = _canonical(it, canon)
             if it is not None and it.casefold() not in seen and len(out) < cap:
                 out.append(it)
