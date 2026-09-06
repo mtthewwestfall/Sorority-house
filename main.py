@@ -439,8 +439,8 @@ def _ensure_user(user_id, display_name="Player"):
                 next_reset = _next_reset_after(row["plan_reset_at"], now)
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0, plan_reset_at=%s
-                    WHERE user_id=%s
-                """, (next_reset, user_id))
+                    WHERE user_id=%s AND plan_reset_at=%s
+                """, (next_reset, user_id, row["plan_reset_at"]))
                 conn.commit()
                 row["msg_used"] = 0
                 row["free_audits_used"] = 0
