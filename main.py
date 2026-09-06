@@ -45,6 +45,11 @@ API CONTRACT implemented here (point your chat app at these):
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
                                                             webhook after a $0.99 charge)
+  POST /admin/link-account {"user_id","email","password","secret"}
+                                                         -> give a pre-accounts player a login
+                                                            for their existing user_id (migration)
+  (set-tier / grant-audits / link-account REQUIRE ADMIN_SECRET to be set; they refuse
+   with 503 otherwise, so entitlements are never publicly mutable.)
   GET  /leaderboard                                     -> [ {name,milestone,audit_count,...} ]
                                                             frontend shows * when audit_count>=5
   POST /admin/persona {"girl","name","door_title","persona"} (upsert; paste full doc)
@@ -425,9 +430,13 @@ def init_db():
         conn.close()
 
 
-def _check_admin(secret: str):
-    """If ADMIN_SECRET is set, /admin/* calls must send it. Unset => open (dev/personal)."""
-    if ADMIN_SECRET and secret != ADMIN_SECRET:
+def _check_admin(secret: str, strict: bool = False):
+    """If ADMIN_SECRET is set, /admin/* calls must send it. Unset => open (dev/personal),
+    EXCEPT strict endpoints (anything that changes money/entitlements), which refuse to
+    run at all until ADMIN_SECRET is configured."""
+    if strict and not ADMIN_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_SECRET must be set for this endpoint")
+    if ADMIN_SECRET and not hmac.compare_digest(secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
@@ -866,6 +875,13 @@ class SetTierIn(BaseModel):
     secret: str = ""
 
 
+class LinkAccountIn(BaseModel):
+    user_id: str         # pre-existing users.user_id (from before accounts existed)
+    email: str
+    password: str
+    secret: str = ""
+
+
 class PersonaIn(BaseModel):
     girl: str
     name: str
@@ -1167,13 +1183,39 @@ def _user_for_email(email):
     return _ensure_user(acct["user_id"])
 
 
+@app.post("/admin/link-account")
+def link_account(body: LinkAccountIn):
+    """Migration for players created before accounts existed: attach an email +
+    password to their existing user_id so their tier, credits, history and
+    relationships stay reachable. One account per user_id / per email."""
+    _check_admin(body.secret, strict=True)
+    email = _norm_email(body.email)
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users WHERE user_id=%s", (body.user_id,))
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="No such user_id")
+            cur.execute("SELECT 1 FROM accounts WHERE email=%s OR user_id=%s", (email, body.user_id))
+            if cur.fetchone():
+                raise HTTPException(status_code=409, detail="Email or user_id already has an account")
+            cur.execute("INSERT INTO accounts (email, user_id, password_hash) VALUES (%s,%s,%s)",
+                        (email, body.user_id, _hash_pw(body.password)))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": body.user_id, "email": email}
+
+
 @app.post("/admin/set-tier")
 def set_tier(body: SetTierIn):
     """Links a subscription to an account. Call from your Stripe webhook with the
     customer's email: upgrade on checkout/renewal, set 'freshman' on cancellation.
     A new paid tier starts a fresh monthly allowance; downgrading to freshman does
     NOT restore the one-time trial."""
-    _check_admin(body.secret)
+    _check_admin(body.secret, strict=True)
     tier = body.tier.strip().lower()
     if tier not in TIERS:
         raise HTTPException(status_code=400, detail=f"tier must be one of {list(TIERS)}")
@@ -1200,7 +1242,7 @@ def set_tier(body: SetTierIn):
 def grant_audits(body: GrantAuditsIn):
     """Credits audit_credits after a successful $0.99 payment. Wire this to your
     Stripe webhook (or call it from your 'Buy audit' button once Stripe confirms)."""
-    _check_admin(body.secret)
+    _check_admin(body.secret, strict=True)
     if body.amount <= 0 or body.amount > 1000:
         raise HTTPException(status_code=400, detail="amount must be 1..1000")
     user = _user_for_email(body.email)
