@@ -413,18 +413,19 @@ def _ensure_user(user_id, display_name="Player"):
             row = cur.fetchone()
             if row is None:
                 cur.execute("""
-                    INSERT INTO users (user_id, display_name, tier)
-                    VALUES (%s,%s,'freshman')
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                    VALUES (%s,%s,'freshman', now() + interval '1 month')
                 """, (user_id, display_name))
                 conn.commit()
                 return {"user_id": user_id, "tier": "freshman", "msg_used": 0,
                         "audit_credits": 0, "free_audits_used": 0,
                         "total_audits_used": 0, "display_name": display_name}
-            # lazy monthly reset: message allowance AND free audits refill together
-            if row["plan_reset_at"] < datetime.now(timezone.utc):
+            # lazy monthly reset: message allowance AND free audits refill together.
+            # Freshman is a one-time 25-message trial, so it never refills.
+            if row["tier"] != "freshman" and row["plan_reset_at"] < datetime.now(timezone.utc):
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0,
-                        plan_reset_at = plan_reset_at + interval '1 month'
+                        plan_reset_at = now() + interval '1 month'
                     WHERE user_id=%s
                 """, (user_id,))
                 conn.commit()
