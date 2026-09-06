@@ -185,6 +185,8 @@ AUDIT_INSTRUCTION = (
 GIRLS_ENGINE = {
     "dakota": {
         "stage_days": [1, 2, 3, 4, 5, 6, 8],
+        "stage_kept": [0, 1, 2, 2, 3, 4, 5],
+        "conduct_note": "WARM for her: remembering small things, patience, respecting the diner and her independence. COLD: offering to rescue or pay her way, joking away a sincere moment, pushing pace.",
         "pace_note": "Steady and unhurried. Consistent days beat one great night; showing up again the same person is the single strongest move. Gaps above TRUSTED read hard for her.",
         "pinned": [
             "works the diner off campus to pay her own way",
@@ -203,6 +205,8 @@ GIRLS_ENGINE = {
     },
     "zoe": {
         "stage_days": [1, 2, 3, 5, 6, 8, 10],
+        "stage_kept": [0, 1, 1, 2, 3, 4, 5],
+        "conduct_note": "WARM for her: engaging her mind, interest that survives when nothing is flirtatious. COLD: leading with her looks, acting surprised she is smart, treating her as a trophy.",
         "pace_note": "Early chemistry is real, but she waits past the shine - later stages need real days where interest survives when nothing is new or flirtatious.",
         "pinned": [
             "former homecoming queen and cheer captain",
@@ -221,6 +225,8 @@ GIRLS_ENGINE = {
     },
     "willow": {
         "stage_days": [1, 3, 4, 6, 8, 9, 11],
+        "stage_kept": [0, 0, 1, 2, 3, 4, 5],
+        "conduct_note": "WARM for her: quiet patience, letting silence sit, not pressing. COLD: any pressure, demanding she open up, filling every gap, intensity.",
         "pace_note": "Slowest in the house by design - patience is the test itself. Needs many separate steady days; silence is warm to her, pressure makes her close back up.",
         "pinned": [
             "works part-time at the plant shop",
@@ -239,6 +245,8 @@ GIRLS_ENGINE = {
     },
     "brittany": {
         "stage_days": [1, 2, 4, 6, 7, 9, 11],
+        "stage_kept": [0, 1, 2, 3, 3, 4, 5],
+        "conduct_note": "WARM for her: seeing past the surface without being told, staying steady when she dazzles. COLD: chasing the sparkle, rushing when she cracks the armor, flattery.",
         "pace_note": "The trap arc: the surface dazzles fast, real depth is as slow as Willow's. When she starts to open, rushing makes her retreat into the armor. Faster availability means less meaning.",
         "pinned": [
             "the social heart; her room is the pre-party landing zone",
@@ -257,6 +265,8 @@ GIRLS_ENGINE = {
     },
     "sasha": {
         "stage_days": [1, 2, 4, 5, 7, 8, 10],
+        "stage_kept": [0, 1, 2, 3, 4, 4, 5],
+        "conduct_note": "WARM for her: consistency she can verify, respect across time, keeping your word. COLD: persistence as pressure, inconsistency, trying to charm past her checks.",
         "pace_note": "Deliberate and self-contained; she verifies before she opens. She does not reward pressure or persistence - respect shown across real time is what moves her.",
         "pinned": [
             "studies business and behavioral psychology",
@@ -275,6 +285,8 @@ GIRLS_ENGINE = {
     },
     "piper": {
         "stage_days": [1, 2, 3, 5, 6, 8, 10],
+        "stage_kept": [0, 0, 1, 2, 3, 4, 5],
+        "conduct_note": "WARM for her: being unchanged and glad when she returns, never guilt for her absences. COLD: punishing her for needing space, clinginess, keeping score.",
         "pace_note": "She lives in moments and returns with something; never punish her for needing space. Being warm and unchanged when she comes back IS the mechanic.",
         "pinned": [
             "studies music production and creative writing",
@@ -294,6 +306,8 @@ GIRLS_ENGINE = {
     },
     "veronica": {
         "stage_days": [1, 2, 4, 6, 7, 9, 11],
+        "stage_kept": [0, 1, 2, 3, 3, 4, 5],
+        "conduct_note": "WARM for her: wanting HER over the hosting, noticing her off-duty. COLD: using her for access or status, only showing up for the party, performing for the room.",
         "pace_note": "Host fast, known slow, the same shape as Brittany's. She needs to see you want HER and not the hosting across real days before the polish drops.",
         "pinned": [
             "20, the social chair of the house",
@@ -621,40 +635,62 @@ def rel_days_in_stage(rel):
         return 0
 
 
-def gate_milestone(girl, rel, proposed):
-    """TIME FLOOR: she must 'live' enough real days at her CURRENT stage before she
-    lets it go a stage deeper. Also caps any single refresh at +1 stage, so one great
-    night can never climb the whole ladder. Staying or regressing is always allowed."""
+def stage_days_needed(girl, cur):
     cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    return cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
+
+
+def kept_needed(girl, target):
+    """Key points the user must have demonstrably REMEMBERED (pinned_kept) before
+    this girl opens to stage M(target). stage_kept[i] applies to reaching M(i+2);
+    each girl's ladder reflects her own backstory."""
+    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    ladder = cfg["stage_kept"]
+    idx = max(0, min(len(ladder) - 1, target - 2))
+    return min(ladder[idx], len(cfg["key_points"]))
+
+
+def gate_milestone(girl, rel, proposed, conduct="steady"):
+    """Going deeper is earned on THREE axes at once, never by one alone:
+      TIME    - enough real days lived at the CURRENT stage (per-girl stage_days);
+      MEMORY  - the user has shown they remember enough of her key points
+                (pinned_kept, threshold grows with the target stage);
+      CONDUCT - the grader judged how the user acted this stretch as 'warm'.
+    A refresh can climb at most one stage. Staying is always allowed; regressing is
+    whatever the grader proposes, and 'cold' conduct always costs at least one stage."""
     cur = int(rel.get("milestone", 1))
-    proposed = int(proposed)
+    proposed = max(1, min(8, int(proposed)))
+    if conduct == "cold":
+        return max(1, min(proposed, cur - 1))
     if proposed <= cur:
-        return max(1, min(8, proposed))
-    if proposed > cur + 1:
-        proposed = cur + 1
-    need = cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
-    if rel_days_in_stage(rel) >= need:
         return proposed
-    return cur
+    target = cur + 1
+    if conduct != "warm":
+        return cur
+    if rel_days_in_stage(rel) < stage_days_needed(girl, cur):
+        return cur
+    if len(rel.get("pinned_kept") or []) < kept_needed(girl, target):
+        return cur
+    return target
 
 
 def build_engine_card(girl, rel):
     """The short per-turn state card the character reads (injected with the memory
     block): which band she is at, how the real-time floor is pacing her, and which of
     her pinned facts / key points are already on the record."""
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
     cur = int(rel.get("milestone", 1))
     band, ball = STAGE_META.get(cur, STAGE_META[1])
-    need = cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
+    need = stage_days_needed(girl, cur)
     held = rel_days_in_stage(rel)
     told = rel.get("pinned_told") or []
     kept = rel.get("pinned_kept") or []
     lines = [
         f"- Stage M{cur}/8 · trust band: {band} (about {ball}/100 on her meter).",
         f"- She has lived this stage {held} real day(s); she opens a stage deeper "
-        f"only after ~{need}.",
+        f"only after ~{need}, and only if the user keeps acting right.",
         f"- Pinned: she has shared {len(told)} personal facts; the user has shown "
-        f"they remember {len(kept)} of her key details.",
+        f"they remember {len(kept)} of her key details (the next stage needs "
+        f"{kept_needed(girl, min(8, cur + 1))}).",
     ]
     if told:
         lines.append("- Facts already shared with the user: " + "; ".join(told[-4:]))
@@ -703,8 +739,14 @@ def _summarize(user_id, girl, rel, recent_msgs):
             "noticing and testing, M3 a first real thing shared, M4 opening up, M5 trust "
             "and a quiet confession, M6 different with you, M7 deep loyalty, M8 she chooses "
             "you. Match her pacing note: " + cfg["pace_note"] + " "
+            "Also grade HOW THE USER ACTED in the new messages as conduct: 'warm' "
+            "(respectful, patient, present, remembers her, listens), 'steady' (fine but "
+            "nothing earned), or 'cold' (bragging, pushing, disrespect, ignoring or "
+            "forgetting what she shared, treating her as a prize). Judge it by HER "
+            "standards: " + cfg["conduct_note"] + " Be strict: 'warm' is earned, not default. "
             "Reply with ONLY JSON: "
-            '{"summary": "...", "milestone": N, "new_told": [], "new_kept": []}')},
+            '{"summary": "...", "milestone": N, "conduct": "warm|steady|cold", '
+            '"new_told": [], "new_kept": []}')},
     ]
     if rel["summary"]:
         context.append({"role": "user", "content": "OLD MEMORY:\n" + rel["summary"]})
@@ -716,6 +758,7 @@ def _summarize(user_id, girl, rel, recent_msgs):
     out = _gemini(context, model=CHAT_MODEL)
     summary = rel["summary"] or ""
     milestone = int(rel["milestone"])
+    conduct = "steady"
     new_told, new_kept = [], []
     try:
         # strip markdown fences if present, then pull the first {...} JSON object
@@ -727,13 +770,12 @@ def _summarize(user_id, girl, rel, recent_msgs):
         data = json.loads(cleaned[start:end + 1])
         summary = str(data.get("summary", rel["summary"] or "")).strip()
         milestone = int(data.get("milestone", milestone))
+        c = str(data.get("conduct", "steady")).strip().lower()
+        conduct = c if c in ("warm", "steady", "cold") else "steady"
         new_told = [str(x).strip() for x in data.get("new_told", []) if str(x).strip()]
         new_kept = [str(x).strip() for x in data.get("new_kept", []) if str(x).strip()]
     except Exception:
         pass
-
-    # The AI proposes; the TIME FLOOR decides what is believable today.
-    milestone = gate_milestone(girl, rel, milestone)
 
     def _merge(existing, items, cap=12):
         seen = {s.casefold() for s in existing}
@@ -747,10 +789,13 @@ def _summarize(user_id, girl, rel, recent_msgs):
     told = _merge(told, new_told)
     kept = _merge(kept, new_kept)
 
+    # The AI proposes; time + memory + conduct decide what is believable today.
+    milestone = gate_milestone(girl, {**rel, "pinned_kept": kept}, milestone, conduct)
+
     conn = db()
     try:
         with conn.cursor() as cur:
-            # reset the per-stage clock only when she actually moves a stage deeper
+            # the per-stage clock restarts whenever the stage actually moves
             changed = int(milestone) != int(rel["milestone"])
             cur.execute("""
                 UPDATE relationships

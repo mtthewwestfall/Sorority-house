@@ -17,7 +17,7 @@ This is the core intelligence layer for a high-fidelity AI sorority experience. 
 ### 1. The Trust Engine (Psychological Progression)
 The system doesn't just track messages; it tracks *emotional depth*.
 - **Stages:** Stranger $\rightarrow$ Acquaintance $\rightarrow$ Friend $\rightarrow$ Close Friend $\rightarrow$ Intimate $\rightarrow$ Devoted.
-- **Temporal Gates:** Trust cannot jump stages instantly. Minimum 30-day cooldowns exist between higher stages to prevent "love-bombing."
+- **Three gates, all required:** a stage only deepens when the user has (1) lived enough real days at the current stage (`stage_days`, per girl), (2) demonstrably remembered enough of her key points (`stage_kept`, per girl), and (3) been graded `warm` on conduct for that stretch by her own standards (`conduct_note`, per girl). Any single refresh can climb at most one stage; `cold` conduct always costs at least one.
 - **Memory Probes:** The AI occasionally tests the user on past conversations. Correct recall = Trust $\uparrow$, Forgetting = Trust $\downarrow$.
 
 ### 2. Persona Engine (The 28 Girls)
