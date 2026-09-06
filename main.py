@@ -43,6 +43,10 @@ Env vars (Railway -> Variables):
   GEMINI_API_KEY    your existing Google (Gemini) API key - the one your bots run on
   CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
+  IMAGE_MODEL       gemini-2.5-flash-image (default; the model /image renders portraits with)
+  IMAGE_FIRST_AT    10 (default): PAID message count at which her first photo unlocks
+                    (trial messages never count; photos are locked on the free trial)
+  IMAGE_EVERY       200 (default): paid messages she needs between photos after the first
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
@@ -61,6 +65,9 @@ requirements.txt for Railway:
   pydantic
 """
 
+import base64
+import hashlib
+import hmac
 import os
 import json
 from datetime import datetime, timezone
@@ -68,7 +75,7 @@ from datetime import datetime, timezone
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -80,8 +87,20 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
+IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")  # portraits (/image)
+IMAGE_FIRST_AT = int(os.environ.get("IMAGE_FIRST_AT", "10"))   # PAID message her first photo unlocks on
+IMAGE_EVERY = int(os.environ.get("IMAGE_EVERY", "200"))        # paid messages between photos after that
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+
+# Billing. Subscriptions are sold with Stripe Payment Links; /stripe/webhook grants the
+# plan. STRIPE_PRICE_TIERS maps a Stripe price or payment-link id to a tier, as JSON:
+#   {"price_1abc": "junior", "plink_1xyz": "senior"}
+# A paid event whose id is not listed grants DEFAULT_PAID_TIER, so a single-plan store
+# needs no mapping at all.
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_TIERS = json.loads(os.environ.get("STRIPE_PRICE_TIERS", "{}"))
+DEFAULT_PAID_TIER = os.environ.get("DEFAULT_PAID_TIER", "sophomore")
 PORT = int(os.environ.get("PORT", "8080"))
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -126,6 +145,35 @@ DEFAULT_PERSONAS = {
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
     "veronica": ("Veronica", "The host",       "Senior exclusive. The social chair who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
 }
+
+# Appearance used by /image so a girl looks like herself every time.
+VISUAL_DNA = {
+    "dakota":   "early-20s woman, warm brown eyes, very long straight blue-black hair, full lips, calm level gaze",
+    "zoe":      "early-20s woman, striking green eyes, long honey-blonde hair, sharp cheekbones, polished and composed",
+    "willow":   "early-20s woman, pale grey eyes, straight auburn hair past her shoulders, quiet watchful expression",
+    "brittany": "early-20s woman, bright blue eyes, shoulder-length golden blonde hair, sunny open smile",
+    "sasha":    "early-20s woman, dark brown eyes, short jet-black bob, confident level gaze",
+    "piper":    "early-20s woman, warm brown eyes, wavy chestnut hair, freckled nose, relaxed free-spirited look",
+    "veronica": "early-20s woman, amber eyes, sleek dark hair worn up, elegant hostess poise",
+}
+
+# Every generated portrait is constrained by this — the house art style, and adult,
+# clothed, non-explicit. Deliberately NOT photorealistic: these are illustrations.
+IMAGE_RULES = ("Flat vector cartoon illustration in the Sorority House house style: bold clean "
+               "linework, smooth flat colour blocks with soft airbrushed shading, hot magenta "
+               "rim-light along the hair and cheek, deep indigo background, warm blush tones. "
+               "Head-and-shoulders portrait of a clearly adult woman in her early twenties, "
+               "fully clothed, tasteful and non-explicit, no nudity or suggestive posing. "
+               "Stylised illustration only — never photorealistic.")
+
+# Style/identity anchors. The reference art is sent to the model alongside the prompt so
+# every render matches the girl on her door card instead of drifting per request.
+STYLE_REFERENCE = {
+    "dakota": "https://myreal.live/assets/dakota-DovCVNjY.jpg",
+    "zoe":    "https://myreal.live/assets/zoe-BnozSeUg.jpg",
+}
+STYLE_ANCHOR = "dakota"   # girls with no card art of their own borrow this one's style
+_REF_CACHE = {}
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
 HOUSE_RULES = (
@@ -348,8 +396,20 @@ def init_db():
                     audit_credits    INTEGER NOT NULL DEFAULT 0,
                     free_audits_used INTEGER NOT NULL DEFAULT 0,
                     total_audits_used INTEGER NOT NULL DEFAULT 0,
-                    plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+                    plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    paid_since       TIMESTAMPTZ,
+                    billing_email    TEXT,
+                    stripe_customer_id TEXT
                 );
+                -- paid_since marks when the trial ended, so photo progress can count
+                -- paid messages only. Safe to run on an existing users table.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_since TIMESTAMPTZ;
+                -- Billing identity from Stripe: lets renewals/cancellations find the user
+                -- and lets someone recover a plan after clearing their browser.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_email TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+                CREATE INDEX IF NOT EXISTS users_stripe_customer_idx
+                    ON users (stripe_customer_id);
                 -- If you already had the old users table, uncomment to add the
                 -- new audit columns without dropping anything:
                 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS audit_credits INTEGER NOT NULL DEFAULT 0;
@@ -391,6 +451,15 @@ def init_db():
                     door_title TEXT NOT NULL DEFAULT '',
                     persona    TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS photo_log (
+                    id         BIGSERIAL PRIMARY KEY,
+                    user_id    TEXT NOT NULL,
+                    girl       TEXT NOT NULL,
+                    msg_count  INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_photo_user_girl
+                    ON photo_log (user_id, girl, id);
                 CREATE INDEX IF NOT EXISTS idx_chat_user_girl
                     ON chat_logs (user_id, girl, id);
             """)
@@ -757,6 +826,94 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         raise HTTPException(status_code=502, detail="Unexpected model response")
 
 
+def photo_status(user, girl):
+    """Photo progress for this girl, counted in PAID messages only.
+
+    Trial (freshman) messages never count: nothing sent before the user subscribed
+    moves the counter, and a trial user has no photo at all."""
+    if user["tier"] == "freshman" or not user.get("paid_since"):
+        return {"paid_messages": 0, "unlocks_at": IMAGE_FIRST_AT,
+                "remaining": IMAGE_FIRST_AT, "unlocked": False, "trial": True}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM chat_logs WHERE user_id=%s AND girl=%s "
+                        "AND sender='user' AND created_at >= %s",
+                        (user["user_id"], girl, user["paid_since"]))
+            sent = int(cur.fetchone()["n"])
+            cur.execute("SELECT msg_count FROM photo_log "
+                        "WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT 1",
+                        (user["user_id"], girl))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    unlocks_at = IMAGE_FIRST_AT if row is None else int(row["msg_count"]) + IMAGE_EVERY
+    return {"paid_messages": sent, "unlocks_at": unlocks_at,
+            "remaining": max(0, unlocks_at - sent), "unlocked": sent >= unlocks_at,
+            "trial": False}
+
+
+def record_photo(user_id, girl, msg_count):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO photo_log (user_id, girl, msg_count) VALUES (%s,%s,%s)",
+                        (user_id, girl, msg_count))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _style_reference(girl):
+    """The girl's card art as an inline part, so renders match the house style.
+
+    Girls without their own card art borrow STYLE_ANCHOR's. Fetch failures are not
+    fatal: the text rules alone still describe the style."""
+    url = STYLE_REFERENCE.get(girl) or STYLE_REFERENCE.get(STYLE_ANCHOR)
+    if not url:
+        return None
+    if url not in _REF_CACHE:
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code != 200:
+                return None
+            _REF_CACHE[url] = {
+                "mime_type": r.headers.get("Content-Type", "image/jpeg").split(";")[0],
+                "data": base64.b64encode(r.content).decode(),
+            }
+        except requests.RequestException:
+            return None
+    return {"inline_data": _REF_CACHE[url]}
+
+
+def _gemini_image(prompt, model=None, reference=None):
+    """Render one image and return (mime_type, base64 data)."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or IMAGE_MODEL
+    parts = [{"text": prompt}]
+    if reference:
+        parts.append(reference)
+    r = requests.post(
+        f"{GEMINI_BASE}/{model}:generateContent",
+        json={"contents": [{"role": "user", "parts": parts}],
+              "generationConfig": {"responseModalities": ["IMAGE"]}},
+        params={"key": GEMINI_API_KEY},
+        headers={"Content-Type": "application/json"}, timeout=180)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"Image call failed ({r.status_code}): {r.text[:300]}")
+    try:
+        parts = r.json()["candidates"][0]["content"]["parts"]
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected image response")
+    for part in parts:
+        blob = part.get("inlineData") or part.get("inline_data")
+        if blob and blob.get("data"):
+            return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
+    raise HTTPException(status_code=502, detail="Model returned no image")
+
+
 # ---------------------------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------------------------
@@ -770,6 +927,18 @@ class ChatIn(BaseModel):
 class AuditIn(BaseModel):
     user_id: str
     girl: str
+
+
+class TierIn(BaseModel):
+    user_id: str
+    tier: str
+    secret: str = ""
+
+
+class ImageIn(BaseModel):
+    user_id: str
+    girl: str
+    scene: str = ""      # optional short setting hint, e.g. "on the porch at sunset"
 
 
 class PersonaIn(BaseModel):
@@ -794,6 +963,8 @@ def _startup():
 @app.get("/health")
 def health():
     return {"ok": True, "model": CHAT_MODEL, "audit_model": AUDIT_MODEL,
+            "image_model": IMAGE_MODEL,
+            "image_first_at": IMAGE_FIRST_AT, "image_every": IMAGE_EVERY,
             "audit_thinking": AUDIT_THINKING, "audit_price_usd": AUDIT_PRICE_USD,
             "free_audits": FREE_AUDITS}
 
@@ -861,6 +1032,49 @@ def chat(body: ChatIn):
 
     return {"ok": True, "reply": reply, "remaining": remaining - 1,
             "milestone": state["milestone"]}
+
+
+@app.post("/image")
+def image(body: ImageIn):
+    user = _ensure_user(body.user_id)
+    girl = body.girl.strip().lower()
+
+    if not girl_open(user["user_id"], girl, user["tier"]):
+        raise HTTPException(status_code=403, detail="This door is locked for your tier")
+    if girl not in VISUAL_DNA:
+        raise HTTPException(status_code=404, detail="Unknown girl")
+
+    status = photo_status(user, girl)
+    if not status["unlocked"]:
+        reason = ("Photos come with a membership." if status["trial"] else
+                  f"Not yet — {status['remaining']} more messages before she sends a photo.")
+        return {"ok": False, "locked": True, **status, "error": reason}
+
+    _, name = get_persona(girl)
+    scene = " ".join((body.scene or "").split())[:200]
+    reference = _style_reference(girl)
+    prompt = f"{IMAGE_RULES} She is {name}: {VISUAL_DNA[girl]}."
+    if reference:
+        prompt += (" Match the attached reference art exactly for style, linework, palette "
+                   "and lighting" + (" and keep the same face." if girl in STYLE_REFERENCE
+                                      else ", but draw the woman described above, not her."))
+    if scene:
+        prompt += f" Setting: {scene}."
+
+    mime, data = _gemini_image(prompt, reference=reference)
+    record_photo(user["user_id"], girl, status["paid_messages"])
+    return {"ok": True, "girl": girl, "name": name, "mime": mime, "image_b64": data,
+            "disclosure": "AI-generated image", "paid_messages": status["paid_messages"],
+            "next_unlocks_at": status["paid_messages"] + IMAGE_EVERY}
+
+
+@app.get("/image/status")
+def image_status(user_id: str, girl: str):
+    user = _ensure_user(user_id)
+    girl = girl.strip().lower()
+    if girl not in VISUAL_DNA:
+        raise HTTPException(status_code=404, detail="Unknown girl")
+    return {"ok": True, "girl": girl, **photo_status(user, girl)}
 
 
 @app.get("/history")
@@ -1006,6 +1220,125 @@ def set_persona(body: PersonaIn):
     finally:
         conn.close()
     return {"ok": True, "girl": girl}
+
+
+def apply_tier(user_id, tier, email=None, customer_id=None):
+    """Move a user onto a plan. Leaving the trial stamps paid_since, which is what photo
+    progress counts from — so trial messages never earn a photo. Dropping back to the trial
+    clears it, and email/customer_id are kept so a subscription can be found again if the
+    browser ID is lost."""
+    if tier not in TIERS:
+        raise HTTPException(status_code=400, detail=f"Unknown tier: {tier}")
+    _ensure_user(user_id)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if tier == "freshman":
+                cur.execute("UPDATE users SET tier=%s, paid_since=NULL WHERE user_id=%s",
+                            (tier, user_id))
+            else:
+                cur.execute("UPDATE users SET tier=%s, "
+                            "paid_since=COALESCE(paid_since, now()) WHERE user_id=%s",
+                            (tier, user_id))
+            if email:
+                cur.execute("UPDATE users SET billing_email=%s WHERE user_id=%s",
+                            (email.strip().lower(), user_id))
+            if customer_id:
+                cur.execute("UPDATE users SET stripe_customer_id=%s WHERE user_id=%s",
+                            (customer_id, user_id))
+            conn.commit()
+            cur.execute("SELECT tier, paid_since FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": user_id, "tier": row["tier"],
+            "paid_since": row["paid_since"]}
+
+
+@app.post("/admin/tier")
+def set_tier(body: TierIn):
+    """Move a user between plans by hand (the Stripe webhook does this automatically)."""
+    _check_admin(body.secret)
+    return apply_tier(body.user_id, body.tier.strip().lower())
+
+
+def _stripe_signature_ok(payload: bytes, header: str):
+    """Verify Stripe's Signature header: t=<ts>,v1=<hmac of "ts.payload">.
+
+    Rejects timestamps older than five minutes so a captured request cannot be replayed."""
+    if not STRIPE_WEBHOOK_SECRET or not header:
+        return False
+    parts = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    ts, sent = parts.get("t"), parts.get("v1")
+    if not ts or not sent:
+        return False
+    try:
+        if abs(datetime.now(timezone.utc).timestamp() - int(ts)) > 300:
+            return False
+    except ValueError:
+        return False
+    expected = hmac.new(STRIPE_WEBHOOK_SECRET.encode(),
+                        f"{ts}.".encode() + payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sent)
+
+
+def _tier_for_stripe(obj):
+    """Which plan a paid Stripe object grants, by payment-link, plan or line-item price id.
+    Anything unmapped falls back to DEFAULT_PAID_TIER — see STRIPE_PRICE_TIERS."""
+    for key in (obj.get("payment_link"), obj.get("plan", {}).get("id") if
+                isinstance(obj.get("plan"), dict) else None):
+        if key and key in STRIPE_PRICE_TIERS:
+            return STRIPE_PRICE_TIERS[key]
+    for item in (obj.get("lines", {}) or {}).get("data", []) or []:
+        price = (item.get("price") or {}).get("id")
+        if price in STRIPE_PRICE_TIERS:
+            return STRIPE_PRICE_TIERS[price]
+    return DEFAULT_PAID_TIER
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Flip a user's plan when Stripe reports a payment or a cancellation.
+
+    The user is identified by client_reference_id, which the plan buttons append to the
+    Payment Link as the browser's user_id. Unsigned or unknown-user events are ignored
+    rather than failing, so Stripe does not retry them forever."""
+    payload = await request.body()
+    if not _stripe_signature_ok(payload, request.headers.get("stripe-signature", "")):
+        raise HTTPException(status_code=400, detail="Bad Stripe signature")
+    event = json.loads(payload or b"{}")
+    obj = event.get("data", {}).get("object", {}) or {}
+    kind = event.get("type", "")
+
+    user_id = obj.get("client_reference_id")
+    customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else None
+    if not user_id and customer_id:
+        user_id = _user_for_customer(customer_id)
+    if not user_id:
+        return {"ok": True, "ignored": kind, "reason": "no client_reference_id"}
+
+    if kind in ("checkout.session.completed", "invoice.payment_succeeded"):
+        email = ((obj.get("customer_details") or {}).get("email")
+                 or obj.get("customer_email"))
+        return apply_tier(user_id, _tier_for_stripe(obj), email=email,
+                          customer_id=customer_id)
+    if kind in ("customer.subscription.deleted", "charge.refunded"):
+        return apply_tier(user_id, "freshman")
+    return {"ok": True, "ignored": kind}
+
+
+def _user_for_customer(customer_id):
+    """Find a user by Stripe customer, so renewals and cancellations land on the right
+    account even though only the first checkout carries client_reference_id."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users WHERE stripe_customer_id=%s LIMIT 1",
+                        (customer_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return row["user_id"] if row else None
 
 
 @app.post("/admin/grant-audits")
