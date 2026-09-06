@@ -322,23 +322,23 @@
             <img src="https://myreal.live/assets/zoe-BnozSeUg.jpg" alt="Portrait of Zoe" />
             <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><button class="button door-cta" type="button">Knock on Zoe's door</button></div>
           </article>
-          <article class="door-card locked">
+          <article class="door-card locked" data-girl="willow" data-name="Willow" data-title="The quiet lock" data-avatar="assets/willow.jpg">
             <img src="assets/willow.jpg" alt="Willow's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p></div>
           </article>
-          <article class="door-card locked">
+          <article class="door-card locked" data-girl="brittany" data-name="Brittany" data-title="The sweet trap" data-avatar="assets/brittany.jpg">
             <img src="assets/brittany.jpg" alt="Brittany's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p></div>
           </article>
-          <article class="door-card locked">
+          <article class="door-card locked" data-girl="sasha" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.jpg">
             <img src="assets/sasha.jpg" alt="Sasha's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p></div>
           </article>
-          <article class="door-card locked">
+          <article class="door-card locked" data-girl="piper" data-name="Piper" data-title="The closed book" data-avatar="assets/piper.jpg">
             <img src="assets/piper.jpg" alt="Piper's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p></div>
           </article>
-          <article class="door-card locked senior">
+          <article class="door-card locked senior" data-girl="veronica" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.jpg">
             <img src="assets/veronica.jpg" alt="Veronica's locked door" />
             <div class="door-copy"><div class="door-status">Senior exclusive</div><div class="door-name">Veronica</div><div class="door-title">The host</div><p>The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted.</p></div>
           </article>
@@ -460,8 +460,8 @@
       <div class="chat-log" id="chat-log" aria-live="polite"></div>
       <div class="chat-foot">
         <form class="chat-form" id="chat-form">
-          <input id="chat-input" type="text" autocomplete="off" placeholder="Say something…" aria-label="Message" />
-          <button id="chat-photo-btn" type="button">See her</button>
+          <input id="chat-input" type="text" autocomplete="off" maxlength="2000" placeholder="Say something…" aria-label="Message" />
+          <button id="chat-photo-btn" type="button" hidden>See her</button>
           <button class="button" id="chat-send" type="submit">Send</button>
         </form>
         <div class="chat-meta">
@@ -534,7 +534,7 @@
     function signOut() {
       const t = getToken();
       localStorage.removeItem(TOKEN_KEY);
-      updateAuthLinks();
+      updateAuthLinks(); setDoors(DEFAULT_OPEN); closeChat();
       if (t) fetch(API_BASE_URL + '/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } }).catch(() => {});
     }
     function onAuthLink(event) {
@@ -583,7 +583,7 @@
             : 'Confirmation email sent.');
         } else if (response.ok && data && data.token) {   // older backend: instant login
           localStorage.setItem(TOKEN_KEY, data.token);
-          updateAuthLinks(); closeAuth();
+          updateAuthLinks(); closeAuth(); refreshState();
         } else if (response.status === 409) {
           setAuthMsg('That email already has an account. Sign in instead.', 'error');
         } else {
@@ -605,7 +605,7 @@
         });
         if (response.ok && data && data.token) {
           localStorage.setItem(TOKEN_KEY, data.token);
-          updateAuthLinks(); closeAuth();
+          updateAuthLinks(); closeAuth(); refreshState();
           if (currentGirl) addMessage('note', 'Signed in. Her door is open — go ahead.');
         } else if (response.status === 403 && String(errText(data, '')).startsWith('email_unverified')) {
           showVerifyPane(email, 'Confirm your email first — check your inbox (and spam).');
@@ -643,7 +643,7 @@
 
     // Called when the API says the token is missing/expired.
     function handleUnauthorized() {
-      if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); }
+      if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); setDoors(DEFAULT_OPEN); }
       openAuth('login', 'Sign in to keep talking.');
     }
 
@@ -682,6 +682,7 @@
 
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
+      if (!card.classList.contains('open')) return;
       currentGirl = card.dataset.girl;
       document.getElementById('chat-name').textContent = card.dataset.name;
       document.getElementById('chat-title').textContent = card.dataset.title;
@@ -689,7 +690,6 @@
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
       chatLog.innerHTML = '';
-      chatRemaining.textContent = '';
       addMessage('note', 'Her door is open. Say hi.');
       chat.classList.add('is-open');
       chatInput.value = '';
@@ -701,13 +701,41 @@
       currentGirl = null;
     }
 
-    document.querySelectorAll('.door-card.open').forEach((card) => {
+    // Every card is clickable; openChat refuses locked ones. Which doors are open
+    // comes from GET /state for the signed-in account (defaults = freshman set).
+    const DEFAULT_OPEN = ['dakota', 'zoe'];
+    function setDoors(openList) {
+      document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
+        const open = openList.includes(card.dataset.girl);
+        card.classList.toggle('open', open);
+        card.classList.toggle('locked', !open);
+        const status = card.querySelector('.door-status');
+        if (status) status.textContent = open ? 'Door open' : (card.classList.contains('senior') ? 'Senior exclusive' : 'Door still shut');
+      });
+    }
+    async function refreshState() {
+      if (!isLoggedIn()) { setDoors(DEFAULT_OPEN); chatRemaining.textContent = ''; return; }
+      try {
+        const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
+        if (response.status === 401) { handleUnauthorized(); setDoors(DEFAULT_OPEN); return; }
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || !data.girls) return;
+        setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open));
+        if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+      } catch (error) { /* keep whatever is shown */ }
+    }
+    document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
       card.addEventListener('click', () => openChat(card));
     });
+    refreshState();
     document.getElementById('chat-close').addEventListener('click', closeChat);
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
 
+    // Photos: the button stays hidden until the backend exposes POST /image.
+    fetch(API_BASE_URL + '/image', { method: 'HEAD' })
+      .then((r) => { if (r.status !== 404) chatPhotoBtn.hidden = false; })
+      .catch(() => {});
     chatPhotoBtn.addEventListener('click', async () => {
       if (!currentGirl || chatPhotoBtn.disabled) return;
       chatPhotoBtn.disabled = true;
@@ -780,8 +808,7 @@
     });
 
     // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
-    // Leaderboard: only a shortened display name and progress are ever rendered —
-    // user IDs and audit counts are dropped client-side and never shown.
+    // Leaderboard: the API only returns a shortened display name + progress.
     function lbName(raw) {
       const name = String(raw || '').trim();
       if (!name || name.toLowerCase() === 'guest' || name.toLowerCase() === 'player') return 'Anonymous';
@@ -798,7 +825,7 @@
       }
       const top = ranked.slice(0, 10);
       box.innerHTML = '<table class="lb-table"><thead><tr><th>#</th><th>Player</th><th style="text-align:right">Milestone</th><th style="text-align:right">Doors</th></tr></thead><tbody>' +
-        top.map((r, i) => '<tr><td class="lb-rank">' + (i + 1) + '</td><td>' + esc(lbName(r.display_name)) + (r.audit_count >= 5 ? ' *' : '') + '</td><td class="lb-num">' + esc(r.milestone) + '</td><td class="lb-num">' + esc(r.girls_reached || 0) + '</td></tr>').join('') +
+        top.map((r, i) => '<tr><td class="lb-rank">' + (i + 1) + '</td><td>' + esc(lbName(r.display_name)) + (r.starred ? ' *' : '') + '</td><td class="lb-num">' + esc(r.milestone) + '</td><td class="lb-num">' + esc(r.girls_reached || 0) + '</td></tr>').join('') +
         '</tbody></table><p class="lb-note">Ranked by furthest milestone reached. Only first names are shown.</p>';
       const allSix = rows.filter(r => (r.girls_reached || 0) >= 28).length;
       document.getElementById('all-six-count').textContent = allSix;
@@ -859,11 +886,11 @@
         const card = document.createElement('article');
         card.className = 'merch-card';
         card.innerHTML =
-          (image ? `<img src="${image.url}" alt="${image.altText || node.title}" loading="lazy" />` : '') +
+          (image && /^https:\/\//.test(image.url) ? `<img src="${esc(image.url)}" alt="${esc(image.altText || node.title)}" loading="lazy" />` : '') +
           '<div class="merch-body">' +
-            `<h3>${node.title}</h3>` +
-            `<div class="price">${money(variants[0].price)}</div>` +
-            `<p>${node.description}</p>` +
+            `<h3>${esc(node.title)}</h3>` +
+            `<div class="price">${esc(money(variants[0].price))}</div>` +
+            `<p>${esc(node.description)}</p>` +
             '<div class="merch-row"><select aria-label="Size"></select><button class="button" type="button">Buy now</button></div>' +
           '</div>';
         const select = card.querySelector('select');

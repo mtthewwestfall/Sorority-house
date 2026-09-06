@@ -111,7 +111,7 @@ from psycopg2.extras import RealDictCursor, Json
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 # ---------------------------------------------------------------------------
@@ -135,6 +135,9 @@ RESEND_COOLDOWN_S = 60
 # per-IP throttle for the password endpoints (PBKDF2 is deliberately slow)
 AUTH_RATE_LIMIT = int(os.environ.get("AUTH_RATE_LIMIT", "10"))     # requests
 AUTH_RATE_WINDOW_S = int(os.environ.get("AUTH_RATE_WINDOW_S", "60"))
+# Set TRUST_PROXY=false when running without a reverse proxy in front.
+TRUST_PROXY = os.environ.get("TRUST_PROXY", "true").lower() != "false"
+CHAT_MAX_CHARS = int(os.environ.get("CHAT_MAX_CHARS", "2000"))
 VERIFY_TTL_HOURS = 24
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -600,9 +603,12 @@ _rate_hits = defaultdict(deque)
 
 
 def _client_ip(request: Request):
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """Only the LAST X-Forwarded-For hop is trustworthy: it's appended by our own
+    proxy (Railway); anything before it is caller-controlled and can be forged."""
+    if TRUST_PROXY:
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.rsplit(",", 1)[-1].strip()
     return request.client.host if request.client else "?"
 
 
@@ -1262,7 +1268,7 @@ class ResendVerifyIn(BaseModel):
 
 class ChatIn(BaseModel):
     girl: str
-    message: str
+    message: str = Field(max_length=CHAT_MAX_CHARS)
 
 
 class AuditIn(BaseModel):
@@ -1655,20 +1661,22 @@ def audit(body: AuditIn, user=Depends(current_user)):
 
 @app.get("/leaderboard")
 def leaderboard():
-    """Rows sorted by furthest milestone reached. audit_count (total audits used) is
-    returned so the frontend can show ONLY an asterisk (*) once audit_count >= 5."""
+    """Public: top rows by furthest milestone. Only a truncated display name plus
+    aggregate progress is exposed — no user_id, no raw audit/purchase counts
+    (`starred` is the single bit the UI renders as an asterisk)."""
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT u.user_id, u.display_name,
-                       MAX(r.milestone) AS milestone,
-                       u.total_audits_used AS audit_count,
+                SELECT LEFT(u.display_name, 12) AS display_name,
+                       COALESCE(MAX(r.milestone), 0) AS milestone,
+                       (u.total_audits_used >= 5) AS starred,
                        COUNT(DISTINCT r.girl) AS girls_reached
                 FROM users u
                 LEFT JOIN relationships r ON r.user_id = u.user_id
                 GROUP BY u.user_id
-                ORDER BY milestone DESC NULLS LAST, girls_reached DESC, u.total_audits_used ASC
+                ORDER BY milestone DESC, girls_reached DESC, u.total_audits_used ASC
+                LIMIT 25
             """)
             return {"leaderboard": cur.fetchall()}
     finally:
