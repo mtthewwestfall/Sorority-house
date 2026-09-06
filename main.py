@@ -44,8 +44,9 @@ Env vars (Railway -> Variables):
   CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   IMAGE_MODEL       gemini-2.5-flash-image (default; the model /image renders portraits with)
-  IMAGE_FIRST_AT    40 (default): message count at which her first photo unlocks
-  IMAGE_EVERY       200 (default): messages she needs between photos after the first
+  IMAGE_FIRST_AT    10 (default): PAID message count at which her first photo unlocks
+                    (trial messages never count; photos are locked on the free trial)
+  IMAGE_EVERY       200 (default): paid messages she needs between photos after the first
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
@@ -84,8 +85,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")  # portraits (/image)
-IMAGE_FIRST_AT = int(os.environ.get("IMAGE_FIRST_AT", "40"))   # her first photo unlocks here
-IMAGE_EVERY = int(os.environ.get("IMAGE_EVERY", "200"))        # messages between photos after that
+IMAGE_FIRST_AT = int(os.environ.get("IMAGE_FIRST_AT", "10"))   # PAID message her first photo unlocks on
+IMAGE_EVERY = int(os.environ.get("IMAGE_EVERY", "200"))        # paid messages between photos after that
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
@@ -370,8 +371,12 @@ def init_db():
                     audit_credits    INTEGER NOT NULL DEFAULT 0,
                     free_audits_used INTEGER NOT NULL DEFAULT 0,
                     total_audits_used INTEGER NOT NULL DEFAULT 0,
-                    plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+                    plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    paid_since       TIMESTAMPTZ
                 );
+                -- paid_since marks when the trial ended, so photo progress can count
+                -- paid messages only. Safe to run on an existing users table.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_since TIMESTAMPTZ;
                 -- If you already had the old users table, uncomment to add the
                 -- new audit columns without dropping anything:
                 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS audit_credits INTEGER NOT NULL DEFAULT 0;
@@ -788,23 +793,31 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         raise HTTPException(status_code=502, detail="Unexpected model response")
 
 
-def photo_status(user_id, girl):
-    """How many messages she has had, and how many are left before the next photo."""
+def photo_status(user, girl):
+    """Photo progress for this girl, counted in PAID messages only.
+
+    Trial (freshman) messages never count: nothing sent before the user subscribed
+    moves the counter, and a trial user has no photo at all."""
+    if user["tier"] == "freshman" or not user.get("paid_since"):
+        return {"paid_messages": 0, "unlocks_at": IMAGE_FIRST_AT,
+                "remaining": IMAGE_FIRST_AT, "unlocked": False, "trial": True}
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS n FROM chat_logs "
-                        "WHERE user_id=%s AND girl=%s AND sender='user'", (user_id, girl))
+            cur.execute("SELECT COUNT(*) AS n FROM chat_logs WHERE user_id=%s AND girl=%s "
+                        "AND sender='user' AND created_at >= %s",
+                        (user["user_id"], girl, user["paid_since"]))
             sent = int(cur.fetchone()["n"])
             cur.execute("SELECT msg_count FROM photo_log "
                         "WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT 1",
-                        (user_id, girl))
+                        (user["user_id"], girl))
             row = cur.fetchone()
     finally:
         conn.close()
     unlocks_at = IMAGE_FIRST_AT if row is None else int(row["msg_count"]) + IMAGE_EVERY
-    return {"messages": sent, "unlocks_at": unlocks_at,
-            "remaining": max(0, unlocks_at - sent), "unlocked": sent >= unlocks_at}
+    return {"paid_messages": sent, "unlocks_at": unlocks_at,
+            "remaining": max(0, unlocks_at - sent), "unlocked": sent >= unlocks_at,
+            "trial": False}
 
 
 def record_photo(user_id, girl, msg_count):
@@ -856,6 +869,12 @@ class ChatIn(BaseModel):
 class AuditIn(BaseModel):
     user_id: str
     girl: str
+
+
+class TierIn(BaseModel):
+    user_id: str
+    tier: str
+    secret: str = ""
 
 
 class ImageIn(BaseModel):
@@ -967,10 +986,11 @@ def image(body: ImageIn):
     if girl not in VISUAL_DNA:
         raise HTTPException(status_code=404, detail="Unknown girl")
 
-    status = photo_status(user["user_id"], girl)
+    status = photo_status(user, girl)
     if not status["unlocked"]:
-        return {"ok": False, "locked": True, **status,
-                "error": f"Not yet — {status['remaining']} more messages before she sends a photo."}
+        reason = ("Photos come with a membership." if status["trial"] else
+                  f"Not yet — {status['remaining']} more messages before she sends a photo.")
+        return {"ok": False, "locked": True, **status, "error": reason}
 
     _, name = get_persona(girl)
     scene = " ".join((body.scene or "").split())[:200]
@@ -979,10 +999,10 @@ def image(body: ImageIn):
         prompt += f" Setting: {scene}."
 
     mime, data = _gemini_image(prompt)
-    record_photo(user["user_id"], girl, status["messages"])
+    record_photo(user["user_id"], girl, status["paid_messages"])
     return {"ok": True, "girl": girl, "name": name, "mime": mime, "image_b64": data,
-            "disclosure": "AI-generated image", "messages": status["messages"],
-            "next_unlocks_at": status["messages"] + IMAGE_EVERY}
+            "disclosure": "AI-generated image", "paid_messages": status["paid_messages"],
+            "next_unlocks_at": status["paid_messages"] + IMAGE_EVERY}
 
 
 @app.get("/image/status")
@@ -991,7 +1011,7 @@ def image_status(user_id: str, girl: str):
     girl = girl.strip().lower()
     if girl not in VISUAL_DNA:
         raise HTTPException(status_code=404, detail="Unknown girl")
-    return {"ok": True, "girl": girl, **photo_status(user["user_id"], girl)}
+    return {"ok": True, "girl": girl, **photo_status(user, girl)}
 
 
 @app.get("/history")
@@ -1137,6 +1157,34 @@ def set_persona(body: PersonaIn):
     finally:
         conn.close()
     return {"ok": True, "girl": girl}
+
+
+@app.post("/admin/tier")
+def set_tier(body: TierIn):
+    """Move a user between plans. Leaving the trial stamps paid_since, which is what
+    photo progress counts from — so trial messages never earn a photo."""
+    _check_admin(body.secret)
+    tier = body.tier.strip().lower()
+    if tier not in TIERS:
+        raise HTTPException(status_code=400, detail=f"Unknown tier: {tier}")
+    _ensure_user(body.user_id)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if tier == "freshman":
+                cur.execute("UPDATE users SET tier=%s, paid_since=NULL WHERE user_id=%s",
+                            (tier, body.user_id))
+            else:
+                cur.execute("UPDATE users SET tier=%s, "
+                            "paid_since=COALESCE(paid_since, now()) WHERE user_id=%s",
+                            (tier, body.user_id))
+            conn.commit()
+            cur.execute("SELECT tier, paid_since FROM users WHERE user_id=%s", (body.user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": body.user_id, "tier": row["tier"],
+            "paid_since": row["paid_since"]}
 
 
 @app.post("/admin/grant-audits")
