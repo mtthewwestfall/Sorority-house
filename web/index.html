@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Welcome to the Sorority House</title>
+  <meta name="description" content="A social experiment. 28 doors. Can you survive or will you thrive?" />
+  <style>
+    :root {
+      --ink: #0d0918;
+      --panel: rgba(26, 18, 43, .82);
+      --panel-2: rgba(34, 23, 53, .72);
+      --line: rgba(218, 188, 255, .24);
+      --white: #fff9ff;
+      --muted: #c7b9ca;
+      --gold: #ffb52c;
+      --pink: #ff2a91;
+      --violet: #bc51dd;
+      --blue: #273b79;
+      --shadow: 0 22px 70px rgba(0,0,0,.45);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--white);
+      background: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      background:
+        radial-gradient(circle at 15% 15%, rgba(255, 26, 137, .18), transparent 28%),
+        radial-gradient(circle at 84% 27%, rgba(40, 96, 182, .18), transparent 31%),
+        linear-gradient(180deg, #100919, #080711 75%);
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      opacity: .12;
+      background-image: linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: linear-gradient(to bottom, black, transparent 70%);
+    }
+
+    a { color: inherit; }
+    .wrap { width: min(1120px, calc(100% - 36px)); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: .48em;
+      font-size: .84rem;
+      font-weight: 700;
+    }
+    h1, h2, h3, .display, .door-name, .number {
+      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+      font-weight: 500;
+      letter-spacing: .025em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h2 { font-size: clamp(2.6rem, 7vw, 5.8rem); line-height: .98; margin-bottom: 22px; }
+    .gradient-text {
+      background: linear-gradient(100deg, #ff2894 5%, #c74edc 55%, #ffc14e 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+
+    .topbar {
+      position: fixed; z-index: 20; top: 0; left: 0; right: 0;
+      padding: 16px 0;
+      background: linear-gradient(180deg, rgba(8,6,15,.92), rgba(8,6,15,.08));
+      backdrop-filter: blur(9px);
+    }
+    .topbar .inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { text-decoration: none; color: var(--white); font-weight: 800; letter-spacing: .16em; font-size: .78rem; }
+    nav { display: flex; gap: 22px; align-items: center; }
+    nav a { text-decoration: none; color: var(--muted); font-size: .86rem; }
+    nav a:hover { color: var(--white); }
+    .nav-cta { border: 1px solid rgba(255,181,44,.5); border-radius: 999px; padding: 8px 14px; color: var(--gold); }
+
+    .hero {
+      min-height: 820px; display: grid; place-items: center; text-align: center; position: relative; overflow: hidden;
+      background: linear-gradient(180deg, rgba(7,5,15,.15), rgba(8,6,17,.93)), url('https://myreal.live/assets/hero-loft-BkLcAo1y.jpg') center/cover;
+    }
+    .hero::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 15%, rgba(11,5,20,.55) 78%); }
+    .hero-content { position: relative; max-width: 900px; padding: 140px 0 90px; }
+    .hero h1 { font-size: clamp(3.7rem, 11vw, 9rem); line-height: .84; margin: 0 0 30px; }
+    .hero h1 span { display: block; }
+    .hero-sub { font-size: clamp(1.25rem, 3vw, 2rem); color: #f6edf7; margin-bottom: 32px; }
+    .challenge { color: var(--muted); font-size: clamp(1rem, 2vw, 1.3rem); margin-bottom: 50px; }
+    .scroll-cue { color: var(--gold); text-transform: uppercase; letter-spacing: .33em; font-size: .75rem; }
+
+    section { padding: 110px 0; }
+    .section-head { text-align: center; max-width: 800px; margin: 0 auto 48px; }
+    .section-head p { color: var(--muted); font-size: 1.1rem; }
+
+    .doors-section { background: linear-gradient(180deg, rgba(20, 9, 29, .2), rgba(21, 13, 39, .7)); }
+    .doors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    .door-card {
+      position: relative; overflow: hidden; min-height: 530px; border-radius: 24px; border: 1px solid var(--line);
+      background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease;
+    }
+    .door-card:hover { transform: translateY(-6px); border-color: rgba(255,181,44,.66); }
+    .door-card img { width: 100%; height: 285px; display: block; object-fit: cover; }
+    .door-card.locked img { filter: blur(18px) brightness(.42) saturate(.7); transform: scale(1.06); }
+    .door-card.locked::after { content: "🔒  DOOR STILL SHUT"; position: absolute; top: 126px; left: 0; right: 0; text-align: center; color: var(--gold); letter-spacing: .24em; font-size: .78rem; font-weight: 700; }
+    .door-card.senior::after { content: "🔒  SENIOR EXCLUSIVE"; }
+    .door-copy { padding: 25px 25px 28px; }
+    .door-status { color: var(--pink); letter-spacing: .3em; text-transform: uppercase; font-size: .72rem; font-weight: 700; }
+    .locked .door-status { color: var(--gold); }
+    .door-name { font-size: 2.1rem; margin: 8px 0 5px; }
+    .door-title { color: var(--gold); text-transform: uppercase; letter-spacing: .28em; font-size: .72rem; margin-bottom: 14px; }
+    .door-copy p { color: var(--muted); margin-bottom: 0; }
+
+    .trial-banner { margin-top: 42px; text-align: center; padding: 42px 25px; border: 1px solid rgba(255,42,145,.45); border-radius: 22px; background: linear-gradient(110deg, rgba(255,37,143,.92), rgba(189,75,221,.9), rgba(255,181,44,.92)); color: #16091c; }
+    .trial-banner h3 { font-size: clamp(2rem, 5vw, 3.6rem); margin-bottom: 8px; }
+    .trial-banner p { margin: 0; font-weight: 650; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 0; cursor: pointer; text-decoration: none; border-radius: 999px; padding: 14px 23px; font-weight: 800; color: #170817; background: linear-gradient(100deg, #ff2894, #ffb52c); box-shadow: 0 12px 28px rgba(255,42,145,.2); }
+    .button:hover { filter: brightness(1.1); }
+    .button.dark { background: #171021; color: var(--white); border: 1px solid var(--line); box-shadow: none; }
+    .trial-banner .button { margin-top: 20px; background: #170817; color: white; }
+
+    .hallway { margin-top: 78px; min-height: 420px; display: grid; place-items: center; text-align: center; border-radius: 25px; overflow: hidden; background: linear-gradient(180deg, rgba(9,7,17,.15), rgba(9,7,17,.8)), url('https://myreal.live/assets/hallway-jjMGyHnL.jpg') center/cover; border: 1px solid var(--line); }
+    .hallway h2 { margin-bottom: 10px; }
+    .hallway p { color: var(--muted); font-size: 1.1rem; }
+
+    .scoreboard { background: rgba(12, 8, 24, .74); }
+    .score-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; max-width: 900px; margin: 0 auto; }
+    .score-row { border: 1px solid var(--line); border-radius: 18px; padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; background: var(--panel-2); }
+    .score-row span:first-child { font-size: 1.2rem; }
+    .score-num { font-family: Impact, sans-serif; font-size: 2.5rem; color: var(--pink); }
+    .score-num small { color: var(--gold); font-size: 1.2rem; }
+    .leaderboard { max-width: 900px; margin: 44px auto 0; }
+    .leaderboard h3 { text-align: center; text-transform: uppercase; letter-spacing: .28em; font-size: .78rem; color: var(--gold); margin-bottom: 18px; }
+    .lb-table { width: 100%; border-collapse: collapse; background: var(--panel-2); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+    .lb-table th, .lb-table td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--line); }
+    .lb-table th { font-size: .72rem; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); }
+    .lb-table tr:last-child td { border-bottom: 0; }
+    .lb-table td.lb-rank { font-family: Impact, sans-serif; font-size: 1.6rem; color: var(--pink); width: 64px; }
+    .lb-table td.lb-num { text-align: right; font-weight: 700; }
+    .lb-note { text-align: center; opacity: .7; font-size: .85rem; margin-top: 12px; }
+    .all-six { max-width: 900px; margin: 18px auto 0; padding: 30px; border-radius: 18px; text-align: center; border: 1px solid rgba(255,42,145,.5); background: linear-gradient(120deg, rgba(255,42,145,.1), rgba(255,181,44,.08)); }
+    .all-six strong { display: block; font: 4.5rem Impact, sans-serif; color: var(--gold); }
+
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    .step { padding: 30px 26px; border-top: 2px solid var(--pink); background: rgba(27,18,45,.68); border-radius: 0 0 18px 18px; }
+    .number { font-size: 3.2rem; color: var(--gold); }
+    .step h3 { font-size: 1.55rem; margin: 8px 0 12px; }
+    .step p { color: var(--muted); }
+    .group-image { margin-top: 45px; height: 360px; border-radius: 24px; background: linear-gradient(180deg, rgba(8,6,16,.05), rgba(8,6,16,.7)), url('https://myreal.live/assets/house-group-DStbaZUC.jpg') center/cover; border: 1px solid var(--line); display: grid; place-items: end center; padding: 28px; text-align: center; }
+    .group-image h3 { font-size: 2.8rem; margin: 0; }
+    .group-image p { margin: 4px 0 0; color: #e5d9e6; }
+
+    .plans { background: linear-gradient(180deg, rgba(11,7,19,.5), rgba(35,12,43,.55)); }
+    .plan-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: stretch; }
+    .plan { display: flex; flex-direction: column; padding: 28px 23px; border: 1px solid var(--line); border-radius: 21px; background: rgba(26,17,42,.82); }
+    .plan.featured { border-color: var(--pink); box-shadow: 0 0 0 1px rgba(255,42,145,.15), 0 22px 60px rgba(255,42,145,.1); }
+    .plan h3 { font-size: 1.5rem; margin-bottom: 10px; }
+    .price { font-size: 2.2rem; font-weight: 850; margin-bottom: 18px; }
+    .price small { color: var(--muted); font-size: .85rem; font-weight: 500; }
+    .plan p { color: var(--muted); min-height: 70px; }
+    .plan ul { padding-left: 18px; color: var(--muted); flex: 1; }
+    .plan li { margin: 9px 0; }
+    .plan .button { width: 100%; margin-top: 20px; }
+    .extras { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+    .extra { padding: 25px; border: 1px solid var(--line); border-radius: 18px; background: rgba(26,17,42,.72); }
+    .extra h3 { margin-bottom: 8px; }
+    .extra p { color: var(--muted); margin: 0; }
+
+    .merch { background: rgba(12, 8, 24, .74); }
+    .merch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 900px; margin: 0 auto; }
+    .merch-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease; }
+    .merch-card:hover { transform: translateY(-6px); border-color: rgba(255,181,44,.66); }
+    .merch-card img { width: 100%; aspect-ratio: 1 / 1; display: block; object-fit: cover; background: rgba(9,7,17,.6); }
+    .merch-body { display: flex; flex-direction: column; gap: 10px; padding: 24px 24px 28px; flex: 1; }
+    .merch-body h3 { font-size: 1.7rem; margin: 0; }
+    .merch-body .price { font-size: 1.6rem; margin: 0; }
+    .merch-body p { color: var(--muted); margin: 0; flex: 1; }
+    .merch-row { display: flex; gap: 10px; margin-top: 8px; }
+    .merch-row select { flex: 1; min-width: 0; border-radius: 999px; padding: 12px 16px; font: inherit; color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line); }
+    .merch-row select:focus { outline: none; border-color: rgba(255,181,44,.6); }
+    .merch-row .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .merch-note { text-align: center; color: var(--muted); margin: 0; }
+
+    footer { padding: 50px 0 70px; border-top: 1px solid rgba(218,188,255,.12); color: var(--muted); }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .footer-links { display: flex; gap: 18px; }
+    .footer-links a { color: var(--muted); text-decoration: none; }
+    .footer-links a:hover { color: white; }
+
+    .ai-note { color: rgba(199,185,202,.72); font-size: .78rem; letter-spacing: .04em; }
+    .hero .ai-note { margin: 26px 0 0; }
+
+    .door-card.open { cursor: pointer; }
+    .door-card.open .door-cta { display: inline-flex; margin-top: 16px; }
+    .door-cta { display: none; }
+
+    .chat-backdrop {
+      position: fixed; inset: 0; z-index: 40; display: none;
+      background: rgba(6, 4, 12, .72); backdrop-filter: blur(4px);
+    }
+    .chat-backdrop.is-open { display: grid; place-items: center; padding: 20px; }
+    .chat-panel {
+      width: min(560px, 100%); height: min(680px, 92vh); display: flex; flex-direction: column;
+      border: 1px solid var(--line); border-radius: 22px; background: #150e23; box-shadow: var(--shadow); overflow: hidden;
+    }
+    .chat-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .chat-head img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; }
+    .chat-head .who { flex: 1; min-width: 0; }
+    .chat-head .who strong { font-family: Impact, sans-serif; letter-spacing: .03em; font-size: 1.3rem; text-transform: uppercase; }
+    .chat-head .who div { color: var(--muted); font-size: .74rem; }
+    .chat-tag { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--muted); font-size: .64rem; letter-spacing: .18em; text-transform: uppercase; }
+    .chat-close { border: 0; background: transparent; color: var(--muted); font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px 6px; }
+    .chat-close:hover { color: var(--white); }
+    .chat-log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 11px; }
+    .msg { max-width: 82%; padding: 10px 14px; border-radius: 16px; font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .msg.her { align-self: flex-start; background: rgba(34,23,53,.9); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+    .msg.me { align-self: flex-end; background: linear-gradient(100deg, #ff2894, #bd4bdd); color: #fff; border-bottom-right-radius: 5px; }
+    .msg.note { align-self: center; max-width: 100%; text-align: center; color: var(--muted); font-size: .78rem; background: none; padding: 2px 0; }
+    .msg.error { align-self: center; max-width: 100%; text-align: center; color: #ffb0c9; border: 1px solid rgba(255,42,145,.4); background: rgba(255,42,145,.08); font-size: .84rem; }
+    .typing { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; }
+    .chat-foot { border-top: 1px solid var(--line); padding: 12px 14px 14px; }
+    .chat-form { display: flex; gap: 9px; }
+    .chat-form input {
+      flex: 1; min-width: 0; border-radius: 999px; padding: 12px 16px; font: inherit; font-size: .95rem;
+      color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line);
+    }
+    .chat-form input:focus { outline: none; border-color: rgba(255,181,44,.6); }
+    .auth-panel { width: min(420px, 100%); height: auto; padding: 26px 26px 22px; gap: 12px; }
+    .auth-panel h2 { font-size: 1.4rem; margin: 0 0 4px; }
+    .auth-panel .auth-sub { color: var(--muted); font-size: .9rem; margin: 0 0 8px; }
+    .auth-panel form { display: flex; flex-direction: column; gap: 10px; }
+    .auth-panel input { border-radius: 12px; padding: 12px 14px; font: inherit; color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line); }
+    .auth-panel input:focus { outline: none; border-color: rgba(255,181,44,.6); }
+    .auth-panel .button { justify-content: center; }
+    .auth-switch { color: var(--muted); font-size: .84rem; text-align: center; margin: 6px 0 0; }
+    .auth-switch a, .auth-msg a { color: var(--gold); cursor: pointer; text-decoration: underline; }
+    .auth-msg { min-height: 1.2em; font-size: .86rem; text-align: center; color: var(--muted); }
+    .auth-msg.error { color: #ffb0c9; }
+    .auth-msg.ok { color: #b8f5c9; }
+    .auth-close { position: absolute; top: 12px; right: 14px; }
+    .auth-panel { position: relative; }
+    .auth-hidden { display: none !important; }
+    .chat-form .button { padding: 12px 22px; }
+    .chat-photo { border-radius: 16px; overflow: hidden; align-self: flex-start; max-width: 82%; border: 1px solid var(--line); }
+    .chat-photo img { display: block; width: 100%; }
+    .chat-photo figcaption { padding: 6px 10px; color: var(--muted); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; background: rgba(9,7,17,.7); }
+    #chat-photo-btn { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 11px 16px; font: inherit; font-size: .85rem; cursor: pointer; }
+    #chat-photo-btn:hover:not([disabled]) { color: var(--white); border-color: rgba(255,181,44,.6); }
+    #chat-photo-btn[disabled] { opacity: .5; cursor: not-allowed; }
+    .chat-form .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; }
+
+    @media (max-width: 900px) {
+      .doors, .plan-grid { grid-template-columns: repeat(2, 1fr); }
+      .steps { grid-template-columns: 1fr; }
+      .plan p { min-height: auto; }
+    }
+    @media (max-width: 620px) {
+      .wrap { width: min(100% - 26px, 520px); }
+      nav a:not(.nav-cta) { display: none; }
+      .hero { min-height: 720px; }
+      section { padding: 76px 0; }
+      .doors, .plan-grid, .score-grid, .extras, .merch-grid { grid-template-columns: 1fr; }
+      .door-card { min-height: auto; }
+      .door-card img { height: 300px; }
+      .hallway { min-height: 330px; }
+      .group-image { height: 290px; }
+      .footer-inner { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap inner">
+      <a class="brand" href="#top">THE HOUSE</a>
+      <nav aria-label="Main navigation">
+        <a href="#doors">The doors</a>
+        <a href="#scoreboard">Scoreboard</a>
+        <a href="#merch">Merch</a>
+        <a href="#plans">Membership</a>
+        <a class="nav-cta" href="#plans">Enter the house</a>
+        <a class="nav-cta" href="#" id="nav-auth">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-content wrap">
+        <p class="eyebrow">A social experiment</p>
+        <h1><span>Welcome to the</span><span class="gradient-text">Sorority House</span></h1>
+        <p class="hero-sub">Can you survive or will you thrive?</p>
+        <p class="challenge">Think you're a Casanova? I doubt it.<br />No one's made it past two so far.</p>
+        <a class="button" href="#doors">Pick your girl ↓</a>
+        <div class="scroll-cue" style="margin-top:42px">28 doors. One house. Start here.</div>
+      </div>
+    </section>
+
+    <section id="doors" class="doors-section">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Pick your girl</p>
+          <h2>Every door hides a different challenge.</h2>
+          <p>28 doors line one house and hide a whole lot of emotional armor. Two are open. The others are waiting to see whether you are worth letting in.</p>
+        </div>
+        <div class="doors">
+          <article class="door-card open" data-girl="dakota" data-name="Dakota" data-title="The gatekeeper" data-avatar="https://myreal.live/assets/dakota-DovCVNjY.jpg">
+            <img src="https://myreal.live/assets/dakota-DovCVNjY.jpg" alt="Portrait of Dakota" />
+            <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Dakota</div><div class="door-title">The gatekeeper</div><p>Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly.</p><button class="button door-cta" type="button">Knock on Dakota's door</button></div>
+          </article>
+          <article class="door-card open" data-girl="zoe" data-name="Zoe" data-title="The mirage" data-avatar="https://myreal.live/assets/zoe-BnozSeUg.jpg">
+            <img src="https://myreal.live/assets/zoe-BnozSeUg.jpg" alt="Portrait of Zoe" />
+            <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><button class="button door-cta" type="button">Knock on Zoe's door</button></div>
+          </article>
+          <article class="door-card locked">
+            <img src="assets/willow.jpg" alt="Willow's locked door" />
+            <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p></div>
+          </article>
+          <article class="door-card locked">
+            <img src="assets/brittany.jpg" alt="Brittany's locked door" />
+            <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p></div>
+          </article>
+          <article class="door-card locked">
+            <img src="assets/sasha.jpg" alt="Sasha's locked door" />
+            <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p></div>
+          </article>
+          <article class="door-card locked">
+            <img src="assets/piper.jpg" alt="Piper's locked door" />
+            <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p></div>
+          </article>
+          <article class="door-card locked senior">
+            <img src="assets/veronica.jpg" alt="Veronica's locked door" />
+            <div class="door-copy"><div class="door-status">Senior exclusive</div><div class="door-name">Veronica</div><div class="door-title">The host</div><p>The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted.</p></div>
+          </article>
+        </div>
+        <div class="trial-banner">
+          <h3>Start free — 25 messages</h3>
+          <p>No card required. The trial ends at message 50.</p>
+          <a class="button" href="#plans">Start the trial</a>
+        </div>
+        <div class="hallway">
+          <div><h2>2 doors open.<br /><span class="gradient-text">26 shut.</span></h2><p>28 doors in the house. Seven are hers. The rest are waiting on new sisters.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="scoreboard" class="scoreboard">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">The scoreboard</p><h2>How far have you made it?</h2></div>
+        <div class="score-grid">
+          <div class="score-row"><span>Dakota reached</span><span class="score-num">0<small>/4</small></span></div>
+          <div class="score-row"><span>Zoe reached</span><span class="score-num">0<small>/4</small></span></div>
+          <div class="score-row"><span>Willow reached</span><span class="score-num">0<small>/4</small></span></div>
+          <div class="score-row"><span>Brittany reached</span><span class="score-num">0<small>/4</small></span></div>
+          <div class="score-row"><span>Sasha reached</span><span class="score-num">0<small>/4</small></span></div>
+          <div class="score-row"><span>Piper reached</span><span class="score-num">0<small>/4</small></span></div>
+          <div class="score-row"><span>Veronica reached</span><span class="score-num">0<small>/4</small></span></div>
+        </div>
+        <div class="all-six">Players who reached all 28<strong id="all-six-count">0</strong></div>
+        <div class="leaderboard">
+          <h3>Top players</h3>
+          <div id="leaderboard"><p class="lb-note">Loading the rankings…</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">The rules</p><h2>How the experiment works</h2></div>
+        <div class="steps">
+          <article class="step"><div class="number">01</div><h3>Pick a roommate</h3><p>Four personalities, four very different sets of walls. Start with one of the open doors.</p></article>
+          <article class="step"><div class="number">02</div><h3>Start talking</h3><p>Your first 25 messages are free. No card, no catch. See who remembers what you tell them.</p></article>
+          <article class="step"><div class="number">03</div><h3>Get past the guard</h3><p>Earn trust and the conversation changes. Push too hard and it closes.</p></article>
+        </div>
+        <div class="group-image"><div><h3>Come get schooled</h3><p>New girls move in every month.</p></div></div>
+      </div>
+    </section>
+
+    <section id="merch" class="merch">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">House merch</p><h2>Wear the house.</h2><p>Limited runs, straight from the front door. Pick a size and check out securely through Shopify.</p></div>
+        <div class="merch-grid" id="merch-grid"><p class="merch-note">Loading the drop…</p></div>
+      </div>
+    </section>
+
+    <section id="plans" class="plans">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">Choose your way in</p><h2>You get 25 messages.<br /><span class="gradient-text">They get the last word.</span></h2></div>
+        <div class="plan-grid">
+          <article class="plan"><h3>Trial</h3><div class="price">Free</div><p>Up to 25 messages, total.</p><ul><li>Dakota & Zoe's doors are open</li><li>No card required</li><li>Live message counter</li></ul><a class="button" href="#doors">Start the trial</a></article>
+          <article class="plan"><h3>Starter</h3><div class="price">$7.99 <small>/mo</small></div><p>A light way in—1,000 messages a month.</p><ul><li>1,000 messages a month</li><li>The open doors of the house</li><li>They remember what you tell them</li></ul></article>
+          <article class="plan featured"><h3>Storyline challenge</h3><div class="price">$14.99 <small>/mo</small></div><p>Work your way through the challenge at your own pace.</p><ul><li>Earn each door the hard way</li><li>2,000 messages a month</li><li>They remember everything you tell them</li></ul></article>
+          <article class="plan"><h3>All site access</h3><div class="price">$19.99 <small>/mo</small></div><p>Are you the impatient type? Come on in.</p><ul><li>Every door open from day one</li><li>Veronica — Senior exclusive</li><li>Shared house conversations</li><li>2,000 messages a month</li></ul></article>
+        </div>
+        <div class="extras">
+          <div class="extra"><h3>Out of messages?</h3><p>Add 1,000 more messages for $7 any time from your account page.</p></div>
+          <div class="extra"><h3>Suggest a girl — $4.99/mo</h3><p>Pitch a girl for the house. Keep her private or share her with everyone and earn a free request.</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <div>© 2026 The Sorority House · Exclusive through referrals<br /><span class="ai-note">The girls are AI characters. Conversations are fiction.</span></div>
+      <div class="footer-links"><a href="#merch">Merch</a><a href="#" id="footer-auth">Sign in</a><a href="#top">Back to top ↑</a></div>
+    </div>
+  </footer>
+  <div class="chat-backdrop" id="auth" role="dialog" aria-modal="true" aria-labelledby="auth-heading">
+    <div class="chat-panel auth-panel">
+      <button class="chat-close auth-close" id="auth-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="auth-heading">Sign in</h2>
+      <p class="auth-sub" id="auth-sub">Your trial and progress are tied to your account.</p>
+
+      <form id="login-form" autocomplete="on">
+        <input id="login-email" type="email" placeholder="Email" required autocomplete="email" />
+        <input id="login-password" type="password" placeholder="Password" required autocomplete="current-password" />
+        <button class="button" type="submit">Sign in</button>
+        <p class="auth-switch">New here? <a id="to-signup">Create an account</a></p>
+      </form>
+
+      <form id="signup-form" class="auth-hidden" autocomplete="on">
+        <input id="signup-name" type="text" placeholder="Display name" maxlength="40" required autocomplete="nickname" />
+        <input id="signup-email" type="email" placeholder="Email" required autocomplete="email" />
+        <input id="signup-password" type="password" placeholder="Password (8+ characters)" minlength="8" required autocomplete="new-password" />
+        <button class="button" type="submit">Create account</button>
+        <p class="auth-switch">Already have one? <a id="to-login">Sign in</a></p>
+      </form>
+
+      <div id="verify-pane" class="auth-hidden">
+        <p class="auth-sub">We sent a confirmation link to <strong id="verify-email"></strong>. Click it, then come back and sign in. The link expires in 24 hours.</p>
+        <button class="button dark" type="button" id="resend-btn">Resend email</button>
+        <p class="auth-switch"><a id="verify-to-login">Back to sign in</a></p>
+      </div>
+
+      <div class="auth-msg" id="auth-msg" aria-live="polite"></div>
+    </div>
+  </div>
+  <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
+    <div class="chat-panel">
+      <div class="chat-head">
+        <img id="chat-avatar" src="" alt="" />
+        <div class="who">
+          <strong id="chat-name"></strong>
+          <div id="chat-title"></div>
+        </div>
+        <span class="chat-tag">AI companion</span>
+        <button class="chat-close" id="chat-close" type="button" aria-label="Close chat">&times;</button>
+      </div>
+      <div class="chat-log" id="chat-log" aria-live="polite"></div>
+      <div class="chat-foot">
+        <form class="chat-form" id="chat-form">
+          <input id="chat-input" type="text" autocomplete="off" placeholder="Say something…" aria-label="Message" />
+          <button id="chat-photo-btn" type="button">See her</button>
+          <button class="button" id="chat-send" type="submit">Send</button>
+        </form>
+        <div class="chat-meta">
+          <span class="ai-note"></span>
+          <span class="ai-note" id="chat-remaining"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Website backend URL hosted on Railway.
+    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    window.SORORITY_HOUSE_API_URL = API_BASE_URL;
+
+    // Account auth: the backend issues a bearer token on login; chat/audit/image
+    // are keyed to that token (no more anonymous user_id trials).
+    const TOKEN_KEY = 'sorority_house_token';
+    function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+    function isLoggedIn() { return !!getToken(); }
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      const t = getToken();
+      if (t) h['Authorization'] = 'Bearer ' + t;
+      return h;
+    }
+
+    const authBox = document.getElementById('auth');
+    const loginForm = document.getElementById('login-form');
+    const signupForm = document.getElementById('signup-form');
+    const verifyPane = document.getElementById('verify-pane');
+    const authMsg = document.getElementById('auth-msg');
+    const authHeading = document.getElementById('auth-heading');
+    const authSub = document.getElementById('auth-sub');
+    let pendingVerifyEmail = '';
+
+    function setAuthMsg(text, kind) {
+      authMsg.textContent = text || '';
+      authMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+    function showAuthPane(which) {
+      loginForm.classList.toggle('auth-hidden', which !== 'login');
+      signupForm.classList.toggle('auth-hidden', which !== 'signup');
+      verifyPane.classList.toggle('auth-hidden', which !== 'verify');
+      authSub.classList.toggle('auth-hidden', which === 'verify');
+      authHeading.textContent = which === 'signup' ? 'Create your account'
+        : which === 'verify' ? 'Check your email' : 'Sign in';
+      setAuthMsg('');
+    }
+    function openAuth(which, msg) {
+      showAuthPane(which || 'login');
+      if (msg) setAuthMsg(msg);
+      authBox.classList.add('is-open');
+      const first = authBox.querySelector('form:not(.auth-hidden) input');
+      if (first) first.focus();
+    }
+    function closeAuth() { authBox.classList.remove('is-open'); }
+    function showVerifyPane(email, msg) {
+      pendingVerifyEmail = email;
+      document.getElementById('verify-email').textContent = email;
+      showAuthPane('verify');
+      if (msg) setAuthMsg(msg, 'ok');
+    }
+
+    function updateAuthLinks() {
+      const label = isLoggedIn() ? 'Sign out' : 'Sign in';
+      document.getElementById('nav-auth').textContent = label;
+      document.getElementById('footer-auth').textContent = label;
+    }
+    function signOut() {
+      const t = getToken();
+      localStorage.removeItem(TOKEN_KEY);
+      updateAuthLinks();
+      if (t) fetch(API_BASE_URL + '/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } }).catch(() => {});
+    }
+    function onAuthLink(event) {
+      event.preventDefault();
+      if (isLoggedIn()) signOut(); else openAuth('login');
+    }
+    document.getElementById('nav-auth').addEventListener('click', onAuthLink);
+    document.getElementById('footer-auth').addEventListener('click', onAuthLink);
+    document.getElementById('auth-close').addEventListener('click', closeAuth);
+    authBox.addEventListener('click', (event) => { if (event.target === authBox) closeAuth(); });
+    document.getElementById('to-signup').addEventListener('click', () => showAuthPane('signup'));
+    document.getElementById('to-login').addEventListener('click', () => showAuthPane('login'));
+    document.getElementById('verify-to-login').addEventListener('click', () => showAuthPane('login'));
+    updateAuthLinks();
+
+    async function postJson(path, body, withAuth) {
+      const response = await fetch(API_BASE_URL + path, {
+        method: 'POST',
+        headers: withAuth ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => null);
+      return { response, data };
+    }
+    function errText(data, fallback) {
+      if (!data) return fallback;
+      const d = data.detail || data.error;
+      if (Array.isArray(d)) return d.map(x => x.msg || String(x)).join('; ');
+      return d || fallback;
+    }
+
+    signupForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const btn = signupForm.querySelector('button[type=submit]');
+      btn.disabled = true; setAuthMsg('Creating your account…');
+      const email = document.getElementById('signup-email').value.trim();
+      try {
+        const { response, data } = await postJson('/auth/signup', {
+          email,
+          password: document.getElementById('signup-password').value,
+          display_name: document.getElementById('signup-name').value.trim(),
+        });
+        if (response.ok && data && data.needs_verification) {
+          showVerifyPane(data.email || email, data.email_sent === false
+            ? 'Account created, but the email could not be sent. Hit Resend.'
+            : 'Confirmation email sent.');
+        } else if (response.ok && data && data.token) {   // older backend: instant login
+          localStorage.setItem(TOKEN_KEY, data.token);
+          updateAuthLinks(); closeAuth();
+        } else if (response.status === 409) {
+          setAuthMsg('That email already has an account. Sign in instead.', 'error');
+        } else {
+          setAuthMsg(errText(data, 'Could not create the account. Try again.'), 'error');
+        }
+      } catch (e) {
+        setAuthMsg('Could not reach the house. Check your connection.', 'error');
+      } finally { btn.disabled = false; }
+    });
+
+    loginForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const btn = loginForm.querySelector('button[type=submit]');
+      btn.disabled = true; setAuthMsg('Signing in…');
+      const email = document.getElementById('login-email').value.trim();
+      try {
+        const { response, data } = await postJson('/auth/login', {
+          email, password: document.getElementById('login-password').value,
+        });
+        if (response.ok && data && data.token) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+          updateAuthLinks(); closeAuth();
+          if (currentGirl) addMessage('note', 'Signed in. Her door is open — go ahead.');
+        } else if (response.status === 403 && String(errText(data, '')).startsWith('email_unverified')) {
+          showVerifyPane(email, 'Confirm your email first — check your inbox (and spam).');
+        } else if (response.status === 401) {
+          setAuthMsg('Wrong email or password.', 'error');
+        } else if (response.status === 429) {
+          setAuthMsg('Too many attempts. Wait a minute and try again.', 'error');
+        } else {
+          setAuthMsg(errText(data, 'Sign in failed. Try again.'), 'error');
+        }
+      } catch (e) {
+        setAuthMsg('Could not reach the house. Check your connection.', 'error');
+      } finally { btn.disabled = false; }
+    });
+
+    document.getElementById('resend-btn').addEventListener('click', async (event) => {
+      const btn = event.currentTarget;
+      if (!pendingVerifyEmail) return;
+      btn.disabled = true; setAuthMsg('Sending…');
+      try {
+        const { response, data } = await postJson('/auth/resend-verification', { email: pendingVerifyEmail });
+        if (response.ok) setAuthMsg('Sent. Check your inbox (and spam).', 'ok');
+        else if (response.status === 429) setAuthMsg('Please wait a minute before resending.', 'error');
+        else setAuthMsg(errText(data, 'Could not resend. Try again shortly.'), 'error');
+      } catch (e) {
+        setAuthMsg('Could not reach the house. Check your connection.', 'error');
+      } finally { setTimeout(() => { btn.disabled = false; }, 3000); }
+    });
+
+    // Back from the confirmation link (?verified=1) — land them on sign in.
+    if (new URLSearchParams(location.search).get('verified') === '1') {
+      history.replaceState(null, '', location.pathname);
+      openAuth('login', 'Email confirmed — sign in to start your trial.');
+    }
+
+    // Called when the API says the token is missing/expired.
+    function handleUnauthorized() {
+      if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); }
+      openAuth('login', 'Sign in to keep talking.');
+    }
+
+    const chat = document.getElementById('chat');
+    const chatLog = document.getElementById('chat-log');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const chatSend = document.getElementById('chat-send');
+    const chatRemaining = document.getElementById('chat-remaining');
+    const chatPhotoBtn = document.getElementById('chat-photo-btn');
+    let currentGirl = null;
+    let sending = false;
+
+    function addMessage(kind, text) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + kind;
+      el.textContent = text;
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return el;
+    }
+
+    function addPhoto(mime, base64, caption) {
+      const figure = document.createElement('figure');
+      figure.className = 'chat-photo';
+      figure.style.margin = '0';
+      const img = document.createElement('img');
+      img.src = 'data:' + mime + ';base64,' + base64;
+      img.alt = caption;
+      const cap = document.createElement('figcaption');
+      cap.textContent = caption;
+      figure.append(img, cap);
+      chatLog.appendChild(figure);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function openChat(card) {
+      if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
+      currentGirl = card.dataset.girl;
+      document.getElementById('chat-name').textContent = card.dataset.name;
+      document.getElementById('chat-title').textContent = card.dataset.title;
+      const avatar = document.getElementById('chat-avatar');
+      avatar.src = card.dataset.avatar;
+      avatar.alt = card.dataset.name;
+      chatLog.innerHTML = '';
+      chatRemaining.textContent = '';
+      addMessage('note', 'Her door is open. Say hi.');
+      chat.classList.add('is-open');
+      chatInput.value = '';
+      chatInput.focus();
+    }
+
+    function closeChat() {
+      chat.classList.remove('is-open');
+      currentGirl = null;
+    }
+
+    document.querySelectorAll('.door-card.open').forEach((card) => {
+      card.addEventListener('click', () => openChat(card));
+    });
+    document.getElementById('chat-close').addEventListener('click', closeChat);
+    chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
+
+    chatPhotoBtn.addEventListener('click', async () => {
+      if (!currentGirl || chatPhotoBtn.disabled) return;
+      chatPhotoBtn.disabled = true;
+      const pending = addMessage('typing', 'she’s finding a photo…');
+      try {
+        const response = await fetch(API_BASE_URL + '/image', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ girl: currentGirl }),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        if (response.status === 401) {
+          handleUnauthorized();
+        } else if (data && data.locked) {
+          addMessage('note', data.error);
+        } else if (!response.ok || !data || data.ok === false || !data.image_b64) {
+          addMessage('error', (data && (data.error || data.detail)) || 'No photo right now. Try again in a moment.');
+        } else {
+          addPhoto(data.mime, data.image_b64, data.disclosure || 'AI-generated image');
+        }
+      } catch (error) {
+        pending.remove();
+        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+      } finally {
+        chatPhotoBtn.disabled = false;
+      }
+    });
+
+    chatForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const message = chatInput.value.trim();
+      if (!message || sending || !currentGirl) return;
+
+      sending = true;
+      chatSend.disabled = true;
+      chatInput.value = '';
+      addMessage('me', message);
+      const typing = addMessage('typing', 'typing…');
+
+      try {
+        const response = await fetch(API_BASE_URL + '/chat', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ girl: currentGirl, message: message }),
+        });
+        const data = await response.json().catch(() => null);
+        typing.remove();
+
+        if (response.status === 401) {
+          addMessage('note', 'Your session ended. Sign in to keep talking.');
+          handleUnauthorized();
+        } else if (!response.ok || !data || data.ok === false) {
+          addMessage('error', (data && (data.error || data.detail)) || 'She did not answer. Try again in a moment.');
+        } else {
+          addMessage('her', data.reply);
+          if (data.milestone) addMessage('note', data.milestone);
+          if (typeof data.remaining === 'number') {
+            chatRemaining.textContent = data.remaining + ' messages left';
+          }
+        }
+      } catch (error) {
+        typing.remove();
+        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+      } finally {
+        sending = false;
+        chatSend.disabled = false;
+        chatInput.focus();
+      }
+    });
+
+    // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
+    // Leaderboard: only a shortened display name and progress are ever rendered —
+    // user IDs and audit counts are dropped client-side and never shown.
+    function lbName(raw) {
+      const name = String(raw || '').trim();
+      if (!name || name.toLowerCase() === 'guest' || name.toLowerCase() === 'player') return 'Anonymous';
+      const parts = name.split(/\s+/);
+      return parts.length > 1 ? parts[0] + ' ' + parts[1][0].toUpperCase() + '.' : parts[0];
+    }
+    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function renderLeaderboard(rows) {
+      const box = document.getElementById('leaderboard');
+      const ranked = rows.filter(r => r.milestone);
+      if (!ranked.length) {
+        box.innerHTML = '<p class="lb-note">No one has made it through a door yet. Be the first.</p>';
+        return;
+      }
+      const top = ranked.slice(0, 10);
+      box.innerHTML = '<table class="lb-table"><thead><tr><th>#</th><th>Player</th><th style="text-align:right">Milestone</th><th style="text-align:right">Doors</th></tr></thead><tbody>' +
+        top.map((r, i) => '<tr><td class="lb-rank">' + (i + 1) + '</td><td>' + esc(lbName(r.display_name)) + (r.audit_count >= 5 ? ' *' : '') + '</td><td class="lb-num">' + esc(r.milestone) + '</td><td class="lb-num">' + esc(r.girls_reached || 0) + '</td></tr>').join('') +
+        '</tbody></table><p class="lb-note">Ranked by furthest milestone reached. Only first names are shown.</p>';
+      const allSix = rows.filter(r => (r.girls_reached || 0) >= 28).length;
+      document.getElementById('all-six-count').textContent = allSix;
+    }
+    fetch(API_BASE_URL + '/leaderboard')
+      .then(r => r.json())
+      .then(d => renderLeaderboard(d.leaderboard || []))
+      .catch(() => {
+        document.getElementById('leaderboard').innerHTML = '<p class="lb-note">Rankings are taking a nap. Check back soon.</p>';
+      });
+
+    const SHOPIFY_STOREFRONT_URL = 'https://sororityhouse-zlw64-vet1iva0.myshopify.com/api/2025-07/graphql.json';
+    const SHOPIFY_STOREFRONT_TOKEN = '17478e428d0dbb29bf9a6d161c6c6b65';
+
+    async function shopify(query, variables) {
+      const res = await fetch(SHOPIFY_STOREFRONT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': SHOPIFY_STOREFRONT_TOKEN },
+        body: JSON.stringify({ query, variables }),
+      });
+      const json = await res.json();
+      if (json.errors) throw new Error(json.errors[0].message);
+      return json.data;
+    }
+
+    function money(v) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: v.currencyCode }).format(Number(v.amount));
+    }
+
+    async function buyVariant(variantId, button) {
+      button.disabled = true;
+      button.textContent = 'Opening checkout…';
+      try {
+        const data = await shopify(
+          'mutation($lines:[CartLineInput!]!){ cartCreate(input:{lines:$lines}){ cart{ checkoutUrl } userErrors{ message } } }',
+          { lines: [{ merchandiseId: variantId, quantity: 1 }] }
+        );
+        const err = data.cartCreate.userErrors[0];
+        if (err) throw new Error(err.message);
+        window.location.href = data.cartCreate.cart.checkoutUrl;
+      } catch (e) {
+        button.disabled = false;
+        button.textContent = 'Buy now';
+        alert('Checkout could not open: ' + e.message);
+      }
+    }
+
+    function renderMerch(products) {
+      const grid = document.getElementById('merch-grid');
+      grid.innerHTML = '';
+      if (!products.length) {
+        grid.innerHTML = '<p class="merch-note">The drop is sold out. Check back soon.</p>';
+        return;
+      }
+      products.forEach(({ node }) => {
+        const variants = node.variants.edges.map((e) => e.node);
+        const image = node.images.edges[0]?.node;
+        const card = document.createElement('article');
+        card.className = 'merch-card';
+        card.innerHTML =
+          (image ? `<img src="${image.url}" alt="${image.altText || node.title}" loading="lazy" />` : '') +
+          '<div class="merch-body">' +
+            `<h3>${node.title}</h3>` +
+            `<div class="price">${money(variants[0].price)}</div>` +
+            `<p>${node.description}</p>` +
+            '<div class="merch-row"><select aria-label="Size"></select><button class="button" type="button">Buy now</button></div>' +
+          '</div>';
+        const select = card.querySelector('select');
+        const price = card.querySelector('.price');
+        const button = card.querySelector('button');
+        variants.forEach((v) => {
+          const opt = document.createElement('option');
+          opt.value = v.id;
+          opt.textContent = v.availableForSale ? v.title : `${v.title} — sold out`;
+          opt.disabled = !v.availableForSale;
+          select.appendChild(opt);
+        });
+        const firstOpen = variants.find((v) => v.availableForSale);
+        if (firstOpen) select.value = firstOpen.id; else button.disabled = true;
+        select.addEventListener('change', () => {
+          const v = variants.find((x) => x.id === select.value);
+          if (v) price.textContent = money(v.price);
+        });
+        button.addEventListener('click', () => buyVariant(select.value, button));
+        grid.appendChild(card);
+      });
+    }
+
+    shopify(
+      '{ products(first: 12, query: "product_type:Hoodie") { edges { node { title description images(first: 1) { edges { node { url altText } } } variants(first: 20) { edges { node { id title availableForSale price { amount currencyCode } } } } } } } }'
+    )
+      .then((data) => renderMerch(data.products.edges))
+      .catch(() => {
+        document.getElementById('merch-grid').innerHTML =
+          '<p class="merch-note">The shop couldn\'t load right now. Try again in a moment.</p>';
+      });
+
+    document.querySelectorAll('a[href="/auth"]').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        document.getElementById('doors').scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+  </script>
+</body>
+</html>
