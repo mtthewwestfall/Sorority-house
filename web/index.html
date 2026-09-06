@@ -378,7 +378,7 @@
       <div class="wrap">
         <div class="section-head"><p class="eyebrow">The rules</p><h2>How the experiment works</h2></div>
         <div class="steps">
-          <article class="step"><div class="number">01</div><h3>Pick a roommate</h3><p>Four personalities, four very different sets of walls. Start with one of the open doors.</p></article>
+          <article class="step"><div class="number">01</div><h3>Pick a roommate</h3><p>28 personalities, 28 very different sets of walls. Start with one of the open doors.</p></article>
           <article class="step"><div class="number">02</div><h3>Start talking</h3><p>Your first 25 messages are free. No card, no catch. See who remembers what you tell them.</p></article>
           <article class="step"><div class="number">03</div><h3>Get past the guard</h3><p>Earn trust and the conversation changes. Push too hard and it closes.</p></article>
         </div>
@@ -796,7 +796,6 @@
           addMessage('error', (data && (data.error || data.detail)) || 'She did not answer. Try again in a moment.');
         } else {
           addMessage('her', data.reply);
-          if (data.milestone) addMessage('note', data.milestone);
           if (typeof data.remaining === 'number') {
             chatRemaining.textContent = data.remaining + ' messages left';
           }
