@@ -348,7 +348,7 @@ def init_db():
                     audit_credits    INTEGER NOT NULL DEFAULT 0,
                     free_audits_used INTEGER NOT NULL DEFAULT 0,
                     total_audits_used INTEGER NOT NULL DEFAULT 0,
-                    plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+                    plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now() + interval '1 month'
                 );
                 -- If you already had the old users table, uncomment to add the
                 -- new audit columns without dropping anything:
@@ -413,8 +413,8 @@ def _ensure_user(user_id, display_name="Player"):
             row = cur.fetchone()
             if row is None:
                 cur.execute("""
-                    INSERT INTO users (user_id, display_name, tier)
-                    VALUES (%s,%s,'freshman')
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                    VALUES (%s,%s,'freshman', now() + interval '1 month')
                 """, (user_id, display_name))
                 conn.commit()
                 return {"user_id": user_id, "tier": "freshman", "msg_used": 0,
@@ -425,6 +425,8 @@ def _ensure_user(user_id, display_name="Player"):
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0,
                         plan_reset_at = plan_reset_at + interval '1 month'
+                            * (floor(extract(epoch from (now() - plan_reset_at))
+                                     / extract(epoch from interval '1 month')) + 1)
                     WHERE user_id=%s
                 """, (user_id,))
                 conn.commit()
