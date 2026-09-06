@@ -79,6 +79,7 @@ requirements.txt for Railway:
 """
 
 import os
+import re
 import json
 import hashlib
 import hmac
@@ -650,6 +651,32 @@ def kept_needed(girl, target):
     return min(ladder[idx], len(cfg["key_points"]))
 
 
+_STOP = {"the", "a", "an", "is", "are", "her", "she", "his", "he", "and", "or", "not",
+         "of", "to", "in", "it", "that", "with", "you", "your", "never", "always"}
+
+
+def _words(s):
+    return {w for w in re.findall(r"[a-z0-9']+", s.casefold()) if w not in _STOP}
+
+
+def _canonical(item, canon):
+    """Map a grader-returned phrase onto the girl's canonical list (pinned facts or
+    key points) so paraphrases collapse to one entry. Unmatched phrases are dropped,
+    so len(pinned_kept) counts DISTINCT key points remembered."""
+    iw = _words(item)
+    if not iw:
+        return None
+    best, score = None, 0.0
+    for c in canon:
+        if item.casefold() == c.casefold():
+            return c
+        cw = _words(c)
+        s = len(iw & cw) / max(1, min(len(iw), len(cw)))
+        if s > score:
+            best, score = c, s
+    return best if score >= 0.5 else None
+
+
 def gate_milestone(girl, rel, proposed, conduct="steady"):
     """Going deeper is earned on THREE axes at once, never by one alone:
       TIME    - enough real days lived at the CURRENT stage (per-girl stage_days);
@@ -727,7 +754,8 @@ def _summarize(user_id, girl, rel, recent_msgs):
         "In the NEW messages: if she revealed a pinned fact for the first time, add its "
         "short phrase to new_told. If the USER demonstrated remembering a key point "
         "(recalled it unprompted, referenced it, connected it to her), add that phrase to "
-        "new_kept. Never add items already listed above. Empty arrays when nothing new."
+        "new_kept. Copy the canonical phrase from the lists above verbatim - never "
+        "paraphrase. Never add items already listed above. Empty arrays when nothing new."
     )
     context = [
         {"role": "system", "content": (
@@ -777,17 +805,18 @@ def _summarize(user_id, girl, rel, recent_msgs):
     except Exception:
         pass
 
-    def _merge(existing, items, cap=12):
-        seen = {s.casefold() for s in existing}
+    def _merge(existing, items, canon, cap=12):
         out = list(existing)
+        seen = {s.casefold() for s in out}
         for it in items:
-            if it.casefold() not in seen and len(out) < cap:
+            it = _canonical(it, canon)
+            if it is not None and it.casefold() not in seen and len(out) < cap:
                 out.append(it)
                 seen.add(it.casefold())
         return out
 
-    told = _merge(told, new_told)
-    kept = _merge(kept, new_kept)
+    told = _merge(told, new_told, cfg["pinned"])
+    kept = _merge(kept, new_kept, cfg["key_points"])
 
     # The AI proposes; time + memory + conduct decide what is believable today.
     milestone = gate_milestone(girl, {**rel, "pinned_kept": kept}, milestone, conduct)
