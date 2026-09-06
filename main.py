@@ -158,8 +158,8 @@ FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allow
 TIERS = {
     "freshman":   {"label": "Freshman",  "limit": 25},
     "sophomore":  {"label": "Sophomore", "limit": 1500},
-    "junior":     {"label": "Junior",    "limit": 3000},
-    "senior":     {"label": "Senior",    "limit": 5000},
+    "junior":     {"label": "Junior",    "limit": 2500},
+    "senior":     {"label": "Senior",    "limit": 4000},
 }
 
 # Which girls each tier can open. Girls not listed are locked for that tier.
