@@ -90,6 +90,7 @@ import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -439,6 +440,22 @@ def init_db():
                     user_id    TEXT NOT NULL REFERENCES users(user_id),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                -- free time granted from the admin page: tier is comped until comp_until,
+                -- then falls back to comp_prev_tier.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_until TIMESTAMPTZ;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_tier TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
+                CREATE TABLE IF NOT EXISTS complaints (
+                    id          BIGSERIAL PRIMARY KEY,
+                    user_id     TEXT NOT NULL REFERENCES users(user_id),
+                    subject     TEXT NOT NULL,
+                    body        TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+                    admin_note  TEXT NOT NULL DEFAULT '',
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    resolved_at TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
             """)
         conn.commit()
     finally:
@@ -453,6 +470,11 @@ def _check_admin(secret: str, strict: bool = False):
         raise HTTPException(status_code=503, detail="ADMIN_SECRET must be set for this endpoint")
     if ADMIN_SECRET and not hmac.compare_digest(secret.encode(), ADMIN_SECRET.encode()):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
+
+
+def admin_required(x_admin_secret: str = Header(default="")):
+    """FastAPI dependency for the admin console: strict check on X-Admin-Secret."""
+    _check_admin(x_admin_secret, strict=True)
 
 
 # ---------------------------------------------------------------------------
@@ -523,9 +545,26 @@ def _ensure_user(user_id, display_name="Player"):
                 return {"user_id": user_id, "tier": "freshman", "msg_used": 0,
                         "audit_credits": 0, "free_audits_used": 0,
                         "total_audits_used": 0, "display_name": display_name}
+            now = datetime.now(timezone.utc)
+            # comped free time ran out: fall back to whatever tier they had before
+            if row.get("comp_until") is not None and row["comp_until"] < now:
+                prev = row.get("comp_prev_tier") or "freshman"
+                if prev not in TIERS:
+                    prev = "freshman"
+                used = TIERS["freshman"]["limit"] if prev == "freshman" else 0
+                cur.execute("""
+                    UPDATE users SET tier=%s, msg_used=%s, free_audits_used=0,
+                        plan_reset_at = now() + interval '1 month',
+                        comp_until=NULL, comp_prev_tier=NULL
+                    WHERE user_id=%s
+                """, (prev, used, user_id))
+                conn.commit()
+                row["tier"], row["msg_used"], row["free_audits_used"] = prev, used, 0
+                row["comp_until"], row["comp_prev_tier"] = None, None
+                return row
             # lazy monthly reset: message allowance AND free audits refill together.
             # Freshman is a one-time 25-message trial, so it never refills.
-            if row["tier"] != "freshman" and row["plan_reset_at"] < datetime.now(timezone.utc):
+            if row["tier"] != "freshman" and row["plan_reset_at"] < now:
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0,
                         plan_reset_at = now() + interval '1 month'
@@ -921,6 +960,110 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
 
 
 # ---------------------------------------------------------------------------
+# ADMIN CONSOLE PAGE — single file, no build step. Served at GET /admin.
+# The secret you type is kept in sessionStorage and sent as X-Admin-Secret.
+# ---------------------------------------------------------------------------
+ADMIN_HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Sorority House · Admin</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0f0f13;--card:#17171e;--line:#2a2a36;--fg:#ececf1;--mut:#9a9ab0;--acc:#e0559c;--ok:#4fc38a;--warn:#f0b34a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;gap:16px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:16px;margin:0 auto 0 0}
+nav button{background:none;border:1px solid var(--line);color:var(--fg);padding:6px 12px;border-radius:6px;cursor:pointer}
+nav button.on{border-color:var(--acc);color:var(--acc)}
+main{padding:20px;max-width:1200px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+input,select,textarea{background:#0c0c10;border:1px solid var(--line);color:var(--fg);padding:7px 9px;border-radius:6px;font:inherit}
+textarea{width:100%;min-height:70px}
+button.p{background:var(--acc);border:0;color:#fff;padding:7px 12px;border-radius:6px;cursor:pointer;font:inherit}
+button.s{background:none;border:1px solid var(--line);color:var(--fg);padding:6px 10px;border-radius:6px;cursor:pointer;font:inherit}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:500;font-size:12px;text-transform:uppercase}
+tr.row{cursor:pointer}tr.row:hover{background:#1e1e28}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line)}
+.pill.senior{border-color:var(--acc);color:var(--acc)}.pill.open{border-color:var(--warn);color:var(--warn)}.pill.resolved{border-color:var(--ok);color:var(--ok)}
+.mut{color:var(--mut)}.row2{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+#toast{position:fixed;bottom:20px;right:20px;background:#222;border:1px solid var(--line);padding:10px 14px;border-radius:8px;display:none}
+.hid{display:none}.stat{font-size:22px;font-weight:600}.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px}.kv div:nth-child(odd){color:var(--mut)}
+pre{white-space:pre-wrap;margin:0}
+</style></head><body>
+<header><h1>Sorority House · Admin</h1>
+<nav><button id="tabAcc" class="on" onclick="show('acc')">Accounts</button>
+<button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button></nav>
+<button class="s" onclick="logout()">Lock</button></header>
+<main>
+<div id="login" class="card"><h3>Admin secret</h3>
+<div class="row2"><input id="secret" type="password" placeholder="ADMIN_SECRET" style="min-width:280px">
+<button class="p" onclick="login()">Unlock</button></div><div class="mut">Set ADMIN_SECRET on the server; it is required for every action here.</div></div>
+
+<section id="acc" class="hid">
+<div class="card"><div class="row2"><input id="q" placeholder="Search email, name or user id" style="min-width:300px" onkeydown="if(event.key==='Enter')loadAccounts()">
+<button class="p" onclick="loadAccounts()">Search</button><span id="accN" class="mut"></span></div>
+<table><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Left</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th></tr></thead>
+<tbody id="accRows"></tbody></table></div>
+<div id="detail" class="card hid"></div>
+</section>
+
+<section id="cmp" class="hid">
+<div class="card"><div class="row2">
+<select id="cstatus" onchange="loadComplaints()"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select>
+<button class="s" onclick="loadComplaints()">Refresh</button></div>
+<div id="cmpList"></div></div>
+</section>
+</main>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);let SECRET=sessionStorage.getItem('adm')||'';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLocaleDateString():'—';
+function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
+async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
+ const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
+function show(t){$('#acc').classList.toggle('hid',t!=='acc');$('#cmp').classList.toggle('hid',t!=='cmp');$('#tabAcc').classList.toggle('on',t==='acc');$('#tabCmp').classList.toggle('on',t==='cmp');if(t==='cmp')loadComplaints()}
+async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('acc');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
+function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');$('#acc').classList.add('hid');$('#cmp').classList.add('hid')}
+async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
+async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
+ $('#accRows').innerHTML=rows.map(a=>`<tr class="row" onclick="openAccount('${esc(a.email)}')"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
+ <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
+ <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td></tr>`).join('')||'<tr><td colspan=8 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
+async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));const el=$('#detail');el.classList.remove('hid');
+ el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(a.email)}</h3><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span><span class="mut">${esc(a.user_id)}</span><button class="s" style="margin-left:auto" onclick="$('#detail').classList.add('hid')">Close</button></div>
+ <div class="grid"><div>
+  <div class="kv"><div>Name</div><div>${esc(a.display_name)}</div><div>Messages left</div><div>${a.remaining} <span class="mut">(used ${a.msg_used})</span></div>
+  <div>Resets</div><div>${dt(a.plan_reset_at)}</div><div>Audit credits</div><div>${a.audit_credits} <span class="mut">(${a.total_audits_used} used total)</span></div>
+  <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp('${esc(a.email)}')">End now</button>`:'none'}</div>
+  <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div></div>
+  <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">none yet</td></tr>'}</tbody></table>
+ </div><div>
+  <h4>Give free time</h4><div class="row2"><select id="gtTier"><option value="senior">Senior</option><option value="junior">Junior</option><option value="sophomore">Sophomore</option></select>
+  <input id="gtDays" type="number" min=1 value=30 style="width:90px"> days <button class="p" onclick="grantTime('${esc(a.email)}')">Grant</button></div>
+  <div class="mut">Fresh allowance now; falls back to their current tier when it ends. Granting again extends.</div>
+  <h4>Set tier (paid subscription)</h4><div class="row2"><select id="stTier"><option>freshman</option><option>sophomore</option><option>junior</option><option>senior</option></select><button class="s" onclick="setTier('${esc(a.email)}')">Apply</button></div>
+  <h4>Audit credits</h4><div class="row2"><input id="gaN" type="number" min=1 value=1 style="width:90px"><button class="s" onclick="grantAudits('${esc(a.email)}')">Add</button></div>
+  <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote('${esc(a.email)}')">Save note</button></div>
+ </div></div>
+ <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}`;el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
+function renderComplaints(list){if(!list.length)return '<div class="mut">None</div>';return list.map(c=>`<div class="card" id="c${c.id}"><div class="row2"><b>${esc(c.subject)}</b><span class="pill ${esc(c.status)}">${esc(c.status)}</span>
+ <span class="mut">${esc(c.email||'')} ${c.display_name?'· '+esc(c.display_name):''} ${c.tier?'· '+esc(c.tier):''} · ${dt(c.created_at)}</span></div><pre>${esc(c.body)}</pre>
+ <div class="row2" style="margin-top:10px"><input id="cn${c.id}" placeholder="Note / resolution" value="${esc(c.admin_note)}" style="flex:1;min-width:200px">
+ ${c.status==='open'?`<button class="p" onclick="setComplaint(${c.id},'resolved')">Resolve</button>`:`<button class="s" onclick="setComplaint(${c.id},'open')">Reopen</button>`}
+ <button class="s" onclick="setComplaint(${c.id},'${esc(c.status)}')">Save note</button></div></div>`).join('')}
+async function loadComplaints(){try{const list=await api('/admin/complaints?status='+$('#cstatus').value);$('#cmpList').innerHTML=renderComplaints(list);countOpen()}catch(e){toast(e.message,true)}}
+async function setComplaint(id,status){try{await api('/admin/complaints/'+id,{method:'POST',body:JSON.stringify({status,admin_note:$('#cn'+id).value})});toast('Saved');if(!$('#cmp').classList.contains('hid'))loadComplaints();else{const em=$('#detail h3');if(em)openAccount(em.textContent)}countOpen()}catch(e){toast(e.message,true)}}
+async function grantTime(email){try{const r=await api('/admin/grant-time',{method:'POST',body:JSON.stringify({email,tier:$('#gtTier').value,days:+$('#gtDays').value})});toast(`Comped ${r.tier} until ${d(r.comp_until)}`);openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function endComp(email){if(!confirm('End free time now?'))return;try{await api('/admin/end-comp',{method:'POST',body:JSON.stringify({email})});toast('Comp ended');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function setTier(email){try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
+async function grantAudits(email){try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
+async function saveNote(email){try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
+if(SECRET){$('#login').classList.add('hid');show('acc');loadAccounts();countOpen()}
+</script></body></html>"""
+
+
+# ---------------------------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------------------------
 class SignupIn(BaseModel):
@@ -968,6 +1111,41 @@ class GrantAuditsIn(BaseModel):
     email: str
     amount: int          # number of $0.99 audits to credit (call from Stripe webhook)
     secret: str = ""
+
+
+class ComplaintIn(BaseModel):
+    subject: str
+    body: str
+
+
+class GrantTimeIn(BaseModel):
+    email: str
+    tier: str            # tier to comp
+    days: int            # how many free days
+
+
+class AdminGrantAuditsIn(BaseModel):
+    email: str
+    amount: int
+
+
+class AdminSetTierIn(BaseModel):
+    email: str
+    tier: str
+
+
+class AdminEmailIn(BaseModel):
+    email: str
+
+
+class AdminNoteIn(BaseModel):
+    email: str
+    note: str
+
+
+class ComplaintUpdateIn(BaseModel):
+    status: str          # open | resolved
+    admin_note: str = ""
 
 
 @app.on_event("startup")
@@ -1300,13 +1478,18 @@ def set_tier(body: SetTierIn):
     conn = db()
     try:
         with conn.cursor() as cur:
+            # a real subscription change supersedes any comped free time
             if tier == "freshman":
-                cur.execute("UPDATE users SET tier='freshman', msg_used=%s WHERE user_id=%s",
-                            (TIERS["freshman"]["limit"], user["user_id"]))
-            elif tier != user["tier"]:
+                cur.execute("""
+                    UPDATE users SET tier='freshman', msg_used=%s,
+                        comp_until=NULL, comp_prev_tier=NULL
+                    WHERE user_id=%s
+                """, (TIERS["freshman"]["limit"], user["user_id"]))
+            elif tier != user["tier"] or user.get("comp_until") is not None:
                 cur.execute("""
                     UPDATE users SET tier=%s, msg_used=0, free_audits_used=0,
-                        plan_reset_at = now() + interval '1 month'
+                        plan_reset_at = now() + interval '1 month',
+                        comp_until=NULL, comp_prev_tier=NULL
                     WHERE user_id=%s
                 """, (tier, user["user_id"]))
             conn.commit()
@@ -1333,6 +1516,231 @@ def grant_audits(body: GrantAuditsIn):
         conn.close()
     return {"ok": True, "user_id": user["user_id"],
             "audit_credits": int(user["audit_credits"]) + body.amount}
+
+
+# ---------------------------------------------------------------------------
+# COMPLAINTS (player side)
+# ---------------------------------------------------------------------------
+@app.post("/complaints")
+def file_complaint(body: ComplaintIn, user=Depends(current_user)):
+    subject, text = body.subject.strip(), body.body.strip()
+    if not subject or not text:
+        raise HTTPException(status_code=400, detail="subject and body are required")
+    if len(subject) > 200 or len(text) > 5000:
+        raise HTTPException(status_code=400, detail="Complaint too long")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO complaints (user_id, subject, body) VALUES (%s,%s,%s)
+                RETURNING id, status, created_at
+            """, (user["user_id"], subject, text))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "id": row["id"], "status": row["status"]}
+
+
+@app.get("/complaints")
+def my_complaints(user=Depends(current_user)):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, subject, body, status, admin_note, created_at, resolved_at
+                FROM complaints WHERE user_id=%s ORDER BY created_at DESC
+            """, (user["user_id"],))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# ADMIN CONSOLE  (GET /admin serves the page; JSON endpoints take X-Admin-Secret)
+# ---------------------------------------------------------------------------
+_ACCOUNT_COLS = """
+    a.email, a.created_at, u.user_id, u.display_name, u.tier, u.msg_used,
+    u.audit_credits, u.total_audits_used, u.plan_reset_at, u.comp_until,
+    u.comp_prev_tier, u.admin_note,
+    (SELECT count(*) FROM complaints c WHERE c.user_id=u.user_id AND c.status='open') AS open_complaints
+"""
+
+
+def _account_view(row):
+    row = dict(row)
+    row["remaining"] = max(0, TIERS.get(row["tier"], TIERS["freshman"])["limit"] - int(row["msg_used"]))
+    return row
+
+
+@app.get("/admin/accounts", dependencies=[Depends(admin_required)])
+def admin_accounts(q: str = "", limit: int = 100):
+    """Search accounts by email / display name / user_id (blank = newest first)."""
+    limit = max(1, min(500, limit))
+    q = q.strip().lower()
+    like = f"%{q}%"
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT {_ACCOUNT_COLS}
+                FROM accounts a JOIN users u ON u.user_id=a.user_id
+                WHERE %s = '' OR a.email LIKE %s OR lower(u.display_name) LIKE %s
+                      OR lower(u.user_id) LIKE %s
+                ORDER BY a.created_at DESC LIMIT %s
+            """, (q, like, like, like, limit))
+            return [_account_view(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+@app.get("/admin/accounts/{email}", dependencies=[Depends(admin_required)])
+def admin_account(email: str):
+    user = _user_for_email(email)   # also applies comp expiry / monthly reset
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT {_ACCOUNT_COLS}
+                FROM accounts a JOIN users u ON u.user_id=a.user_id WHERE u.user_id=%s
+            """, (user["user_id"],))
+            acct = _account_view(cur.fetchone())
+            cur.execute("""
+                SELECT id, subject, body, status, admin_note, created_at, resolved_at
+                FROM complaints WHERE user_id=%s ORDER BY created_at DESC
+            """, (user["user_id"],))
+            acct["complaints"] = cur.fetchall()
+            cur.execute("""
+                SELECT girl, milestone, active_days, stage_since, last_session
+                FROM relationships WHERE user_id=%s ORDER BY milestone DESC
+            """, (user["user_id"],))
+            acct["relationships"] = cur.fetchall()
+            cur.execute("SELECT count(*) AS n FROM chat_logs WHERE user_id=%s AND sender='user'",
+                        (user["user_id"],))
+            acct["messages_total"] = cur.fetchone()["n"]
+    finally:
+        conn.close()
+    return acct
+
+
+@app.post("/admin/grant-time", dependencies=[Depends(admin_required)])
+def admin_grant_time(body: GrantTimeIn):
+    """Comp an account: run it as `tier` for `days` with a fresh allowance, then
+    fall back to the tier it had before (a comped freshman stays used-up after).
+    Granting again while a comp is active extends it and keeps the original prev tier."""
+    tier = body.tier.strip().lower()
+    if tier not in TIERS or tier == "freshman":
+        raise HTTPException(status_code=400, detail="tier must be a paid tier")
+    if body.days < 1 or body.days > 3650:
+        raise HTTPException(status_code=400, detail="days must be 1..3650")
+    user = _user_for_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET tier=%s, msg_used=0, free_audits_used=0,
+                    plan_reset_at = now() + interval '1 month',
+                    comp_until = GREATEST(COALESCE(comp_until, now()), now()) + (%s * interval '1 day'),
+                    comp_prev_tier = COALESCE(comp_prev_tier, %s)
+                WHERE user_id=%s
+                RETURNING comp_until, comp_prev_tier
+            """, (tier, body.days, user["tier"], user["user_id"]))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "email": _norm_email(body.email), "tier": tier,
+            "comp_until": row["comp_until"], "falls_back_to": row["comp_prev_tier"]}
+
+
+@app.post("/admin/end-comp", dependencies=[Depends(admin_required)])
+def admin_end_comp(body: AdminEmailIn):
+    """Cut a comp short now; the account drops back to its pre-comp tier."""
+    user = _user_for_email(body.email)
+    if user.get("comp_until") is None:
+        raise HTTPException(status_code=400, detail="No active comp")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET comp_until = now() - interval '1 second' WHERE user_id=%s",
+                        (user["user_id"],))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "tier": _ensure_user(user["user_id"])["tier"]}
+
+
+@app.post("/admin/console/set-tier", dependencies=[Depends(admin_required)])
+def admin_console_set_tier(body: AdminSetTierIn):
+    """Same semantics as /admin/set-tier, authenticated via X-Admin-Secret."""
+    return set_tier(SetTierIn(email=body.email, tier=body.tier, secret=ADMIN_SECRET))
+
+
+@app.post("/admin/console/grant-audits", dependencies=[Depends(admin_required)])
+def admin_console_grant_audits(body: AdminGrantAuditsIn):
+    return grant_audits(GrantAuditsIn(email=body.email, amount=body.amount, secret=ADMIN_SECRET))
+
+
+@app.post("/admin/note", dependencies=[Depends(admin_required)])
+def admin_note(body: AdminNoteIn):
+    user = _user_for_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET admin_note=%s WHERE user_id=%s",
+                        (body.note.strip()[:2000], user["user_id"]))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.get("/admin/complaints", dependencies=[Depends(admin_required)])
+def admin_complaints(status: str = "open", limit: int = 200):
+    limit = max(1, min(1000, limit))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT c.id, c.subject, c.body, c.status, c.admin_note, c.created_at,
+                       c.resolved_at, a.email, u.display_name, u.tier
+                FROM complaints c
+                JOIN users u ON u.user_id=c.user_id
+                LEFT JOIN accounts a ON a.user_id=c.user_id
+                WHERE (%s = 'all' OR c.status = %s)
+                ORDER BY c.status = 'open' DESC, c.created_at DESC LIMIT %s
+            """, (status, status, limit))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+@app.post("/admin/complaints/{complaint_id}", dependencies=[Depends(admin_required)])
+def admin_update_complaint(complaint_id: int, body: ComplaintUpdateIn):
+    status = body.status.strip().lower()
+    if status not in ("open", "resolved"):
+        raise HTTPException(status_code=400, detail="status must be open or resolved")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE complaints
+                SET status=%s, admin_note=%s,
+                    resolved_at = CASE WHEN %s='resolved' THEN now() ELSE NULL END
+                WHERE id=%s RETURNING id
+            """, (status, body.admin_note.strip()[:2000], status, complaint_id))
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="No such complaint")
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "id": complaint_id, "status": status}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return ADMIN_HTML
 
 
 if __name__ == "__main__":

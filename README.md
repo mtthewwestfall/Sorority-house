@@ -34,6 +34,12 @@ Each girl has a "Development Bible" containing:
 - **The Paywall:** Triggered at message 25.
 - **The Delivery:** Once subscribed, the promised photo is delivered at message 10 of the paid tier.
 
+### 4. Admin Console
+Open `https://<your-app>/admin` and enter `ADMIN_SECRET`. From there you can:
+- **Accounts:** search by email / name / id, see tier, messages left, audits, girls & stages, and leave a private admin note.
+- **Free time:** comp any account to a paid tier for N days (`/admin/grant-time {email, tier, days}`). They get a fresh allowance immediately; when the time is up they drop back to whatever tier they had before (a used-up trial stays used up). Granting again extends; "End now" cuts it short; a real Stripe tier change cancels the comp.
+- **Complaints:** players file them with `POST /complaints {subject, body}` (logged in) and see status/notes at `GET /complaints`. Admin reads the inbox, adds a note and resolves/reopens.
+
 ---
 
 ## 🛠️ Configuration (Environment Variables)
@@ -42,6 +48,7 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | Variable | Description | Source |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | Connection string for Supabase | Supabase Settings |
+| `ADMIN_SECRET` | Password for `/admin` and all entitlement endpoints (required) | You choose it |
 | `STRIPE_SECRET_KEY` | API key for subscription billing | Stripe Dashboard |
 | `STRIPE_WEBHOOK_SECRET` | Key to verify payment events | Stripe Dashboard |
 | `IMAGE_API_KEY` | Key for autonomous photo generation | Image Provider API |
