@@ -17,7 +17,7 @@ This is the core intelligence layer for a high-fidelity AI sorority experience. 
 ### 1. The Trust Engine (Psychological Progression)
 The system doesn't just track messages; it tracks *emotional depth*.
 - **Stages:** Stranger $\rightarrow$ Acquaintance $\rightarrow$ Friend $\rightarrow$ Close Friend $\rightarrow$ Intimate $\rightarrow$ Devoted.
-- **Temporal Gates:** Trust cannot jump stages instantly. Minimum 30-day cooldowns exist between higher stages to prevent "love-bombing."
+- **Three gates, all required:** a stage only deepens when the user has (1) lived enough real days at the current stage (`stage_days`, per girl), (2) demonstrably remembered enough of her key points (`stage_kept`, per girl), and (3) been graded `warm` on conduct for that stretch by her own standards (`conduct_note`, per girl). Any single refresh can climb at most one stage; `cold` conduct always costs at least one.
 - **Memory Probes:** The AI occasionally tests the user on past conversations. Correct recall = Trust $\uparrow$, Forgetting = Trust $\downarrow$.
 
 ### 2. Persona Engine (The 28 Girls)
@@ -28,10 +28,17 @@ Each girl has a "Development Bible" containing:
 - **Visual DNA:** Specific prompts and ID references for consistent image generation.
 
 ### 3. The Payment & Trial Flow
-- **Free Trial:** Ends at message 25.
+- **Accounts:** Every player signs up with email + password (`/auth/signup`, `/auth/login`) and sends the returned token as `Authorization: Bearer <token>`. The free trial and all subscriptions are bound to that account, so allowances cannot be reset by clearing the browser or inventing a new id. Stripe webhooks link subscriptions via `/admin/set-tier {email, tier}`.
+- **Free Trial:** One per account. Ends at message 25 and never refills.
 - **The Promise:** At message 23, the AI promises a photo.
 - **The Paywall:** Triggered at message 25.
 - **The Delivery:** Once subscribed, the promised photo is delivered at message 10 of the paid tier.
+
+### 4. Admin Console
+Open `https://<your-app>/admin` and enter `ADMIN_SECRET`. From there you can:
+- **Accounts:** search by email / name / id, see tier, messages left, audits, girls & stages, and leave a private admin note.
+- **Free time:** comp any account to a paid tier for N days (`/admin/grant-time {email, tier, days}`). They get a fresh allowance immediately; when the time is up they drop back to whatever tier they had before (a used-up trial stays used up). Granting again extends; "End now" cuts it short; a real Stripe tier change cancels the comp.
+- **Complaints:** players file them with `POST /complaints {subject, body}` (logged in) and see status/notes at `GET /complaints`. Admin reads the inbox, adds a note and resolves/reopens.
 
 ---
 
@@ -41,6 +48,7 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | Variable | Description | Source |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | Connection string for Supabase | Supabase Settings |
+| `ADMIN_SECRET` | Password for `/admin` and all entitlement endpoints (required) | You choose it |
 | `STRIPE_SECRET_KEY` | API key for subscription billing | Stripe Dashboard |
 | `STRIPE_WEBHOOK_SECRET` | Key to verify payment events | Stripe Dashboard |
 | `IMAGE_API_KEY` | Key for autonomous photo generation | Image Provider API |
