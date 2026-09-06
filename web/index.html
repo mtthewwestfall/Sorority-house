@@ -534,7 +534,7 @@
     function signOut() {
       const t = getToken();
       localStorage.removeItem(TOKEN_KEY);
-      updateAuthLinks(); setDoors(DEFAULT_OPEN); closeChat();
+      updateAuthLinks(); closeChat(); refreshState();
       if (t) fetch(API_BASE_URL + '/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } }).catch(() => {});
     }
     function onAuthLink(event) {
@@ -643,7 +643,7 @@
 
     // Called when the API says the token is missing/expired.
     function handleUnauthorized() {
-      if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); setDoors(DEFAULT_OPEN); }
+      if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); refreshState(); }
       openAuth('login', 'Sign in to keep talking.');
     }
 
@@ -713,13 +713,17 @@
         if (status) status.textContent = open ? 'Door open' : (card.classList.contains('senior') ? 'Senior exclusive' : 'Door still shut');
       });
     }
+    let stateSeq = 0;
     async function refreshState() {
-      if (!isLoggedIn()) { setDoors(DEFAULT_OPEN); chatRemaining.textContent = ''; return; }
+      const seq = ++stateSeq;
+      setDoors(DEFAULT_OPEN); chatRemaining.textContent = '';
+      if (!isLoggedIn()) return;
       try {
         const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
-        if (response.status === 401) { handleUnauthorized(); setDoors(DEFAULT_OPEN); return; }
+        if (seq !== stateSeq) return;   // a newer sign-in/out happened; drop this response
+        if (response.status === 401) { handleUnauthorized(); return; }
         const data = await response.json().catch(() => null);
-        if (!response.ok || !data || !data.girls) return;
+        if (seq !== stateSeq || !response.ok || !data || !data.girls) return;
         setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open));
         if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
       } catch (error) { /* keep whatever is shown */ }
