@@ -6,7 +6,7 @@ Built to this spec (verified Sept 2026):
   * ONE provider for everything: Google Gemini, on your existing Google API key.
   * Normal chat replies : Gemini, no thinking budget (fast + cheap).
   * Psychological Audits: Gemini WITH a thinking budget ON (deeper analysis).
-  * AUDITS ARE A PRODUCT: $0.99 each (USD). Everyone pays for them EXCEPT Senior
+  * AUDITS ARE A PRODUCT: $2.99 each (USD). Everyone pays for them EXCEPT Senior
     subscribers, who get 2 FREE audits per month. Free ones reset monthly alongside
     the message allowance. Bought credits roll over.
   * 3-layer memory stack so the payload stays small and flat every turn:
@@ -48,7 +48,7 @@ API CONTRACT implemented here (point your chat app at these):
                                                             tier 'freshman' = cancelled)
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
-                                                            webhook after a $0.99 charge)
+                                                            webhook after a $2.99 charge)
   POST /admin/link-account {"user_id","email","password","secret"}
                                                          -> give a pre-accounts player a login
                                                             for their existing user_id (migration)
@@ -84,7 +84,7 @@ Env vars (Railway -> Variables):
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
-  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Freshman 0 / Sophomore 0 / Junior 0 / Senior 2 per month
+  AUDIT_PRICE_USD = 2.99   ;  FREE_AUDITS = Freshman 0 / Sophomore 0 / Junior 0 / Senior 2 per month
 
 requirements.txt for Railway:
   fastapi
@@ -145,8 +145,8 @@ WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
 SUMMARY_EVERY = 8    # Layer 2: refresh the rolling summary every N user messages
 AUDIT_WINDOW = 80    # audits see up to this many recent messages + the full summary
 
-# Audit product pricing. $0.99 each for everyone; the listed tiers get N FREE per month.
-AUDIT_PRICE_USD = 0.99
+# Audit product pricing. $2.99 each for everyone; the listed tiers get N FREE per month.
+AUDIT_PRICE_USD = 2.99
 FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allowance)
     "freshman":   0,
     "sophomore":  0,
@@ -206,7 +206,7 @@ AUDIT_INSTRUCTION = (
     "still standing, missteps or pressure that pushed her away, and the most effective "
     "next move to deepen trust. Be direct and specific — quote patterns from the "
     "conversation, never vague compliments. Format as short labeled sections. This is "
-    "a paid product at $0.99 (free for Seniors) — make it worth it."
+    "a paid product at $2.99 (free for Seniors) — make it worth it."
 )
 
 # ---------------------------------------------------------------------------
@@ -1298,7 +1298,7 @@ class PersonaIn(BaseModel):
 
 class GrantAuditsIn(BaseModel):
     email: str
-    amount: int          # number of $0.99 audits to credit (call from Stripe webhook)
+    amount: int          # number of $2.99 audits to credit (call from Stripe webhook)
     secret: str = ""
 
 
@@ -1786,7 +1786,7 @@ def set_tier(body: SetTierIn):
 
 @app.post("/admin/grant-audits")
 def grant_audits(body: GrantAuditsIn):
-    """Credits audit_credits after a successful $0.99 payment. Wire this to your
+    """Credits audit_credits after a successful $2.99 payment. Wire this to your
     Stripe webhook (or call it from your 'Buy audit' button once Stripe confirms)."""
     _check_admin(body.secret, strict=True)
     if body.amount <= 0 or body.amount > 1000:
