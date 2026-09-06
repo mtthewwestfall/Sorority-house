@@ -1673,7 +1673,11 @@ def leaderboard():
                        (u.total_audits_used >= 5) AS starred,
                        COUNT(DISTINCT r.girl) AS girls_reached
                 FROM users u
-                LEFT JOIN relationships r ON r.user_id = u.user_id
+                LEFT JOIN relationships r
+                       ON r.user_id = u.user_id
+                      AND EXISTS (SELECT 1 FROM chat_logs c
+                                  WHERE c.user_id = r.user_id AND c.girl = r.girl
+                                    AND c.sender = 'user')
                 GROUP BY u.user_id
                 ORDER BY milestone DESC, girls_reached DESC, u.total_audits_used ASC
                 LIMIT 25
