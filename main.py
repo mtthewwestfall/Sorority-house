@@ -44,6 +44,8 @@ Env vars (Railway -> Variables):
   CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   IMAGE_MODEL       gemini-2.5-flash-image (default; the model /image renders portraits with)
+  IMAGE_FIRST_AT    40 (default): message count at which her first photo unlocks
+  IMAGE_EVERY       200 (default): messages she needs between photos after the first
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
@@ -82,6 +84,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")  # portraits (/image)
+IMAGE_FIRST_AT = int(os.environ.get("IMAGE_FIRST_AT", "40"))   # her first photo unlocks here
+IMAGE_EVERY = int(os.environ.get("IMAGE_EVERY", "200"))        # messages between photos after that
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
@@ -409,6 +413,15 @@ def init_db():
                     door_title TEXT NOT NULL DEFAULT '',
                     persona    TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS photo_log (
+                    id         BIGSERIAL PRIMARY KEY,
+                    user_id    TEXT NOT NULL,
+                    girl       TEXT NOT NULL,
+                    msg_count  INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_photo_user_girl
+                    ON photo_log (user_id, girl, id);
                 CREATE INDEX IF NOT EXISTS idx_chat_user_girl
                     ON chat_logs (user_id, girl, id);
             """)
@@ -775,6 +788,36 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         raise HTTPException(status_code=502, detail="Unexpected model response")
 
 
+def photo_status(user_id, girl):
+    """How many messages she has had, and how many are left before the next photo."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM chat_logs "
+                        "WHERE user_id=%s AND girl=%s AND sender='user'", (user_id, girl))
+            sent = int(cur.fetchone()["n"])
+            cur.execute("SELECT msg_count FROM photo_log "
+                        "WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT 1",
+                        (user_id, girl))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    unlocks_at = IMAGE_FIRST_AT if row is None else int(row["msg_count"]) + IMAGE_EVERY
+    return {"messages": sent, "unlocks_at": unlocks_at,
+            "remaining": max(0, unlocks_at - sent), "unlocked": sent >= unlocks_at}
+
+
+def record_photo(user_id, girl, msg_count):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO photo_log (user_id, girl, msg_count) VALUES (%s,%s,%s)",
+                        (user_id, girl, msg_count))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _gemini_image(prompt, model=None):
     """Render one image and return (mime_type, base64 data)."""
     if not GEMINI_API_KEY:
@@ -844,6 +887,7 @@ def _startup():
 def health():
     return {"ok": True, "model": CHAT_MODEL, "audit_model": AUDIT_MODEL,
             "image_model": IMAGE_MODEL,
+            "image_first_at": IMAGE_FIRST_AT, "image_every": IMAGE_EVERY,
             "audit_thinking": AUDIT_THINKING, "audit_price_usd": AUDIT_PRICE_USD,
             "free_audits": FREE_AUDITS}
 
@@ -923,6 +967,11 @@ def image(body: ImageIn):
     if girl not in VISUAL_DNA:
         raise HTTPException(status_code=404, detail="Unknown girl")
 
+    status = photo_status(user["user_id"], girl)
+    if not status["unlocked"]:
+        return {"ok": False, "locked": True, **status,
+                "error": f"Not yet — {status['remaining']} more messages before she sends a photo."}
+
     _, name = get_persona(girl)
     scene = " ".join((body.scene or "").split())[:200]
     prompt = f"{IMAGE_RULES} She is {name}: {VISUAL_DNA[girl]}."
@@ -930,8 +979,19 @@ def image(body: ImageIn):
         prompt += f" Setting: {scene}."
 
     mime, data = _gemini_image(prompt)
+    record_photo(user["user_id"], girl, status["messages"])
     return {"ok": True, "girl": girl, "name": name, "mime": mime, "image_b64": data,
-            "disclosure": "AI-generated image"}
+            "disclosure": "AI-generated image", "messages": status["messages"],
+            "next_unlocks_at": status["messages"] + IMAGE_EVERY}
+
+
+@app.get("/image/status")
+def image_status(user_id: str, girl: str):
+    user = _ensure_user(user_id)
+    girl = girl.strip().lower()
+    if girl not in VISUAL_DNA:
+        raise HTTPException(status_code=404, detail="Unknown girl")
+    return {"ok": True, "girl": girl, **photo_status(user["user_id"], girl)}
 
 
 @app.get("/history")

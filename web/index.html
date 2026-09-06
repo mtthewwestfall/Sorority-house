@@ -472,7 +472,9 @@
         });
         const data = await response.json().catch(() => null);
         pending.remove();
-        if (!response.ok || !data || data.ok === false || !data.image_b64) {
+        if (data && data.locked) {
+          addMessage('note', data.error);
+        } else if (!response.ok || !data || data.ok === false || !data.image_b64) {
           addMessage('error', (data && (data.error || data.detail)) || 'No photo right now. Try again in a moment.');
         } else {
           addPhoto(data.mime, data.image_b64, data.disclosure || 'AI-generated image');
