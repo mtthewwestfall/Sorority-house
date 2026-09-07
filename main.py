@@ -1143,10 +1143,13 @@ def _summarize(user_id, girl, rel, recent_msgs):
         pass
 
     def _merge(existing, items, canon, cap=12):
-        # legacy rows may hold free-text paraphrases; fold them onto canon too
+        # legacy rows may hold free-text paraphrases; fold them onto canon too.
+        # A sister with no canonical list keeps the grader's own phrases, folded
+        # onto whichever one she has already recorded, so her memory still builds.
         out, seen = [], set()
         for it in list(existing) + list(items):
-            it = _canonical(it, canon)
+            it = _canonical(it, canon) if canon else (
+                _canonical(it, out) or (it.strip() if _words(it) else None))
             if it is not None and it.casefold() not in seen and len(out) < cap:
                 out.append(it)
                 seen.add(it.casefold())
