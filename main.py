@@ -1343,11 +1343,14 @@ def _mouth_thread(msgs, box, stop):
     except Exception:
         pass
     finally:
-        if not stop.is_set():
+        # The sentinel is how the emitter learns the reply ended, so it has to
+        # land: a full box here only means she is still catching up.
+        while not stop.is_set():
             try:
-                box.put(_EOF, timeout=1)
+                box.put(_EOF, timeout=0.2)
+                break
             except queue.Full:
-                pass
+                continue
 
 
 async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, brain):

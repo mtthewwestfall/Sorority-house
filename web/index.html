@@ -474,7 +474,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -643,6 +643,7 @@
 
     // Called when the API says the token is missing/expired.
     function handleUnauthorized() {
+      abortStream();
       if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); refreshState(); }
       openAuth('login', 'Sign in to keep talking.');
     }
@@ -683,6 +684,7 @@
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
       if (!card.classList.contains('open')) return;
+      abortStream();
       currentGirl = card.dataset.girl;
       document.getElementById('chat-name').textContent = card.dataset.name;
       document.getElementById('chat-title').textContent = card.dataset.title;
@@ -697,6 +699,7 @@
     }
 
     function closeChat() {
+      abortStream();
       chat.classList.remove('is-open');
       currentGirl = null;
     }
@@ -772,12 +775,25 @@
     // She types: POST /chat/stream sends her reply as SSE, already paced by the
     // backend, so the bubble just grows as the events land. Older backends have
     // no /chat/stream, so a 404 (or any pre-reply failure) falls back to /chat.
+    // Leaving her room while she is still typing has to cut the connection, or
+    // her remaining deltas land in whatever chat replaced it - and the backend
+    // goes on generating text nobody is reading.
+    let streamAbort = null;
+    function abortStream() {
+      if (streamAbort) { streamAbort.abort(); streamAbort = null; }
+    }
+
     let streamSupported = true;
     async function streamReply(message, typing) {
+      const girl = currentGirl;
+      abortStream();
+      const controller = new AbortController();
+      streamAbort = controller;
       const response = await fetch(API_BASE_URL + '/chat/stream', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ girl: currentGirl, message: message }),
+        body: JSON.stringify({ girl: girl, message: message }),
+        signal: controller.signal,
       });
       if (response.status === 404 || response.status === 405) {
         streamSupported = false;
@@ -798,6 +814,7 @@
       let failed = null;
 
       const handle = (event, data) => {
+        if (girl !== currentGirl) return;   // her room is gone; drop the rest
         if (event === 'delta' && data.t) {
           if (!bubble) { typing.remove(); bubble = addMessage('her', ''); }
           bubble.textContent += data.t;
@@ -825,7 +842,8 @@
           try { handle(event, JSON.parse(payload)); } catch (e) { /* ignore a partial frame */ }
         }
       }
-      if (!bubble) {
+      if (streamAbort === controller) streamAbort = null;
+      if (!bubble && girl === currentGirl) {
         typing.remove();
         addMessage('error', failed === 'she_did_not_answer' ? 'She went quiet. Try again in a moment.' : (failed || 'She did not answer. Try again in a moment.'));
       }
@@ -868,7 +886,9 @@
         }
       } catch (error) {
         typing.remove();
-        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+        if (error.name !== 'AbortError') {   // she was cut off on purpose
+          addMessage('error', 'Could not reach the house. Check your connection and try again.');
+        }
       } finally {
         sending = false;
         chatSend.disabled = false;
