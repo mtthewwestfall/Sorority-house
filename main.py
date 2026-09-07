@@ -1129,6 +1129,19 @@ def rel_days_in_stage(rel):
         return 0
 
 
+def stage_days_talked(user_id, girl):
+    """The committed day-of-presence count for this relationship."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT stage_days_talked FROM relationships "
+                        "WHERE user_id=%s AND girl=%s", (user_id, girl))
+            row = cur.fetchone()
+            return int(row["stage_days_talked"]) if row else 0
+    finally:
+        conn.close()
+
+
 def stage_days_needed(girl, cur):
     cfg = engine_for(girl)
     base = cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
@@ -1208,7 +1221,8 @@ def _phrase_match(a, b):
 
 def gate_milestone(girl, rel, proposed, conduct="steady"):
     """Going deeper is earned on THREE axes at once, never by one alone:
-      TIME    - enough real days lived at the CURRENT stage (per-girl stage_days);
+      TIME    - enough days of presence at the CURRENT stage (per-girl stage_days,
+                counting only days the user actually talked to her);
       MEMORY  - the user has shown they remember enough of her key points
                 (pinned_kept, threshold grows with the target stage);
       CONDUCT - the grader judged how the user acted this stretch as 'warm'.
@@ -1373,7 +1387,11 @@ def _summarize(user_id, girl, rel, recent_msgs):
     kept = _merge(kept, new_kept, cfg["key_points"])
 
     # The AI proposes; time + memory + conduct decide what is believable today.
-    milestone = gate_milestone(girl, {**rel, "pinned_kept": kept}, milestone, conduct)
+    # The day clock is read back from the row, not from the snapshot this refresh
+    # was fired with: the turn that fired it may be the first one of a new day.
+    milestone = gate_milestone(girl, {**rel, "pinned_kept": kept,
+                                      "stage_days_talked": stage_days_talked(user_id, girl)},
+                               milestone, conduct)
 
     conn = db()
     try:
@@ -1557,17 +1575,21 @@ def persist_turn(user_id, girl, rel, user_message, reply):
                 VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
             """, (user_id, girl, user_message, user_id, girl, reply))
             # per-girl engine: track days of presence (the slow-burn clock). Both
-            # clocks move only on a day the user actually said something to her.
-            prev = rel.get("last_session")
-            new_day = 1 if (prev is None or prev < _today()) else 0
+            # clocks move only on a day the user actually said something to her,
+            # and the day boundary is read from the row inside the UPDATE so two
+            # overlapping turns cannot each count the same day.
             cur.execute("""
                 UPDATE relationships
-                SET last_session = CURRENT_DATE,
-                    active_days = active_days + %s,
-                    stage_days_talked = stage_days_talked + %s,
+                SET active_days = active_days + CASE
+                        WHEN last_session IS NULL OR last_session < CURRENT_DATE
+                        THEN 1 ELSE 0 END,
+                    stage_days_talked = stage_days_talked + CASE
+                        WHEN last_session IS NULL OR last_session < CURRENT_DATE
+                        THEN 1 ELSE 0 END,
+                    last_session = CURRENT_DATE,
                     stage_since = COALESCE(stage_since, CURRENT_DATE)
                 WHERE user_id=%s AND girl=%s
-            """, (new_day, new_day, user_id, girl))
+            """, (user_id, girl))
             conn.commit()
     finally:
         conn.close()
