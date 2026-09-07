@@ -254,17 +254,17 @@ def tier_rank(tier):
 # door text, art and the tier that opens her, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
-    ("dakota",   "freshman",  10, "https://myreal.live/assets/dakota-DovCVNjY.jpg",
+    ("dakota",   "freshman",  10, "assets/dakota.jpg",
      "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
-    ("zoe",      "freshman",  20, "https://myreal.live/assets/zoe-BnozSeUg.jpg",
+    ("zoe",      "freshman",  20, "assets/zoe.jpg",
      "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "sophomore", 30, "https://myreal.live/assets/willow-4w9QsnXR.jpg",
+    ("willow",   "sophomore", 30, "assets/willow.jpg",
      "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
-    ("brittany", "sophomore", 40, "https://myreal.live/assets/brittany-DRnJ63HN.jpg",
+    ("brittany", "sophomore", 40, "assets/brittany.jpg",
      "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
     ("sasha",    "junior",    50, "assets/sasha.webp",
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "junior",    60, "https://myreal.live/assets/piper-P4IdzuLV.jpg",
+    ("piper",    "junior",    60, "assets/piper.jpg",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
     ("veronica", "senior",    70, "assets/veronica.webp",
      "The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
@@ -675,9 +675,24 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'normal';
             """)
             _seed_roster(cur, backfill=legacy_rows)
+            _repair_dead_portraits(cur)
         conn.commit()
     finally:
         conn.close()
+
+
+DEAD_PORTRAIT_HOST = "https://myreal.live/"
+
+
+def _repair_dead_portraits(cur):
+    """The original portraits were hot-linked from a host that no longer exists. Point
+    the seeded sisters at the copies shipped in web/assets and blank anyone else's
+    dead link so the door shows its styled art instead of a broken image."""
+    for girl, _tier, _order, avatar, _blurb in ROSTER_SEED:
+        cur.execute("UPDATE personas SET avatar_url = %s WHERE girl = %s AND avatar_url LIKE %s",
+                    (avatar, girl, DEAD_PORTRAIT_HOST + "%"))
+    cur.execute("UPDATE personas SET avatar_url = '' WHERE avatar_url LIKE %s",
+                (DEAD_PORTRAIT_HOST + "%",))
 
 
 def _seed_roster(cur, backfill=False):
