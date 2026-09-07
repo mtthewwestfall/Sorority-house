@@ -342,19 +342,19 @@
             <div class="door-art" data-initial="Z"><img src="assets/zoe.jpg" alt="Portrait of Zoe" /></div>
             <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><button class="button door-cta" type="button">Knock on Zoe's door</button></div>
           </article>
-          <article class="door-card locked" data-girl="willow" data-min-tier="sophomore" data-name="Willow" data-title="The quiet lock" data-avatar="assets/willow.jpg">
+          <article class="door-card locked" data-girl="willow" data-min-tier="freshman" data-name="Willow" data-title="The quiet lock" data-avatar="assets/willow.jpg">
             <div class="door-art" data-initial="W"><img src="assets/willow.jpg" alt="Willow's locked door" /></div>
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p></div>
           </article>
-          <article class="door-card locked" data-girl="brittany" data-min-tier="sophomore" data-name="Brittany" data-title="The sweet trap" data-avatar="assets/brittany.jpg">
+          <article class="door-card locked" data-girl="brittany" data-min-tier="freshman" data-name="Brittany" data-title="The sweet trap" data-avatar="assets/brittany.jpg">
             <div class="door-art" data-initial="B"><img src="assets/brittany.jpg" alt="Brittany's locked door" /></div>
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p></div>
           </article>
-          <article class="door-card locked" data-girl="sasha" data-min-tier="junior" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp">
+          <article class="door-card locked" data-girl="sasha" data-min-tier="freshman" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp">
             <div class="door-art" data-initial="S"><img src="assets/sasha.webp" alt="Sasha's locked door" /></div>
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p></div>
           </article>
-          <article class="door-card locked" data-girl="piper" data-min-tier="junior" data-name="Piper" data-title="The closed book" data-avatar="assets/piper.jpg">
+          <article class="door-card locked" data-girl="piper" data-min-tier="freshman" data-name="Piper" data-title="The closed book" data-avatar="assets/piper.jpg">
             <div class="door-art" data-initial="P"><img src="assets/piper.jpg" alt="Piper's locked door" /></div>
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p></div>
           </article>
@@ -751,13 +751,15 @@
     // Every card is clickable; openChat refuses locked ones. Which doors are open
     // comes from GET /state for the signed-in account (defaults = freshman set).
     let DEFAULT_OPEN = ['dakota', 'zoe'];
-    function setDoors(openList) {
+    function setDoors(openList, reasons) {
       document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
         const open = openList.includes(card.dataset.girl);
         card.classList.toggle('open', open);
         card.classList.toggle('locked', !open);
         const status = card.querySelector('.door-status');
-        if (status) status.textContent = open ? 'Door open' : (card.dataset.minTier === 'senior' ? 'Senior exclusive' : 'Door still shut');
+        if (status) status.textContent = open ? 'Door open' :
+          ((reasons && reasons[card.dataset.girl]) ||
+           (card.dataset.minTier === 'senior' ? 'Senior exclusive' : 'Door still shut'));
       });
     }
 
@@ -786,7 +788,8 @@
           '<button class="button door-cta" type="button">Knock on ' + name + '\u2019s door</button></div>' +
           '</article>';
       }).join('');
-      DEFAULT_OPEN = girls.filter((g) => (g.min_tier || 'freshman') === 'freshman').map((g) => g.girl);
+      // Signed out, only the first pair of doors is open.
+      DEFAULT_OPEN = girls.slice(0, 2).map((g) => g.girl);
     }
     // A portrait that fails to load leaves the styled door art behind it instead of
     // the browser's broken-image box.
@@ -832,7 +835,9 @@
         if (response.status === 401) { handleUnauthorized(); return; }
         const data = await response.json().catch(() => null);
         if (seq !== stateSeq || !response.ok || !data || !data.girls) return;
-        setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open));
+        const reasons = {};
+        Object.keys(data.girls).forEach((g) => { if (data.girls[g].locked_reason) reasons[g] = data.girls[g].locked_reason; });
+        setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open), reasons);
         showRemaining(data.remaining);
       } catch (error) { /* keep whatever is shown */ }
     }

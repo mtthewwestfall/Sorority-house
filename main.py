@@ -243,28 +243,35 @@ TIERS = {
     "senior":     {"label": "Senior",    "limit": 4000},
 }
 
-# Tier order, low to high. A girl opens for every tier from her min_tier up.
+# Tier order, low to high. min_tier is a paywall only: a door also has to be earned
+# (see open_doors). Everyone but Veronica is available on every tier.
 TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
+
+# Doors open in pairs, in roster order. The first pair is open from day one; the
+# next pair unlocks once the user reaches this milestone with EITHER girl of the
+# pair directly before it.
+DOOR_PAIR = 2
+UNLOCK_MILESTONE = 4
 
 def tier_rank(tier):
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
 
 # The roster is the personas table, not this file, so a new sister can be added
 # from the admin console without a deploy. These are only the first-boot seeds:
-# door text, art and the tier that opens her, all editable afterwards.
+# door text, art and the tier she is sold on, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
     ("dakota",   "freshman",  10, "assets/dakota.jpg",
      "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
     ("zoe",      "freshman",  20, "assets/zoe.jpg",
      "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "sophomore", 30, "assets/willow.jpg",
+    ("willow",   "freshman",  30, "assets/willow.jpg",
      "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
-    ("brittany", "sophomore", 40, "assets/brittany.jpg",
+    ("brittany", "freshman",  40, "assets/brittany.jpg",
      "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
-    ("sasha",    "junior",    50, "assets/sasha.webp",
+    ("sasha",    "freshman",  50, "assets/sasha.webp",
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "junior",    60, "assets/piper.jpg",
+    ("piper",    "freshman",  60, "assets/piper.jpg",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
     ("veronica", "senior",    70, "assets/veronica.webp",
      "The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
@@ -676,6 +683,16 @@ def init_db():
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _repair_dead_portraits(cur)
+            # Doors moved from tier-gated to progression-gated. The marker column
+            # makes the tier-wall lift run once, so the console owns min_tier after.
+            cur.execute("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'personas' AND column_name = 'doors_earned'
+            """)
+            if cur.fetchone() is None:
+                cur.execute("ALTER TABLE personas ADD COLUMN IF NOT EXISTS doors_earned BOOLEAN NOT NULL DEFAULT TRUE")
+                _lift_tier_walls(cur)
         conn.commit()
     finally:
         conn.close()
@@ -693,6 +710,14 @@ def _repair_dead_portraits(cur):
                     (avatar, girl, DEAD_PORTRAIT_HOST + "%"))
     cur.execute("UPDATE personas SET avatar_url = '' WHERE avatar_url LIKE %s",
                 (DEAD_PORTRAIT_HOST + "%",))
+
+
+def _lift_tier_walls(cur):
+    """Doors used to be sold by tier; now they are earned by progression and only
+    Veronica stays behind the Senior paywall. Drop the old tier walls off the
+    seeded sisters so nobody is stuck behind both gates."""
+    for girl, min_tier, _order, _avatar, _blurb in ROSTER_SEED:
+        cur.execute("UPDATE personas SET min_tier = %s WHERE girl = %s", (min_tier, girl))
 
 
 def _seed_roster(cur, backfill=False):
@@ -970,15 +995,52 @@ def roster(include_retired=False):
         conn.close()
 
 
-def girls_for_tier(tier, house=None):
-    """Slugs this tier can open: every active girl from her min_tier up."""
+def milestones_for(user_id):
+    """girl -> milestone for every relationship this user has started."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT girl, milestone FROM relationships WHERE user_id=%s", (user_id,))
+            return {r["girl"]: int(r["milestone"]) for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def door_pairs(house):
+    """The active roster, in door order, chunked into the pairs that unlock together."""
+    girls = [r for r in house if r["active"]]
+    return [girls[i:i + DOOR_PAIR] for i in range(0, len(girls), DOOR_PAIR)]
+
+
+def open_doors(user_id, tier, house=None, milestones=None):
+    """girl -> door state for this user. A door is open when it has been EARNED
+    (first pair free; each later pair once the user hit UNLOCK_MILESTONE with one
+    of the pair before it) AND the user's tier covers her min_tier. A shut door
+    carries the reason so the frontend can say what would open it."""
+    house = house if house is not None else roster()
+    reached = milestones if milestones is not None else milestones_for(user_id)
     rank = tier_rank(tier)
-    return [r["girl"] for r in (house if house is not None else roster())
-            if r["active"] and tier_rank(r["min_tier"]) <= rank]
+    doors, earned, previous = {}, True, []
+    for pair in door_pairs(house):
+        if previous:
+            earned = any(reached.get(g["girl"], 0) >= UNLOCK_MILESTONE for g in previous)
+        for r in pair:
+            paid = tier_rank(r["min_tier"]) <= rank
+            if earned and paid:
+                reason = ""
+            elif not earned:
+                reason = "Reach stage %d with %s to open this door" % (
+                    UNLOCK_MILESTONE, " or ".join(g["name"] for g in previous))
+            else:
+                reason = TIERS.get(r["min_tier"], {}).get("label", r["min_tier"].title()) + " exclusive"
+            doors[r["girl"]] = {"open": not reason, "earned": earned, "paid": paid, "reason": reason}
+        previous = pair
+    return doors
 
 
 def girl_open(user_id, girl, tier):
-    return girl in girls_for_tier(tier)
+    door = open_doors(user_id, tier).get(girl)
+    return bool(door and door["open"])
 
 
 def free_audits_left(user):
@@ -1401,7 +1463,7 @@ def chat_preflight(user, girl_raw):
     remaining AFTER this turn). Callers refund_message() if no reply is delivered."""
     girl = girl_raw.strip().lower()
     if not girl_open(user["user_id"], girl, user["tier"]):
-        raise HTTPException(status_code=403, detail="This door is locked for your tier")
+        raise HTTPException(status_code=403, detail="This door is still locked for you")
     limit = TIERS.get(user["tier"], TIERS["freshman"])["limit"]
     conn = db()
     try:
@@ -1920,7 +1982,7 @@ pre{white-space:pre-wrap;margin:0}
 <div class="card"><div class="plist" id="plist"></div>
 <div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
 <button class="s" onclick="exportRoster()">Download backup</button></div>
-<div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the tier that unlocks her and her
+<div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the paid tier she needs (doors themselves are earned by progression) and her
 full character doc, which is her Layer-1 system block. Changes are live on the next reload - no deploy.
 Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
 <div id="pedit" class="card hid"></div>
@@ -1955,7 +2017,7 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
  <label>Name <input id="pName" value="${esc(p.name)}"></label>
  <label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:200px"></label>
- <label>Unlocks at <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
+ <label>Paid tier <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
  <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label>
  <label>Difficulty <select id="pDiff">${Object.keys(DIFFS).map(d=>`<option value="${d}"${d===(p.difficulty||'normal')?' selected':''}>${DIFFS[d]}</option>`).join('')}</select></label></div>
  <div class="mut">Difficulty only stretches the real days each trust stage takes - she still has to be treated right, and remembered, to open up.</div>
@@ -2328,15 +2390,19 @@ def public_roster():
 @app.get("/state")
 def state(user=Depends(current_user)):
     house = roster()
+    doors = open_doors(user["user_id"], user["tier"], house)
     girls = {}
-    for g in girls_for_tier(user["tier"], house):
-        rel = get_relationship(user["user_id"], g)
-        band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
-        girls[g] = {"open": True, "milestone": rel["milestone"], "band": band,
-                    "kept": len(rel.get("pinned_kept") or [])}
-    # locked girls still show so the frontend can render the shut doors
     for row in house:
-        girls.setdefault(row["girl"], {"open": False, "milestone": 0, "band": "", "kept": 0})
+        door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
+        if door["open"]:
+            rel = get_relationship(user["user_id"], row["girl"])
+            band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
+            girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
+                                  "kept": len(rel.get("pinned_kept") or [])}
+        else:
+            # locked girls still show so the frontend can render the shut doors
+            girls[row["girl"]] = {"open": False, "milestone": 0, "band": "", "kept": 0,
+                                  "locked_reason": door["reason"]}
     return {"tier": user["tier"], "remaining": remaining_for(user),
             "audit_count": int(user["total_audits_used"]),
             "free_audits_left": free_audits_left(user),
@@ -2350,7 +2416,7 @@ def audit(body: AuditIn, user=Depends(current_user)):
     girl = body.girl.strip().lower()
 
     if not girl_open(user["user_id"], girl, user["tier"]):
-        raise HTTPException(status_code=403, detail="This door is locked for your tier")
+        raise HTTPException(status_code=403, detail="This door is still locked for you")
 
     # --- AUDIT BILLING: free monthly allowance first, then bought credits ---
     # Reserve the entitlement atomically (conditional UPDATEs) so concurrent
