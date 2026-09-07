@@ -1423,7 +1423,9 @@ def send_daily_report():
                       "subject": f"{ASSISTANT_NAME}'s daily report - {today}",
                       "text": text},
                 timeout=15)
-            if r.status_code >= 300:
+            # 409 = key already used with a different body (the text is regenerated
+            # per attempt): today's mail was accepted earlier, so record it as sent
+            if r.status_code >= 300 and r.status_code != 409:
                 raise RuntimeError(f"resend failed {r.status_code}: {r.text[:200]}")
             with conn.cursor() as cur:
                 cur.execute("UPDATE app_state SET value=%s WHERE key='daily_report' AND value=%s",
