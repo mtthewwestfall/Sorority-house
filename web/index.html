@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
   <title>Welcome to the Sorority House</title>
   <meta name="description" content="A social experiment. 28 doors. Can you survive or will you thrive?" />
   <style>
@@ -206,12 +206,13 @@
     .door-cta { display: none; }
 
     .chat-backdrop {
-      position: fixed; inset: 0; z-index: 40; display: none;
+      position: fixed; top: 0; left: 0; right: 0; height: 100vh; height: 100dvh; z-index: 40; display: none;
       background: rgba(6, 4, 12, .72); backdrop-filter: blur(4px);
     }
     .chat-backdrop.is-open { display: grid; place-items: center; padding: 20px; }
+    body.modal-open { overflow: hidden; position: fixed; width: 100%; }
     .chat-panel {
-      width: min(560px, 100%); height: min(680px, 92vh); display: flex; flex-direction: column;
+      width: min(560px, 100%); height: min(680px, 92%); display: flex; flex-direction: column;
       border: 1px solid var(--line); border-radius: 22px; background: #150e23; box-shadow: var(--shadow); overflow: hidden;
     }
     .chat-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
@@ -277,6 +278,9 @@
       .hallway { min-height: 330px; }
       .group-image { height: 290px; }
       .footer-inner { flex-direction: column; text-align: center; }
+      .chat-backdrop.is-open { padding: 0; }
+      #chat .chat-panel { width: 100%; height: 100%; border-radius: 0; border: 0; }
+      .chat-form input, .auth-panel input { font-size: 16px; }
     }
   </style>
 </head>
@@ -518,10 +522,44 @@
       showAuthPane(which || 'login');
       if (msg) setAuthMsg(msg);
       authBox.classList.add('is-open');
+      lockScroll(true);
       const first = authBox.querySelector('form:not(.auth-hidden) input');
       if (first) first.focus();
     }
-    function closeAuth() { authBox.classList.remove('is-open'); }
+    function closeAuth() { authBox.classList.remove('is-open'); lockScroll(false); }
+
+    // iOS pans the whole page to reveal a focused input under the keyboard; keep
+    // the modal sized to the visible viewport instead so only the log shrinks.
+    let scrollYBeforeLock = 0;
+    function lockScroll(on) {
+      const anyOpen = document.querySelector('.chat-backdrop.is-open');
+      if (on) {
+        if (document.body.classList.contains('modal-open')) return;
+        scrollYBeforeLock = window.scrollY;
+        document.body.classList.add('modal-open');
+        document.body.style.top = `-${scrollYBeforeLock}px`;
+        fitToViewport();
+      } else if (!anyOpen) {
+        document.body.classList.remove('modal-open');
+        document.body.style.top = '';
+        document.querySelectorAll('.chat-backdrop').forEach(el => { el.style.height = ''; el.style.top = ''; });
+        window.scrollTo(0, scrollYBeforeLock);
+      }
+    }
+    function fitToViewport() {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      document.querySelectorAll('.chat-backdrop.is-open').forEach(el => {
+        el.style.height = `${vv.height}px`;
+        el.style.top = `${vv.offsetTop}px`;
+      });
+      window.scrollTo(0, 0);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', fitToViewport);
+      window.visualViewport.addEventListener('scroll', fitToViewport);
+    }
     function showVerifyPane(email, msg) {
       pendingVerifyEmail = email;
       document.getElementById('verify-email').textContent = email;
@@ -697,13 +735,15 @@
       chatLog.innerHTML = '';
       addMessage('note', 'Her door is open. Say hi.');
       chat.classList.add('is-open');
+      lockScroll(true);
       chatInput.value = '';
-      chatInput.focus();
+      chatInput.focus({ preventScroll: true });
     }
 
     function closeChat() {
       abortStreamAndResync();
       chat.classList.remove('is-open');
+      lockScroll(false);
       currentGirl = null;
     }
 
