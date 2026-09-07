@@ -234,31 +234,41 @@ class BotApp:
         text = (message.get("text") or "").strip()
         if chat_id is None or not text:
             return
+        if chat.get("type", "private") != "private":
+            self.send(chat_id, "For account privacy, please message Mia bot directly instead of using a group.")
+            return
         if text.startswith("/"):
             command, _, args = text.partition(" ")
             self.command(chat_id, command.split("@", 1)[0].lower(), args.strip())
         else:
             self.talk(chat_id, text)
 
+    @staticmethod
+    def credentials(args: str) -> tuple[str, str] | None:
+        email, separator, password = args.partition(" ")
+        if not separator or not email or not password:
+            return None
+        return email, password
+
     def command(self, chat_id: int, command: str, args: str) -> None:
         try:
             if command in ("/start", "/help"):
                 self.send(chat_id, "Welcome to Mia bot. Use /signup email password or /login email password, then /girls and /talk <name>.")
             elif command == "/signup":
-                parts = args.split()
-                if len(parts) != 2:
+                credentials = self.credentials(args)
+                if credentials is None:
                     self.send(chat_id, "Usage: /signup email password (password must be at least 8 characters).")
                     return
-                result = self.backend.signup(parts[0], parts[1], "Telegram Player")
+                result = self.backend.signup(credentials[0], credentials[1], "Telegram Player")
                 self.send(chat_id, "Account created. Confirm the verification email, then use /login email password.")
                 if not result.get("email_sent", True):
                     self.send(chat_id, "The backend could not send the verification email; ask the owner to verify this account in admin.")
             elif command == "/login":
-                parts = args.split()
-                if len(parts) != 2:
+                credentials = self.credentials(args)
+                if credentials is None:
                     self.send(chat_id, "Usage: /login email password")
                     return
-                result = self.backend.login(parts[0], parts[1])
+                result = self.backend.login(credentials[0], credentials[1])
                 self.links.put(chat_id, result["token"])
                 self.send(chat_id, "You’re logged in. Use /girls, then /talk <name>.")
             elif command in ("/girls", "/roster"):
@@ -318,7 +328,10 @@ class BotApp:
         try:
             self.telegram.typing(chat_id)
             result = self.backend.chat(token, girl, text)
-            self.send(chat_id, result["reply"])
+            try:
+                self.send(chat_id, result["reply"])
+            except Exception:
+                LOG.exception("Chat reply was generated but Telegram delivery failed")
         except BackendError as exc:
             self.send(chat_id, self.error_text(exc))
 
@@ -332,6 +345,8 @@ class BotApp:
         if error.status == 401:
             return "Your login expired. Please use /login email password again."
         if error.status == 403:
+            if error.detail.startswith("email_unverified"):
+                return "Check your inbox and confirm your verification email before logging in."
             return "That door is locked for your tier."
         if error.status == 402 or error.detail == "out_of_messages":
             return "You’ve reached your message limit. Upgrade your tier to keep chatting."
@@ -348,12 +363,19 @@ def run() -> None:
     app = BotApp(TelegramApi(TELEGRAM_BOT_TOKEN), BackendClient(), links)
     offset = None
     while True:
-        for update in app.telegram.updates(offset):
-            offset = update["update_id"] + 1
+        try:
+            updates = app.telegram.updates(offset)
+        except Exception:
+            LOG.exception("Telegram polling failed")
+            time.sleep(5)
+            continue
+        for update in updates:
             try:
                 app.handle(update)
             except Exception:
                 LOG.exception("Unhandled Telegram update")
+            else:
+                offset = update["update_id"] + 1
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ class FakeLinks:
 class FakeBackend:
     def __init__(self):
         self.messages = []
+        self.login_args = []
         self.locked = False
         self.limited = False
 
@@ -34,6 +35,7 @@ class FakeBackend:
         return {"ok": True, "needs_verification": True, "email_sent": True}
 
     def login(self, email, password):
+        self.login_args.append((email, password))
         return {"token": "token-1", "tier": "freshman"}
 
     def logout(self, token):
@@ -107,6 +109,18 @@ class TelegramSmokeTest(unittest.TestCase):
         self.update("/signup player@example.com password123")
         self.assertIsNone(self.links.get(7))
         self.assertIn("Confirm the verification email", self.telegram.sent[-1][1])
+
+    def test_login_preserves_spaces_in_password(self):
+        self.update("/login player@example.com pass word 123")
+        self.assertEqual(self.backend.login_args, [("player@example.com", "pass word 123")])
+
+    def test_group_messages_cannot_use_a_linked_account(self):
+        self.app.handle({"message": {
+            "chat": {"id": 7, "type": "group"},
+            "text": "/login player@example.com password123",
+        }})
+        self.assertIsNone(self.links.get(7))
+        self.assertIn("message Mia bot directly", self.telegram.sent[-1][1])
 
 
 if __name__ == "__main__":

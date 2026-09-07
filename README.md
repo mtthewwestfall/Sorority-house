@@ -100,6 +100,8 @@ python telegram_bot.py
 In Telegram, use `/signup email password`, confirm the verification email, then
 `/login email password`. `/girls` lists open and locked characters, `/talk
 <name>` selects a character, and subsequent plain messages use `POST /chat`.
+For account privacy, Mia bot accepts account commands and chats only in direct
+messages, not group chats.
 The bot sends a typing action while the synchronous response is generated
 instead of using `/chat/stream`, because long-polling plus a single final
 Telegram message avoids rate-limit-heavy message edits while preserving the
