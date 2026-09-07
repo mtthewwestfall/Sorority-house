@@ -89,8 +89,9 @@ Env vars (Railway -> Variables):
                     the memory digest (summary, milestone, conduct) that runs a turn behind.
                     e.g. BRAIN_BASE_URL=https://api.deepseek.com/v1 BRAIN_MODEL=deepseek-chat
     AUDIT_BASE_URL / AUDIT_API_KEY
-                    optional; with these set, AUDIT_MODEL is served from that endpoint
-                    (e.g. deepseek-reasoner) instead of Gemini.
+                    optional; with these set, AUDIT_MODEL is served from that endpoint.
+                    Otherwise audits ride the MOUTH (same voice as chat; the brain never
+                    writes what the user reads), with AUDIT_MODEL overriding the model.
   MODEL_TIMEOUT_S   per-call timeout for every provider (default 120).
   CHAT_CPS          her typing speed on /chat/stream, characters per second (default 14).
   CHAT_LEAD_CHARS   how far generation may run ahead of the screen (default 240 chars).
@@ -174,7 +175,9 @@ def _role_config(role, default_model):
 
 MOUTH = _role_config("MOUTH", CHAT_MODEL)     # the voice that types
 BRAIN = _role_config("BRAIN", CHAT_MODEL)     # memory digest, a turn behind
-AUDIT = _role_config("AUDIT", AUDIT_MODEL)    # paid psychological audit
+# Audits are written in her voice, so they ride the mouth unless given their own endpoint.
+AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
+         else {**MOUTH, "model": os.environ.get("AUDIT_MODEL") or MOUTH["model"]})
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
