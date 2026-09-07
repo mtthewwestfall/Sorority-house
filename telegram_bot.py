@@ -23,6 +23,7 @@ API_BASE_URL = os.environ.get(
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 REQUEST_TIMEOUT = 45
+MAX_UPDATE_RETRIES = 3
 
 
 class BackendError(Exception):
@@ -236,6 +237,12 @@ class BotApp:
     def send(self, chat_id: int, text: str) -> None:
         self.telegram.send(chat_id, text[:4096])
 
+    def notify(self, chat_id: int, text: str) -> None:
+        try:
+            self.send(chat_id, text)
+        except Exception:
+            LOG.exception("Telegram delivery failed")
+
     def handle(self, update: dict) -> None:
         message = update.get("message", {})
         chat = message.get("chat", {})
@@ -269,9 +276,15 @@ class BotApp:
                     self.send(chat_id, "Usage: /signup email password (password must be at least 8 characters).")
                     return
                 result = self.backend.signup(credentials[0], credentials[1], "Telegram Player")
-                self.send(chat_id, "Account created. Confirm the verification email, then use /login email password.")
+                self.notify(
+                    chat_id,
+                    "Account created. Confirm the verification email, then use /login email password.",
+                )
                 if not result.get("email_sent", True):
-                    self.send(chat_id, "The backend could not send the verification email; ask the owner to verify this account in admin.")
+                    self.notify(
+                        chat_id,
+                        "The backend could not send the verification email; ask the owner to verify this account in admin.",
+                    )
             elif command == "/login":
                 credentials = self.credentials(args)
                 if credentials is None:
@@ -279,7 +292,7 @@ class BotApp:
                     return
                 result = self.backend.login(credentials[0], credentials[1])
                 self.links.put(chat_id, result["token"])
-                self.send(chat_id, "You’re logged in. Use /girls, then /talk <name>.")
+                self.notify(chat_id, "You’re logged in. Use /girls, then /talk <name>.")
             elif command in ("/girls", "/roster"):
                 self.show_roster(chat_id)
             elif command == "/talk":
@@ -291,7 +304,7 @@ class BotApp:
                         self.backend.logout(link[0])
                     finally:
                         self.links.delete(chat_id)
-                self.send(chat_id, "You’re logged out.")
+                self.notify(chat_id, "You’re logged out.")
             else:
                 self.send(chat_id, "Unknown command. Try /start, /login, /girls, or /talk <name>.")
         except BackendError as exc:
@@ -362,15 +375,26 @@ class BotApp:
         return error.detail
 
 
-def process_updates(app: BotApp, updates: list[dict], offset: int | None) -> tuple[int | None, bool]:
+def process_updates(
+    app: BotApp,
+    updates: list[dict],
+    offset: int | None,
+    failures: dict[int, int] | None = None,
+) -> tuple[int | None, bool, dict[int, int]]:
+    failures = failures if failures is not None else {}
     for update in updates:
+        update_id = update["update_id"]
         try:
             app.handle(update)
         except Exception:
-            LOG.exception("Unhandled Telegram update")
-            return offset, False
-        offset = update["update_id"] + 1
-    return offset, True
+            failures[update_id] = failures.get(update_id, 0) + 1
+            if failures[update_id] < MAX_UPDATE_RETRIES:
+                LOG.exception("Unhandled Telegram update; retry %d", failures[update_id])
+                return offset, False, failures
+            LOG.exception("Dropping Telegram update after %d failures", failures[update_id])
+            failures.pop(update_id)
+        offset = update_id + 1
+    return offset, True, failures
 
 
 def run() -> None:
@@ -382,6 +406,7 @@ def run() -> None:
     links.init()
     app = BotApp(TelegramApi(TELEGRAM_BOT_TOKEN), BackendClient(), links)
     offset = None
+    failures: dict[int, int] = {}
     while True:
         try:
             updates = app.telegram.updates(offset)
@@ -389,7 +414,7 @@ def run() -> None:
             LOG.exception("Telegram polling failed")
             time.sleep(5)
             continue
-        offset, processed = process_updates(app, updates, offset)
+        offset, processed, failures = process_updates(app, updates, offset, failures)
         if not processed:
             time.sleep(5)
 

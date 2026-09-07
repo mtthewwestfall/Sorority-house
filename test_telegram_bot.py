@@ -114,6 +114,27 @@ class TelegramSmokeTest(unittest.TestCase):
         self.update("/login player@example.com pass word 123")
         self.assertEqual(self.backend.login_args, [("player@example.com", "pass word 123")])
 
+    def test_login_delivery_failure_does_not_replay_backend_login(self):
+        class FailingTelegram(FakeTelegram):
+            def send(self, chat_id, text):
+                raise RuntimeError("delivery failed")
+
+        app = BotApp(FailingTelegram(), self.backend, self.links)
+        with self.assertLogs("sorority.telegram", level="ERROR"):
+            offset, processed, failures = process_updates(
+                app,
+                [{"update_id": 1, "message": {
+                    "chat": {"id": 7},
+                    "text": "/login player@example.com password123",
+                }}],
+                None,
+            )
+        self.assertEqual(offset, 2)
+        self.assertTrue(processed)
+        self.assertEqual(failures, {})
+        self.assertEqual(self.backend.login_args, [("player@example.com", "password123")])
+        self.assertEqual(self.links.get(7), ("token-1", ""))
+
     def test_group_messages_cannot_use_a_linked_account(self):
         self.app.handle({"message": {
             "chat": {"id": 7, "type": "group"},
@@ -134,7 +155,7 @@ class TelegramSmokeTest(unittest.TestCase):
 
         app = FailingApp()
         with self.assertLogs("sorority.telegram", level="ERROR"):
-            offset, processed = process_updates(
+            offset, processed, failures = process_updates(
                 app,
                 [{"update_id": 1}, {"update_id": 2}, {"update_id": 3}],
                 1,
@@ -142,6 +163,32 @@ class TelegramSmokeTest(unittest.TestCase):
         self.assertEqual(app.seen, [1, 2])
         self.assertEqual(offset, 2)
         self.assertFalse(processed)
+        self.assertEqual(failures, {2: 1})
+
+    def test_permanent_update_failure_is_dropped_after_retries(self):
+        class FailingApp:
+            def handle(self, update):
+                if update["update_id"] == 2:
+                    raise RuntimeError("permanent failure")
+
+        app = FailingApp()
+        failures = {}
+        for attempt in range(2):
+            with self.assertLogs("sorority.telegram", level="ERROR"):
+                offset, processed, failures = process_updates(
+                    app, [{"update_id": 2}, {"update_id": 3}], 2, failures
+                )
+            self.assertEqual(offset, 2)
+            self.assertFalse(processed)
+            self.assertEqual(failures, {2: attempt + 1})
+
+        with self.assertLogs("sorority.telegram", level="ERROR"):
+            offset, processed, failures = process_updates(
+                app, [{"update_id": 2}, {"update_id": 3}], 2, failures
+            )
+        self.assertEqual(offset, 4)
+        self.assertTrue(processed)
+        self.assertEqual(failures, {})
 
 
 class LinkStoreDsnTest(unittest.TestCase):

@@ -107,7 +107,9 @@ instead of using `/chat/stream`, because long-polling plus a single final
 Telegram message avoids rate-limit-heavy message edits while preserving the
 backend's existing reply and memory behavior. It handles expired sessions,
 locked doors, exhausted message allowances, network errors, and Telegram
-429 retries.
+429 retries. Failed updates are retried in order with a bounded backoff; after
+three consecutive failures, Mia logs and drops the poison update so it cannot
+block every later user's messages.
 
 Without a real Telegram token, run the stubbed smoke test:
 
