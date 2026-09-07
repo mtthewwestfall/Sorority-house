@@ -64,9 +64,10 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | `SHOPIFY_API_KEY` | Integration for merch store | Shopify Admin |
 | `GEMINI_API_KEY` / `CHAT_MODEL` | Gemini fallback for any role without its own endpoint (default model `gemini-3.1-flash-lite`) | Google AI Studio |
 | `MOUTH_BASE_URL` / `MOUTH_MODEL` / `MOUTH_API_KEY` | The voice that types. e.g. `https://api.mistral.ai/v1` + `mistral-small-latest`, or your own vLLM box | Mistral / your server |
-| `BRAIN_BASE_URL` / `BRAIN_MODEL` / `BRAIN_API_KEY` | The memory digest a turn behind. e.g. `https://api.deepseek.com/v1` + `deepseek-chat` | DeepSeek |
+| `BRAIN_BASE_URL` / `BRAIN_MODEL` / `BRAIN_API_KEY` | The memory digest a turn behind. e.g. `https://api.deepseek.com/v1` + `deepseek-v4-flash` (about 3 s a digest; `deepseek-v4-pro` thinks for minutes) | DeepSeek |
 | `AUDIT_BASE_URL` / `AUDIT_MODEL` / `AUDIT_API_KEY` | Optional own endpoint for the paid audit; otherwise audits ride the mouth (same voice as chat) | You choose it |
 | `MODEL_TIMEOUT_S` | Per-call timeout for every provider (default `120`) | You choose it |
+| `BRAIN_MAX_TOKENS` | Token budget for the memory digest (default `4000`); reasoning models bill their thinking against it | You choose it |
 | `CHAT_CPS` | Her typing speed on `/chat/stream`, characters per second (default `14`) | You choose it |
 | `CHAT_LEAD_CHARS` | How far generation may run ahead of the screen (default `240`) | You choose it |
 | `TAIL_REVISION` | `true` (default) lets a mid-reply brain rewrite only the untyped tail | You choose it |

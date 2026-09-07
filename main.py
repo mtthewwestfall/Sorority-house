@@ -159,6 +159,9 @@ CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal 
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
 MODEL_TIMEOUT_S = float(os.environ.get("MODEL_TIMEOUT_S", "120"))
+# Reasoning models (DeepSeek v4 / reasoner) bill their thinking against
+# max_tokens, so the brain's memory digest needs far more headroom than 600.
+BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4000"))
 
 
 def _role_config(role, default_model):
@@ -1028,7 +1031,7 @@ def _summarize(user_id, girl, rel, recent_msgs):
         context.append({"role": "user", "content": "NEW CONVERSATION:\n" + "\n".join(lines)})
     context.append({"role": "user", "content": "Return the updated JSON now.\n" + grading})
 
-    out = llm(BRAIN, context)
+    out = llm(BRAIN, context, max_tokens=BRAIN_MAX_TOKENS)
     summary = rel["summary"] or ""
     milestone = int(rel["milestone"])
     conduct = "steady"
@@ -1387,12 +1390,17 @@ def _openai(cfg, messages, max_tokens=600, temperature=0.8):
         raise HTTPException(status_code=502,
                             detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
     try:
-        text = r.json()["choices"][0]["message"]["content"]
-        if not text or not text.strip():
-            raise ValueError("no text")
-        return text.strip()
+        choice = r.json()["choices"][0]
+        text = choice["message"]["content"]
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected model response")
+    if not text or not text.strip():
+        if choice.get("finish_reason") == "length":
+            raise HTTPException(status_code=502, detail=(
+                f"{cfg['model']} spent all {max_tokens} tokens thinking and wrote "
+                "nothing; raise the token budget for this role"))
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    return text.strip()
 
 
 def _openai_stream(cfg, messages, max_tokens=600, temperature=0.8):
