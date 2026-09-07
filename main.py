@@ -1157,10 +1157,13 @@ def _openrouter(messages, model, max_tokens=600, temperature=0.8, timeout=120):
         raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY not set")
     payload = {"model": model, "messages": messages,
                "max_tokens": max_tokens, "temperature": temperature}
-    r = requests.post(OPENROUTER_BASE, json=payload, timeout=timeout,
-                      headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                               "Content-Type": "application/json",
-                               "X-Title": "Sorority House"})
+    try:
+        r = requests.post(OPENROUTER_BASE, json=payload, timeout=timeout,
+                          headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                                   "Content-Type": "application/json",
+                                   "X-Title": "Sorority House"})
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {type(e).__name__}")
     if r.status_code != 200:
         raise HTTPException(status_code=502,
                             detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
@@ -1665,7 +1668,11 @@ def chat(body: ChatIn, user=Depends(current_user)):
         conn.close()
 
     # Layer-2 refresh is throttled (every SUMMARY_EVERY messages), not per turn.
-    state = maybe_refresh_summary(user["user_id"], girl, rel)
+    # The reply is already saved and charged; a failed refresh must not hide it.
+    try:
+        state = maybe_refresh_summary(user["user_id"], girl, rel)
+    except Exception:
+        state = {"summary": rel["summary"], "milestone": rel["milestone"]}
 
     return {"ok": True, "reply": reply, "remaining": remaining - 1,
             "milestone": state["milestone"]}
