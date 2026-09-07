@@ -220,28 +220,47 @@
       width: min(560px, 100%); height: min(680px, 92vh); display: flex; flex-direction: column;
       border: 1px solid var(--line); border-radius: 22px; background: #150e23; box-shadow: var(--shadow); overflow: hidden;
     }
-    .chat-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
-    .chat-head img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: linear-gradient(160deg, #ff2894, #bd4bdd); color: transparent; }
+    /* iMessage-style layout: avatar + name header, tailed bubbles, pill composer. */
+    .chat-panel { --bubble-her: #2a1d40; --bubble-me: var(--pink); --panel: #150e23; }
+    .chat-head { position: relative; display: flex; align-items: center; gap: 18px; padding: 18px 22px 8px 72px; }
+    .chat-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex: none; background: linear-gradient(160deg, #ff2894, #bd4bdd); color: transparent; border: 2px solid rgba(255,255,255,.08); }
     .chat-head .who { flex: 1; min-width: 0; }
-    .chat-head .who strong { font-family: Impact, sans-serif; letter-spacing: .03em; font-size: 1.3rem; text-transform: uppercase; }
-    .chat-head .who div { color: var(--muted); font-size: .74rem; }
-    .chat-tag { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--muted); font-size: .64rem; letter-spacing: .18em; text-transform: uppercase; }
-    .chat-close { border: 0; background: transparent; color: var(--muted); font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px 6px; }
-    .chat-close:hover { color: var(--white); }
-    .chat-log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 11px; }
-    .msg { max-width: 82%; padding: 10px 14px; border-radius: 16px; font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .msg.her { align-self: flex-start; background: rgba(34,23,53,.9); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
-    .msg.me { align-self: flex-end; background: linear-gradient(100deg, #ff2894, #bd4bdd); color: #fff; border-bottom-right-radius: 5px; }
-    .msg.note { align-self: center; max-width: 100%; text-align: center; color: var(--muted); font-size: .78rem; background: none; padding: 2px 0; }
+    .chat-head .who strong { display: block; font-size: 1.55rem; font-weight: 700; letter-spacing: -.01em; }
+    .chat-head .who div { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+    .chat-close { position: absolute; left: 14px; top: 16px; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255,255,255,.06); color: var(--white); font-size: 1.5rem; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+    .chat-close:hover { background: rgba(255,255,255,.12); }
+    .chat-service { text-align: center; color: var(--muted); font-size: .7rem; font-weight: 600; letter-spacing: .02em; padding: 6px 0 0; }
+    .chat-service small { display: block; font-weight: 400; font-size: .68rem; opacity: .85; }
+    .chat-log { flex: 1; overflow-y: auto; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 4px; }
+    .msg { position: relative; max-width: 78%; padding: 9px 14px; border-radius: 18px; font-size: 1rem; line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+    .msg.her, .msg.me { margin-top: 2px; }
+    .msg.her { align-self: flex-start; background: var(--bubble-her); color: var(--white); border-bottom-left-radius: 18px; }
+    .msg.me { align-self: flex-end; background: var(--bubble-me); color: #fff; }
+    /* tails */
+    .msg.her::before, .msg.me::before { content: ''; position: absolute; bottom: 0; width: 20px; height: 22px; z-index: -1; }
+    .msg.her::after, .msg.me::after { content: ''; position: absolute; bottom: 0; width: 26px; height: 22px; background: var(--panel); }
+    .msg.her::before { left: -7px; background: var(--bubble-her); border-bottom-right-radius: 16px 14px; }
+    .msg.her::after { left: -26px; border-bottom-right-radius: 10px; }
+    .msg.me::before { right: -7px; background: var(--bubble-me); border-bottom-left-radius: 16px 14px; }
+    .msg.me::after { right: -26px; border-bottom-left-radius: 10px; }
+    .msg.her, .msg.me { z-index: 0; }
+    .msg.note, .msg.stamp { align-self: center; max-width: 100%; text-align: center; color: var(--muted); font-size: .74rem; background: none; padding: 8px 0 4px; margin: 0; }
+    .msg.stamp b { font-weight: 600; }
+    .msg.receipt { align-self: flex-end; max-width: 100%; color: var(--muted); font-size: .72rem; background: none; padding: 0 4px; margin: -2px 0 8px; }
+    .msg.receipt b { font-weight: 600; }
     .msg.error { align-self: center; max-width: 100%; text-align: center; color: #ffb0c9; border: 1px solid rgba(255,42,145,.4); background: rgba(255,42,145,.08); font-size: .84rem; }
-    .typing { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; }
-    .chat-foot { border-top: 1px solid var(--line); padding: 12px 14px 14px; }
-    .chat-form { display: flex; gap: 9px; }
+    .typing { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; margin: 4px 0 8px; }
+    .chat-foot { padding: 10px 12px 14px; }
+    .chat-form { display: flex; align-items: flex-end; gap: 10px; }
     .chat-form textarea {
-      flex: 1; min-width: 0; border-radius: 999px; padding: 12px 16px; font: inherit; font-size: .95rem; line-height: 1.3;
-      color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line); resize: none; max-height: 110px;
+      flex: 1; min-width: 0; border-radius: 22px; padding: 11px 44px 11px 16px; font: inherit; font-size: 1rem; line-height: 1.3;
+      color: var(--white); background: rgba(255,255,255,.05); border: 1px solid var(--line); resize: none; max-height: 110px;
     }
-    .chat-form textarea:focus { outline: none; border-color: rgba(255,181,44,.6); }
+    .chat-form textarea::placeholder { color: rgba(199,185,202,.6); }
+    .chat-form textarea:focus { outline: none; border-color: rgba(255,255,255,.28); }
+    .chat-form .field { flex: 1; min-width: 0; position: relative; display: flex; }
+    .chat-form .field textarea { width: 100%; overflow-y: auto; scrollbar-width: none; }
+    .chat-form .field textarea::-webkit-scrollbar { display: none; }
     .auth-panel { width: min(420px, 100%); height: auto; padding: 26px 26px 22px; gap: 12px; }
     .auth-panel h2 { font-size: 1.4rem; margin: 0 0 4px; }
     .auth-panel .auth-sub { color: var(--muted); font-size: .9rem; margin: 0 0 8px; }
@@ -257,15 +276,28 @@
     .auth-close { position: absolute; top: 12px; right: 14px; }
     .auth-panel { position: relative; }
     .auth-hidden { display: none !important; }
-    .chat-form .button { padding: 12px 22px; }
-    .chat-photo { border-radius: 16px; overflow: hidden; align-self: flex-start; max-width: 82%; border: 1px solid var(--line); }
+    /* send arrow lives inside the pill and only shows once there is text */
+    .chat-form .button#chat-send {
+      position: absolute; right: 5px; bottom: 5px; width: 34px; height: 34px; padding: 0; border-radius: 50%;
+      display: none; place-items: center; font-size: 1.1rem; line-height: 1;
+    }
+    .chat-form.has-text .button#chat-send { display: grid; }
+    .chat-form .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .chat-photo { border-radius: 18px; overflow: hidden; align-self: flex-start; max-width: 78%; border: 1px solid var(--line); margin-bottom: 8px; }
     .chat-photo img { display: block; width: 100%; }
     .chat-photo figcaption { padding: 6px 10px; color: var(--muted); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; background: rgba(9,7,17,.7); }
-    #chat-photo-btn { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 11px 16px; font: inherit; font-size: .85rem; cursor: pointer; }
-    #chat-photo-btn:hover:not([disabled]) { color: var(--white); border-color: rgba(255,181,44,.6); }
+    #chat-photo-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: var(--white); font: inherit; font-size: 1.7rem; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0 0 3px; }
+    #chat-photo-btn:hover:not([disabled]) { background: rgba(255,255,255,.14); }
     #chat-photo-btn[disabled] { opacity: .5; cursor: not-allowed; }
-    .chat-form .button[disabled] { opacity: .5; cursor: not-allowed; }
-    .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; }
+    #chat-photo-btn[hidden] { display: none; }
+    .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 0 6px; }
+    /* picture request sheet, opened from the + button */
+    .pic-sheet { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; font-size: .9rem; margin: 6px 0 10px; }
+    .pic-sheet h4 { margin: 0 0 4px; font-size: 1rem; }
+    .pic-sheet p { margin: 0 0 10px; color: var(--muted); font-size: .84rem; }
+    .pic-sheet .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pic-sheet .button { padding: 9px 16px; font-size: .86rem; }
+    .pic-sheet .ghost { background: none; border: 1px solid var(--line); color: var(--muted); }
 
     @media (max-width: 900px) {
       .doors, .plan-grid { grid-template-columns: repeat(2, 1fr); }
@@ -285,14 +317,17 @@
       .footer-inner { flex-direction: column; text-align: center; }
       /* Pin the panel to the top of the screen at full size; the on-screen keyboard
          overlays its lower half and the composer floats above the keyboard. */
-      #chat.is-open { place-items: start center; padding: 10px; }
-      #chat .chat-panel { height: 100%; position: relative; }
-      #chat .chat-log { padding-bottom: calc(var(--foot-h, 96px) + var(--kb-offset, 0px)); }
+      #chat.is-open { place-items: start center; padding: 0; background: #150e23; backdrop-filter: none; }
+      #chat .chat-panel { height: 100%; position: relative; width: 100%; border: 0; border-radius: 0; box-shadow: none; }
+      #chat .chat-head { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+      #chat .chat-log { padding-bottom: calc(var(--foot-h, 96px) + var(--kb-offset, 0px)); scrollbar-width: none; }
+      #chat .chat-log::-webkit-scrollbar { display: none; }
       #chat .chat-foot {
         position: absolute; left: 0; right: 0; bottom: var(--kb-offset, 0px); z-index: 2;
         background: rgba(21, 14, 35, .55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-        border-top-color: rgba(255,255,255,.08);
       }
+      #chat .chat-head { padding-left: 64px; gap: 14px; }
+      #chat .chat-head img { width: 72px; height: 72px; }
       body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
     }
   </style>
@@ -469,20 +504,22 @@
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
     <div class="chat-panel">
       <div class="chat-head">
+        <button class="chat-close" id="chat-close" type="button" aria-label="Back">&lsaquo;</button>
         <img id="chat-avatar" src="" alt="" />
         <div class="who">
           <strong id="chat-name"></strong>
           <div id="chat-title"></div>
         </div>
-        <span class="chat-tag">AI companion</span>
-        <button class="chat-close" id="chat-close" type="button" aria-label="Close chat">&times;</button>
       </div>
+      <div class="chat-service">AI Message<small>Private &middot; AI companion</small></div>
       <div class="chat-log" id="chat-log" aria-live="polite"></div>
       <div class="chat-foot">
         <form class="chat-form" id="chat-form">
-          <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="Say something…" aria-label="Message"></textarea>
-          <button id="chat-photo-btn" type="button" hidden>See her</button>
-          <button class="button" id="chat-send" type="submit">Send</button>
+          <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
+          <div class="field">
+            <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="Message" aria-label="Message"></textarea>
+            <button class="button" id="chat-send" type="submit" aria-label="Send">&uarr;</button>
+          </div>
         </form>
         <div class="chat-meta">
           <span class="ai-note"></span>
@@ -687,6 +724,37 @@
       return el;
     }
 
+    // iMessage-style furniture: "Today 7:09 PM" stamps and a Read receipt under
+    // your latest bubble.
+    const timeFmt = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
+    function clockNow() { return timeFmt.format(new Date()); }
+    let lastStampAt = 0;
+    function addStamp(label, force) {
+      const now = Date.now();
+      if (!force && now - lastStampAt < 5 * 60 * 1000) return;
+      lastStampAt = now;
+      const el = document.createElement('div');
+      el.className = 'msg stamp';
+      const b = document.createElement('b');
+      b.textContent = label || 'Today';
+      el.append(b, ' ' + clockNow());
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    let receipt = null;
+    function markRead() {
+      if (receipt) receipt.remove();
+      const me = [...chatLog.querySelectorAll('.msg.me')].pop();
+      if (!me) return;
+      receipt = document.createElement('div');
+      receipt.className = 'msg receipt';
+      const b = document.createElement('b');
+      b.textContent = 'Read';
+      receipt.append(b, ' ' + clockNow());
+      me.after(receipt);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
     function addPhoto(mime, base64, caption) {
       const figure = document.createElement('figure');
       figure.className = 'chat-photo';
@@ -699,6 +767,23 @@
       figure.append(img, cap);
       chatLog.appendChild(figure);
       chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    const HISTORY_SHOWN = 8;
+    async function loadHistory(girl) {
+      try {
+        const response = await fetch(API_BASE_URL + '/history?girl=' + encodeURIComponent(girl), { headers: authHeaders() });
+        if (response.status === 401) { handleUnauthorized(); return; }
+        if (!response.ok) return;
+        const data = await response.json();
+        if (currentGirl !== girl) return;
+        const recent = (data.messages || []).slice(-HISTORY_SHOWN);
+        if (!recent.length || chatLog.children.length > 1) return;
+        chatLog.innerHTML = '';
+        addMessage('note', 'Where you left off');
+        for (const m of recent) addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
+        if (recent[recent.length - 1].sender === 'user') markRead();
+      } catch (_) { /* history is a nicety; the chat still works without it */ }
     }
 
     let lockedScrollY = 0;
@@ -714,7 +799,11 @@
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
       chatLog.innerHTML = '';
+      receipt = null;
+      lastStampAt = 0;
       addMessage('note', 'Her door is open. Say hi.');
+      loadHistory(currentGirl);
+      loadPictureStatus();
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
@@ -749,6 +838,7 @@
     }
 
     function growChatInput() {
+      chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
       chatInput.style.height = 'auto';
       chatInput.style.height = `${Math.min(chatInput.scrollHeight, 110)}px`;
       const pinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 8;
@@ -870,11 +960,57 @@
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
 
-    // Photos: the button stays hidden until the backend exposes POST /image.
+    // Pictures: the + button stays hidden until the backend exposes /image.
+    // One picture is earned per PICTURE_EVERY messages; packs add credits.
+    let picStatus = null;
     fetch(API_BASE_URL + '/image', { method: 'HEAD' })
       .then((r) => { if (r.status !== 404) chatPhotoBtn.hidden = false; })
       .catch(() => {});
-    chatPhotoBtn.addEventListener('click', async () => {
+    async function loadPictureStatus() {
+      if (chatPhotoBtn.hidden || !isLoggedIn()) return;
+      try {
+        const r = await fetch(API_BASE_URL + '/image', { headers: authHeaders() });
+        if (r.ok) picStatus = await r.json();
+      } catch (_) {}
+    }
+    let picSheet = null;
+    function closePicSheet() { if (picSheet) { picSheet.remove(); picSheet = null; } }
+    function openPicSheet() {
+      closePicSheet();
+      const s = picStatus || {};
+      const available = (s.available || 0);
+      picSheet = document.createElement('div');
+      picSheet.className = 'pic-sheet';
+      const h = document.createElement('h4');
+      h.textContent = available > 0 ? `Ask her for a picture (${available} ready)` : 'Ask her for a picture';
+      const p = document.createElement('p');
+      p.textContent = available > 0
+        ? 'She picks the moment. Same girl, same style as her door.'
+        : `You earn one picture every ${s.every || 100} messages${s.next_in ? ` — ${s.next_in} to go` : ''}. Or grab a pack of ${s.pack_size || 5}.`;
+      const row = document.createElement('div');
+      row.className = 'row';
+      const ask = document.createElement('button');
+      ask.type = 'button'; ask.className = 'button'; ask.textContent = 'Request picture';
+      ask.disabled = available <= 0;
+      ask.addEventListener('click', () => { closePicSheet(); requestPicture(); });
+      const pack = document.createElement('button');
+      pack.type = 'button'; pack.className = 'button ghost';
+      pack.textContent = s.pack_price ? `Pack of ${s.pack_size || 5} · ${s.pack_price}` : `Pack of ${s.pack_size || 5} · coming soon`;
+      pack.disabled = !s.pack_price;
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
+      cancel.addEventListener('click', closePicSheet);
+      row.append(ask, pack, cancel);
+      picSheet.append(h, p, row);
+      chatLog.appendChild(picSheet);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    chatPhotoBtn.addEventListener('click', () => {
+      if (!currentGirl || chatPhotoBtn.disabled) return;
+      if (picSheet) { closePicSheet(); return; }
+      openPicSheet();
+    });
+    async function requestPicture() {
       if (!currentGirl || chatPhotoBtn.disabled) return;
       chatPhotoBtn.disabled = true;
       const pending = addMessage('typing', 'she’s finding a photo…');
@@ -895,13 +1031,14 @@
         } else {
           addPhoto(data.mime, data.image_b64, data.disclosure || 'AI-generated image');
         }
+        if (data && data.status) picStatus = data.status;
       } catch (error) {
         pending.remove();
         addMessage('error', 'Could not reach the house. Check your connection and try again.');
       } finally {
         chatPhotoBtn.disabled = false;
       }
-    });
+    }
 
     // She types: POST /chat/stream sends her reply as SSE, already paced by the
     // backend, so the bubble just grows as the events land. Older backends have
@@ -975,7 +1112,7 @@
       const handle = (event, data) => {
         if (girl !== currentGirl) return;   // her room is gone; drop the rest
         if (event === 'delta' && data.t) {
-          if (!bubble) { typing.remove(); bubble = addMessage('her', ''); }
+          if (!bubble) { typing.remove(); markRead(); bubble = addMessage('her', ''); }
           bubble.textContent += data.t;
           chatLog.scrollTop = chatLog.scrollHeight;
         } else if (event === 'done') {
@@ -1031,6 +1168,7 @@
       } else if (!response.ok || !data || data.ok === false) {
         addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
       } else {
+        markRead();
         addMessage('her', data.reply);
         showRemaining(data.remaining);
       }
@@ -1045,6 +1183,7 @@
       chatSend.disabled = true;
       chatInput.value = '';
       growChatInput();
+      addStamp('Today');
       addMessage('me', message);
       const typing = addMessage('typing', 'typing…');
 

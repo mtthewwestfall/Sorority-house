@@ -143,6 +143,7 @@ requirements.txt for Railway:
 import os
 import re
 import json
+import base64
 import asyncio
 import hashlib
 import hmac
@@ -221,6 +222,15 @@ EMIT_TICK_S = 0.05          # emitter wakes this often and types its share
 PIECE_CHARS = 24            # granularity the mouth thread hands to the emitter
 SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+# Pictures (POST /image): she sends a new photo of herself in the style of her door
+# portrait. One is earned per PICTURE_EVERY user messages (all girls combined);
+# packs of PICTURE_PACK_SIZE add credits once a price is set. Portraits are fetched
+# from the site that serves web/assets.
+IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")
+PICTURE_EVERY = int(os.environ.get("PICTURE_EVERY", "100"))
+PICTURE_PACK_SIZE = int(os.environ.get("PICTURE_PACK_SIZE", "5"))
+PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "")     # e.g. "$4.99"; blank = not for sale yet
+SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
 SUMMARY_EVERY = 8    # Layer 2: refresh the rolling summary every N user messages
@@ -606,6 +616,7 @@ def init_db():
                     stage_since  DATE,
                     last_session DATE,
                     active_days  INTEGER NOT NULL DEFAULT 1,
+                    stage_days   INTEGER NOT NULL DEFAULT 0,
                     pinned_told  JSONB NOT NULL DEFAULT '[]'::jsonb,
                     pinned_kept  JSONB NOT NULL DEFAULT '[]'::jsonb,
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -646,6 +657,15 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_free_audits INTEGER;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_reset_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pics_free_used INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_credits INTEGER NOT NULL DEFAULT 0;
+                -- distinct days the user actually talked to her at the current stage;
+                -- existing rows are seeded from the calendar clock, capped by days talked
+                ALTER TABLE relationships ADD COLUMN IF NOT EXISTS stage_days INTEGER;
+                UPDATE relationships
+                   SET stage_days = LEAST(active_days, GREATEST(0, CURRENT_DATE - COALESCE(stage_since, CURRENT_DATE)))
+                 WHERE stage_days IS NULL;
+                ALTER TABLE relationships ALTER COLUMN stage_days SET DEFAULT 0;
                 -- accounts that pre-date verification are grandfathered in as verified
                 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ DEFAULT now();
                 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verify_token TEXT;
@@ -1062,8 +1082,8 @@ def get_relationship(user_id, girl):
             if row is None:
                 cur.execute("""
                     INSERT INTO relationships (user_id, girl, milestone, summary,
-                                               stage_since, last_session, active_days)
-                    VALUES (%s,%s,1,'',CURRENT_DATE,CURRENT_DATE,1)
+                                               stage_since, last_session, active_days, stage_days)
+                    VALUES (%s,%s,1,'',CURRENT_DATE,CURRENT_DATE,1,0)
                     ON CONFLICT (user_id, girl) DO NOTHING
                 """, (user_id, girl))
                 conn.commit()
@@ -1073,7 +1093,7 @@ def get_relationship(user_id, girl):
             if row is None:  # safety net (shouldn't happen)
                 return {"user_id": user_id, "girl": girl, "milestone": 1,
                         "summary": "", "since_summary": 0, "stage_since": None,
-                        "last_session": None, "active_days": 1,
+                        "last_session": None, "active_days": 1, "stage_days": 0,
                         "pinned_told": [], "pinned_kept": []}
             return row
     finally:
@@ -1104,13 +1124,10 @@ def _today():
 
 
 def rel_days_in_stage(rel):
-    """Real days the user has 'lived' at the current milestone.
-    A row with no stage_since yet counts 0 — the first session starts the clock."""
+    """Distinct real days the user actually talked to her at the current milestone.
+    Days of silence don't count; the day the stage moved is day 0."""
     try:
-        d = rel.get("stage_since")
-        if d is None:
-            return 0
-        return max(0, (_today() - d).days)
+        return max(0, int(rel.get("stage_days") or 0))
     except Exception:
         return 0
 
@@ -1370,9 +1387,10 @@ def _summarize(user_id, girl, rel, recent_msgs):
                 SET summary=%s, milestone=%s, since_summary=0,
                     pinned_told=%s, pinned_kept=%s,
                     stage_since = CASE WHEN %s THEN CURRENT_DATE ELSE stage_since END,
+                    stage_days = CASE WHEN %s THEN 0 ELSE stage_days END,
                     updated_at=now()
                 WHERE user_id=%s AND girl=%s
-            """, (summary, milestone, Json(told), Json(kept), changed,
+            """, (summary, milestone, Json(told), Json(kept), changed, changed,
                   user_id, girl))
             conn.commit()
     finally:
@@ -1547,9 +1565,10 @@ def persist_turn(user_id, girl, rel, user_message, reply):
                 UPDATE relationships
                 SET last_session = CURRENT_DATE,
                     active_days = active_days + %s,
+                    stage_days = COALESCE(stage_days, 0) + %s,
                     stage_since = COALESCE(stage_since, CURRENT_DATE)
                 WHERE user_id=%s AND girl=%s
-            """, (new_day, user_id, girl))
+            """, (new_day, new_day, user_id, girl))
             conn.commit()
     finally:
         conn.close()
@@ -2366,6 +2385,145 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
                  "X-Accel-Buffering": "no"})
+
+
+# ---------------------------------------------------------------------------
+# PICTURES — earned every PICTURE_EVERY messages, or bought in packs
+# ---------------------------------------------------------------------------
+class ImageIn(BaseModel):
+    girl: str
+
+
+def picture_status(cur, user_id):
+    cur.execute("SELECT count(*) AS n FROM chat_logs WHERE user_id=%s AND sender='user'", (user_id,))
+    total = int(cur.fetchone()["n"])
+    cur.execute("SELECT pics_free_used, pic_credits FROM users WHERE user_id=%s", (user_id,))
+    row = cur.fetchone() or {"pics_free_used": 0, "pic_credits": 0}
+    earned = total // PICTURE_EVERY
+    free_left = max(0, earned - int(row["pics_free_used"]))
+    return {
+        "every": PICTURE_EVERY,
+        "messages": total,
+        "earned": earned,
+        "free_left": free_left,
+        "credits": int(row["pic_credits"]),
+        "available": free_left + int(row["pic_credits"]),
+        "next_in": PICTURE_EVERY - (total % PICTURE_EVERY),
+        "pack_size": PICTURE_PACK_SIZE,
+        "pack_price": PICTURE_PACK_PRICE or None,
+    }
+
+
+def _portrait_bytes(avatar_url):
+    """Her door portrait, as (mime, bytes), or None when it can't be fetched."""
+    if not avatar_url:
+        return None
+    url = avatar_url if avatar_url.startswith("http") else f"{SITE_URL}/{avatar_url.lstrip('/')}"
+    try:
+        r = requests.get(url, timeout=15)
+        if r.status_code != 200 or not r.content:
+            return None
+        mime = r.headers.get("Content-Type", "").split(";")[0].strip() or "image/jpeg"
+        return mime, r.content
+    except requests.RequestException:
+        return None
+
+
+def generate_picture(girl, name, avatar_url):
+    """A fresh selfie of her in the style of her portrait. Returns (mime, base64)."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    scene = random.choice([
+        "a casual mirror selfie in her bedroom",
+        "a sunny selfie on the sorority house porch",
+        "a cozy evening selfie on the couch",
+        "a quick selfie between classes on campus",
+        "a coffee-shop selfie, laughing at something off camera",
+    ])
+    prompt = (f"Create a new picture of {name}, the same woman as in the reference image: "
+              f"same face, hair, skin tone and overall art style. Scene: {scene}. "
+              "Fully clothed, tasteful, natural expression, phone-camera framing. "
+              "No text or watermarks.")
+    parts = [{"text": prompt}]
+    portrait = _portrait_bytes(avatar_url)
+    if portrait:
+        parts.append({"inline_data": {"mime_type": portrait[0],
+                                       "data": base64.b64encode(portrait[1]).decode()}})
+    payload = {"contents": [{"role": "user", "parts": parts}],
+               "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
+    r = requests.post(f"{GEMINI_BASE}/{IMAGE_MODEL}:generateContent", json=payload,
+                      params={"key": GEMINI_API_KEY},
+                      headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Image model failed ({r.status_code}): {r.text[:300]}")
+    try:
+        for part in r.json()["candidates"][0]["content"]["parts"]:
+            blob = part.get("inlineData") or part.get("inline_data")
+            if blob and blob.get("data"):
+                return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
+    except Exception:
+        pass
+    raise HTTPException(status_code=502, detail="She didn't send a picture this time")
+
+
+@app.get("/image")
+def image_status(user=Depends(current_user)):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            return picture_status(cur, user["user_id"])
+    finally:
+        conn.close()
+
+
+@app.post("/image")
+def image(body: ImageIn, user=Depends(current_user)):
+    girl = body.girl.strip().lower()
+    if not girl_open(user["user_id"], girl, user["tier"]):
+        raise HTTPException(status_code=403, detail="This door is still locked for you")
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            status = picture_status(cur, uid)
+            # reserve one entitlement atomically: earned first, then bought credits
+            cur.execute("""
+                UPDATE users SET pics_free_used = pics_free_used + 1
+                WHERE user_id=%s AND pics_free_used < %s RETURNING 1
+            """, (uid, status["earned"]))
+            spent = "free" if cur.fetchone() else None
+            if spent is None:
+                cur.execute("""
+                    UPDATE users SET pic_credits = pic_credits - 1
+                    WHERE user_id=%s AND pic_credits > 0 RETURNING 1
+                """, (uid,))
+                spent = "credit" if cur.fetchone() else None
+            if spent is None:
+                conn.rollback()
+                return {"ok": False, "locked": True, "status": status,
+                        "error": f"She'll send one after {status['next_in']} more messages."}
+            conn.commit()
+            cur.execute("SELECT name, avatar_url FROM personas WHERE girl=%s", (girl,))
+            row = cur.fetchone()
+        name = row["name"] if row else girl.title()
+        avatar_url = row["avatar_url"] if row else ""
+        try:
+            mime, b64 = generate_picture(girl, name, avatar_url)
+        except HTTPException:
+            # refund: a failed generation must not eat the entitlement
+            with conn.cursor() as cur:
+                if spent == "free":
+                    cur.execute("UPDATE users SET pics_free_used = GREATEST(0, pics_free_used - 1) WHERE user_id=%s", (uid,))
+                else:
+                    cur.execute("UPDATE users SET pic_credits = pic_credits + 1 WHERE user_id=%s", (uid,))
+                conn.commit()
+            raise
+        with conn.cursor() as cur:
+            status = picture_status(cur, uid)
+        return {"ok": True, "mime": mime, "image_b64": b64,
+                "disclosure": "AI-generated image", "status": status}
+    finally:
+        conn.close()
 
 
 @app.get("/history")
