@@ -277,10 +277,16 @@
       .hallway { min-height: 330px; }
       .group-image { height: 290px; }
       .footer-inner { flex-direction: column; text-align: center; }
-      /* Pin the panel to the top of the visual viewport so the on-screen keyboard
-         shrinks it in place instead of pushing the whole chat off screen. */
-      #chat.is-open { place-items: start center; padding: 10px; height: var(--vv-height, 100%); bottom: auto; }
-      #chat .chat-panel { height: 100%; }
+      /* Pin the panel to the top of the screen at full size; the on-screen keyboard
+         overlays its lower half and the composer floats above the keyboard. */
+      #chat.is-open { place-items: start center; padding: 10px; }
+      #chat .chat-panel { height: 100%; position: relative; }
+      #chat .chat-log { padding-bottom: 96px; }
+      #chat .chat-foot {
+        position: absolute; left: 0; right: 0; bottom: var(--kb-offset, 0px);
+        background: rgba(21, 14, 35, .55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        border-top-color: rgba(255,255,255,.08);
+      }
       body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
     }
   </style>
@@ -724,7 +730,8 @@
       if (!chat.classList.contains('is-open')) return;
       const vv = window.visualViewport;
       if (!vv) return;
-      chat.style.setProperty('--vv-height', `${Math.round(vv.height)}px`);
+      const keyboard = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      chat.style.setProperty('--kb-offset', `${Math.round(keyboard)}px`);
       chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
       if (window.scrollY) window.scrollTo(0, 0);
       chatLog.scrollTop = chatLog.scrollHeight;
