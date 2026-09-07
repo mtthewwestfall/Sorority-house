@@ -1381,14 +1381,45 @@ def brain_milestone(brain, fallback):
 # ONE TURN — prompt assembly and persistence, shared by /chat and /chat/stream.
 # ---------------------------------------------------------------------------
 def chat_preflight(user, girl_raw):
-    """Tier/door/allowance checks. Returns (girl, relationship row, remaining)."""
+    """Tier/door/allowance checks. Reserves one message atomically (conditional
+    UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
+    remaining AFTER this turn). Callers refund_message() if no reply is delivered."""
     girl = girl_raw.strip().lower()
     if not girl_open(user["user_id"], girl, user["tier"]):
         raise HTTPException(status_code=403, detail="This door is locked for your tier")
-    remaining = remaining_for(user)
-    if remaining <= 0:
+    limit = TIERS.get(user["tier"], TIERS["freshman"])["limit"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET msg_used = msg_used + 1
+                WHERE user_id=%s AND msg_used < %s
+                RETURNING msg_used
+            """, (user["user_id"], limit))
+            got = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if got is None:
         raise HTTPException(status_code=402, detail="out_of_messages")
-    return girl, get_relationship(user["user_id"], girl), remaining
+    remaining = max(0, limit - int(got["msg_used"]))
+    try:
+        return girl, get_relationship(user["user_id"], girl), remaining
+    except Exception:
+        refund_message(user["user_id"])
+        raise
+
+
+def refund_message(user_id):
+    """Hand back the message reserved by chat_preflight when she never answered."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET msg_used = GREATEST(msg_used - 1, 0) WHERE user_id=%s",
+                        (user_id,))
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
@@ -1423,7 +1454,8 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
 
 
 def persist_turn(user_id, girl, rel, user_message, reply):
-    """Log both sides of the turn, spend one message, and advance the day clock."""
+    """Log both sides of the turn and advance the day clock. The message itself
+    was already spent by chat_preflight."""
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -1431,8 +1463,6 @@ def persist_turn(user_id, girl, rel, user_message, reply):
                 INSERT INTO chat_logs (user_id, girl, sender, message)
                 VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
             """, (user_id, girl, user_message, user_id, girl, reply))
-            cur.execute("UPDATE users SET msg_used = msg_used + 1 WHERE user_id=%s",
-                        (user_id,))
             # per-girl engine: track real days of presence (the slow-burn clock)
             prev = rel.get("last_session")
             new_day = 1 if (prev is None or prev < _today()) else 0
@@ -1787,7 +1817,7 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
             return
         await asyncio.to_thread(persist_turn, user_id, girl, rel, user_message, reply)
         logged = True
-        yield _sse("done", {"remaining": max(remaining - 1, 0),
+        yield _sse("done", {"remaining": remaining,
                             "milestone": brain_milestone(brain, rel["milestone"])})
     finally:
         stop.set()
@@ -1796,6 +1826,9 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
             # dropped connection: log what she actually got to say, off-thread
             # because the client is already gone and cannot wait for it
             _BRAIN_POOL.submit(persist_turn, user_id, girl, rel, user_message, reply)
+        elif not reply:
+            # she never said a word: the reserved message goes back
+            _BRAIN_POOL.submit(refund_message, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2217,13 +2250,16 @@ def chat(body: ChatIn, user=Depends(current_user)):
     """Whole reply in one response. The brain runs behind it, so "milestone" here
     is the stage as of this turn; /state has it once the refresh lands."""
     girl, rel, remaining = chat_preflight(user, body.girl)
-    msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
-
-    reply = llm(MOUTH, msgs)   # no thinking budget for chat
+    try:
+        msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
+        reply = llm(MOUTH, msgs)   # no thinking budget for chat
+    except Exception:
+        refund_message(user["user_id"])
+        raise
     persist_turn(user["user_id"], girl, rel, body.message, reply)
     kick_brain(user["user_id"], girl, rel)
 
-    return {"ok": True, "reply": reply, "remaining": remaining - 1,
+    return {"ok": True, "reply": reply, "remaining": remaining,
             "milestone": int(rel["milestone"])}
 
 
@@ -2240,8 +2276,12 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
     What the user has SEEN is the transcript: on a mid-reply disconnect the typed
     part is what gets logged, so her memory and the screen never disagree."""
     girl, rel, remaining = await asyncio.to_thread(chat_preflight, user, body.girl)
-    msgs = await asyncio.to_thread(build_chat_messages,
-                                  user["user_id"], girl, rel, body.message)
+    try:
+        msgs = await asyncio.to_thread(build_chat_messages,
+                                      user["user_id"], girl, rel, body.message)
+    except Exception:
+        await asyncio.to_thread(refund_message, user["user_id"])
+        raise
     brain = kick_brain(user["user_id"], girl, rel)
     return StreamingResponse(
         _type_out(request, user["user_id"], girl, rel, msgs, body.message,
