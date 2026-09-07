@@ -47,6 +47,8 @@ Open `https://<your-app>/admin` and enter `ADMIN_SECRET`. From there you can:
 - **Accounts:** search by email / name / id, see tier, messages left, audits, girls & stages, and leave a private admin note.
 - **Free time:** comp any account to a paid tier for N days (`/admin/grant-time {email, tier, days}`). They get a fresh allowance immediately; when the time is up they drop back to whatever tier they had before (a used-up trial stays used up). Granting again extends; "End now" cuts it short; a real Stripe tier change cancels the comp.
 - **Complaints:** players file them with `POST /complaints {subject, body}` (logged in) and see status/notes at `GET /complaints`. Admin reads the inbox, adds a note and resolves/reopens.
+- **Roster:** the girls are data, not code. Add a sister, rewrite her character doc, change her door text or art, move her in the order, or change which tier unlocks her — all from the Roster tab, live on the next page load, no deploy (`POST /admin/console/girl`). Retiring her (`POST /admin/console/girl/{girl}/active?active=false`) takes her off the doors and keeps every message, so bringing her back resumes each conversation where it stopped. `GET /roster` is what the frontend renders the doors from; the cards in `web/index.html` are only the fallback for when the API can't be reached.
+- **Backup:** "Download backup" (`GET /admin/console/export`) saves the whole roster — every door and every character doc — as JSON. Roster only: no accounts, tokens or keys. Keep a copy; it is enough to rebuild the house on an empty database.
 
 ---
 

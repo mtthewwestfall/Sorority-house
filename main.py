@@ -68,6 +68,18 @@ API CONTRACT implemented here (point your chat app at these):
                                                             frontend shows * when audit_count>=5
   POST /admin/persona {"girl","name","door_title","persona","secret"} (upsert; paste full
                                                             doc; REQUIRES ADMIN_SECRET)
+  GET  /roster                                          -> {"tiers":[...],"girls":[{girl,name,
+                                                            door_title,blurb,avatar_url,
+                                                            min_tier,tier_label}]}
+                                                            the doors to render; door text and
+                                                            art only, never the persona doc
+  POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,min_tier,sort_order,
+                            active,persona}                -> add or rewrite a sister; the
+                                                            roster is data, so no deploy
+  POST /admin/console/girl/{girl}/active ?active=          -> take her off the doors / put her
+                                                            back. Her chats are kept either way
+  GET  /admin/console/export                              -> the roster as JSON (backup)
+  (the /admin/console/* endpoints take ADMIN_SECRET as the X-Admin-Secret header)
   GET  /health
 
 Env vars (Railway -> Variables):
@@ -190,13 +202,32 @@ TIERS = {
     "senior":     {"label": "Senior",    "limit": 4000},
 }
 
-# Which girls each tier can open. Girls not listed are locked for that tier.
-GIRL_ACCESS = {
-    "freshman":  ["dakota", "zoe"],
-    "sophomore": ["dakota", "zoe", "brittany", "willow"],
-    "junior":    ["dakota", "zoe", "brittany", "willow", "sasha", "piper"],
-    "senior":    ["dakota", "zoe", "brittany", "willow", "sasha", "piper", "veronica"],
-}
+# Tier order, low to high. A girl opens for every tier from her min_tier up.
+TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
+
+def tier_rank(tier):
+    return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
+
+# The roster is the personas table, not this file, so a new sister can be added
+# from the admin console without a deploy. These are only the first-boot seeds:
+# door text, art and the tier that opens her, all editable afterwards.
+ROSTER_SEED = [
+    # slug, min_tier, order, avatar, door blurb
+    ("dakota",   "freshman",  10, "https://myreal.live/assets/dakota-DovCVNjY.jpg",
+     "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
+    ("zoe",      "freshman",  20, "https://myreal.live/assets/zoe-BnozSeUg.jpg",
+     "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
+    ("willow",   "sophomore", 30, "https://myreal.live/assets/willow-4w9QsnXR.jpg",
+     "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
+    ("brittany", "sophomore", 40, "https://myreal.live/assets/brittany-DRnJ63HN.jpg",
+     "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
+    ("sasha",    "junior",    50, "assets/sasha.webp",
+     "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
+    ("piper",    "junior",    60, "https://myreal.live/assets/piper-P4IdzuLV.jpg",
+     "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
+    ("veronica", "senior",    70, "assets/veronica.webp",
+     "The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
+]
 
 # Fallback personas used only until you seed full docs via /admin/persona.
 # The FULL personality texts (the Canvas character docs) are what you paste there —
@@ -526,10 +557,35 @@ def init_db():
                     resolved_at TIMESTAMPTZ
                 );
                 CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
+                -- the roster lives with the persona doc: which tier opens her door,
+                -- what the door shows, and whether she is in the house at all.
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS min_tier TEXT NOT NULL DEFAULT 'freshman';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 100;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
             """)
+            _seed_roster(cur)
         conn.commit()
     finally:
         conn.close()
+
+
+def _seed_roster(cur):
+    """Put the seven original sisters in the table so the roster has a starting
+    point. A girl whose door has already been configured (avatar set) is left
+    alone - the seed is a floor, not the truth, and the console owns her after."""
+    for girl, min_tier, order, avatar, blurb in ROSTER_SEED:
+        name, title, fallback = DEFAULT_PERSONAS[girl]
+        cur.execute("""
+            INSERT INTO personas (girl, name, door_title, persona,
+                                  min_tier, sort_order, avatar_url, blurb)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (girl) DO UPDATE
+            SET min_tier = EXCLUDED.min_tier, sort_order = EXCLUDED.sort_order,
+                avatar_url = EXCLUDED.avatar_url, blurb = EXCLUDED.blurb
+            WHERE personas.avatar_url = ''
+        """, (girl, name, title, fallback, min_tier, order, avatar, blurb))
 
 
 def _check_admin(secret: str, strict: bool = False):
@@ -767,8 +823,33 @@ def remaining_for(user):
     return max(0, limit - int(user["msg_used"]))
 
 
+def roster(include_retired=False):
+    """The house, in door order. Rows are dicts with girl, name, door_title,
+    blurb, avatar_url, min_tier, sort_order, active."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT girl, name, door_title, blurb, avatar_url,
+                       min_tier, sort_order, active
+                FROM personas
+                WHERE active OR %s
+                ORDER BY sort_order, girl
+            """, (include_retired,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def girls_for_tier(tier, house=None):
+    """Slugs this tier can open: every active girl from her min_tier up."""
+    rank = tier_rank(tier)
+    return [r["girl"] for r in (house if house is not None else roster())
+            if r["active"] and tier_rank(r["min_tier"]) <= rank]
+
+
 def girl_open(user_id, girl, tier):
-    return girl in GIRL_ACCESS.get(tier, [])
+    return girl in girls_for_tier(tier)
 
 
 def free_audits_left(user):
@@ -1477,7 +1558,7 @@ pre{white-space:pre-wrap;margin:0}
 <nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
-<button id="tabPer" onclick="show('per')">Personas</button></nav>
+<button id="tabPer" onclick="show('per')">Roster</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
@@ -1510,7 +1591,11 @@ pre{white-space:pre-wrap;margin:0}
 
 <section id="per" class="hid">
 <div class="card"><div class="plist" id="plist"></div>
-<div class="mut" style="margin-top:8px">The persona text is the girl's Layer-1 system block. Paste her FULL character doc; unseeded girls run on the short built-in fallback.</div></div>
+<div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
+<button class="s" onclick="exportRoster()">Download backup</button></div>
+<div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the tier that unlocks her and her
+full character doc, which is her Layer-1 system block. Changes are live on the next reload - no deploy.
+Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
 <div id="pedit" class="card hid"></div>
 </section>
 </main>
@@ -1532,16 +1617,35 @@ async function loadOverview(){try{const s=await api('/admin/overview');const st=
  const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
  $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
-let PERS=[];
-async function loadPersonas(sel){try{PERS=await api('/admin/personas');$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name)} ${p.seeded?'':'<span class="mut">(fallback)</span>'}</button>`).join('');if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
+let PERS=[],CURP=null;const TIERS=['freshman','sophomore','junior','senior'];
+function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
+async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function editPersona(i){const p=PERS[i];if(!p)return;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
- el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl)}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback'}</span></div>
- <div class="row2"><label>Name <input id="pName" value="${esc(p.name)}"></label><label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:220px"></label></div>
- <textarea id="pDoc" style="min-height:320px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
- <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="savePersona(this.dataset.girl)">Save</button><span class="mut" id="pLen">${p.persona.length} chars</span></div>`;
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'freshman',sort_order:100,active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
+ el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
+ <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
+ <label>Name <input id="pName" value="${esc(p.name)}"></label>
+ <label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:200px"></label>
+ <label>Unlocks at <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
+ <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label></div>
+ <div class="row2"><label style="flex:1">Avatar URL <input id="pAvatar" value="${esc(p.avatar_url)}" style="width:100%"></label></div>
+ <label class="mut">Door blurb</label><textarea id="pBlurb" style="min-height:60px">${esc(p.blurb)}</textarea>
+ <label class="mut">Character doc (her system block)</label>
+ <textarea id="pDoc" style="min-height:300px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
+ <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="saveGirl(this.dataset.girl)">Save</button>
+ ${p.isNew?'':`<button class="s" onclick="setActive('${esc(p.girl)}',${p.active?'false':'true'})">${p.active?'Retire her':'Bring her back'}</button>`}
+ <span class="mut" id="pLen">${(p.persona||'').length} chars</span></div>`;
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
-async function savePersona(girl){try{await api('/admin/console/persona',{method:'POST',body:JSON.stringify({girl,name:$('#pName').value,door_title:$('#pTitle').value,persona:$('#pDoc').value})});toast('Persona saved');loadPersonas(girl)}catch(e){toast(e.message,true)}}
+async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
+ try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
+  blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,
+  persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
+async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
+ try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
+async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+ a.download='sorority-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
 async function loadChat(girl){const email=CUR;try{const rows=await api('/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl));document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',b.dataset.girl===girl));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
@@ -1681,6 +1785,19 @@ class AdminPersonaIn(BaseModel):
     name: str
     door_title: str = ""
     persona: str
+
+
+class AdminGirlIn(BaseModel):
+    """Everything about a sister that used to need a deploy."""
+    girl: str
+    name: str
+    persona: str
+    door_title: str = ""
+    blurb: str = ""
+    avatar_url: str = ""
+    min_tier: str = "freshman"
+    sort_order: int = 100
+    active: bool = True
 
 
 @app.on_event("startup")
@@ -1857,18 +1974,30 @@ def history(girl: str, user=Depends(current_user)):
     return {"messages": [{"sender": m["sender"], "message": m["message"]} for m in msgs]}
 
 
+@app.get("/roster")
+def public_roster():
+    """The doors to render, newest roster edits included. Public: door text and
+    art only - never the persona doc, which is the model's system prompt."""
+    return {"tiers": TIER_ORDER,
+            "girls": [{"girl": r["girl"], "name": r["name"],
+                       "door_title": r["door_title"], "blurb": r["blurb"],
+                       "avatar_url": r["avatar_url"], "min_tier": r["min_tier"],
+                       "tier_label": TIERS.get(r["min_tier"], {}).get("label", "")}
+                      for r in roster()]}
+
+
 @app.get("/state")
 def state(user=Depends(current_user)):
+    house = roster()
     girls = {}
-    for g in GIRL_ACCESS.get(user["tier"], []):
+    for g in girls_for_tier(user["tier"], house):
         rel = get_relationship(user["user_id"], g)
         band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
         girls[g] = {"open": True, "milestone": rel["milestone"], "band": band,
                     "kept": len(rel.get("pinned_kept") or [])}
     # locked girls still show so the frontend can render the shut doors
-    for g in GIRL_ACCESS["senior"]:
-        if g not in girls:
-            girls[g] = {"open": False, "milestone": 0, "band": "", "kept": 0}
+    for row in house:
+        girls.setdefault(row["girl"], {"open": False, "milestone": 0, "band": "", "kept": 0})
     return {"tier": user["tier"], "remaining": remaining_for(user),
             "audit_count": int(user["total_audits_used"]),
             "free_audits_left": free_audits_left(user),
@@ -2007,7 +2136,7 @@ def set_persona(body: PersonaIn):
     Strict: personas are the model's system prompt, so this must never be public."""
     _check_admin(body.secret, strict=True)
     girl = body.girl.strip().lower()
-    if girl not in GIRL_ACCESS["senior"]:
+    if girl not in [r["girl"] for r in roster(include_retired=True)]:
         raise HTTPException(status_code=400, detail="Unknown girl slug")
     conn = db()
     try:
@@ -2414,22 +2543,15 @@ def admin_overview():
 
 @app.get("/admin/personas", dependencies=[Depends(admin_required)])
 def admin_personas():
-    """Every girl with her seeded doc (or the built-in fallback when none is seeded)."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT girl, name, door_title, persona FROM personas")
-            seeded = {r["girl"]: r for r in cur.fetchall()}
-    finally:
-        conn.close()
+    """The whole roster, retired sisters included, with her doc and door settings.
+    "seeded" is false while she is still running on the built-in placeholder."""
     out = []
-    for girl in GIRL_ACCESS["senior"]:
-        name, title, blurb = DEFAULT_PERSONAS.get(girl, (girl.title(), "New sister", ""))
-        row = seeded.get(girl)
-        out.append({"girl": girl, "seeded": row is not None,
-                    "name": row["name"] if row else name,
-                    "door_title": row["door_title"] if row else title,
-                    "persona": row["persona"] if row else blurb})
+    for row in roster(include_retired=True):
+        persona, _name = get_persona(row["girl"])
+        seed = DEFAULT_PERSONAS.get(row["girl"])
+        out.append(dict(row, persona=persona,
+                        seeded=not (seed and persona.strip() == seed[2].strip()),
+                        tiers=TIER_ORDER))
     return out
 
 
@@ -2439,6 +2561,71 @@ def admin_console_persona(body: AdminPersonaIn):
         raise HTTPException(status_code=400, detail="name and persona are required")
     return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
                                  persona=body.persona, secret=ADMIN_SECRET))
+
+
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
+
+
+@app.post("/admin/console/girl", dependencies=[Depends(admin_required)])
+def admin_console_girl(body: AdminGirlIn):
+    """Add a sister or rewrite an existing one - door, art, tier gate and doc.
+    This is the whole roster, so it never needs a deploy to change."""
+    girl = body.girl.strip().lower()
+    if not _SLUG_RE.match(girl):
+        raise HTTPException(status_code=400,
+                            detail="slug must be lowercase letters, digits, - or _ (2-31 chars)")
+    if not body.name.strip() or not body.persona.strip():
+        raise HTTPException(status_code=400, detail="name and persona are required")
+    if body.min_tier not in TIER_ORDER:
+        raise HTTPException(status_code=400, detail="min_tier must be one of " + ", ".join(TIER_ORDER))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO personas (girl, name, door_title, persona, blurb,
+                                      avatar_url, min_tier, sort_order, active)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (girl) DO UPDATE
+                SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
+                    persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
+                    avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
+                    sort_order=EXCLUDED.sort_order, active=EXCLUDED.active
+            """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
+                  body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
+                  max(0, min(9999, int(body.sort_order))), bool(body.active)))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "girl": girl}
+
+
+@app.post("/admin/console/girl/{girl}/active", dependencies=[Depends(admin_required)])
+def admin_console_girl_active(girl: str, active: bool = True):
+    """Take a sister off the doors or put her back. Her chats and relationships
+    are kept, so bringing her back resumes every conversation where it stopped."""
+    girl = girl.strip().lower()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET active=%s WHERE girl=%s RETURNING girl",
+                        (bool(active), girl))
+            found = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if not found:
+        raise HTTPException(status_code=404, detail="Unknown girl slug")
+    return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/admin/console/export", dependencies=[Depends(admin_required)])
+def admin_console_export():
+    """The roster as JSON: every door, every persona doc. Keep a copy somewhere
+    safe - it is enough to rebuild the house on an empty database."""
+    return {"exported_at": datetime.now(timezone.utc).isoformat(),
+            "tiers": TIERS,
+            "girls": [dict(r, persona=get_persona(r["girl"])[0])
+                      for r in roster(include_retired=True)]}
 
 
 @app.get("/admin/accounts/{email}/chat", dependencies=[Depends(admin_required)])

@@ -113,7 +113,8 @@
     .door-card img { width: 100%; height: 285px; display: block; object-fit: cover; }
     .door-card.locked img { filter: blur(18px) brightness(.42) saturate(.7); transform: scale(1.06); }
     .door-card.locked::after { content: "🔒  DOOR STILL SHUT"; position: absolute; top: 126px; left: 0; right: 0; text-align: center; color: var(--gold); letter-spacing: .24em; font-size: .78rem; font-weight: 700; }
-    .door-card.senior::after { content: "🔒  SENIOR EXCLUSIVE"; }
+    .door-card.senior::after,
+    .door-card.locked[data-min-tier="senior"]::after { content: "🔒  SENIOR EXCLUSIVE"; }
     .door-copy { padding: 25px 25px 28px; }
     .door-status { color: var(--pink); letter-spacing: .3em; text-transform: uppercase; font-size: .72rem; font-weight: 700; }
     .locked .door-status { color: var(--gold); }
@@ -313,32 +314,34 @@
           <h2>Every door hides a different challenge.</h2>
           <p>28 doors line one house and hide a whole lot of emotional armor. Two are open. The others are waiting to see whether you are worth letting in.</p>
         </div>
-        <div class="doors">
-          <article class="door-card open" data-girl="dakota" data-name="Dakota" data-title="The gatekeeper" data-avatar="https://myreal.live/assets/dakota-DovCVNjY.jpg">
+        <!-- These seven are the fallback: GET /roster replaces them with whatever
+             the house holds now, so a new sister needs no deploy. -->
+        <div class="doors" id="doors-grid">
+          <article class="door-card open" data-girl="dakota" data-min-tier="freshman" data-name="Dakota" data-title="The gatekeeper" data-avatar="https://myreal.live/assets/dakota-DovCVNjY.jpg">
             <img src="https://myreal.live/assets/dakota-DovCVNjY.jpg" alt="Portrait of Dakota" />
             <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Dakota</div><div class="door-title">The gatekeeper</div><p>Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly.</p><button class="button door-cta" type="button">Knock on Dakota's door</button></div>
           </article>
-          <article class="door-card open" data-girl="zoe" data-name="Zoe" data-title="The mirage" data-avatar="https://myreal.live/assets/zoe-BnozSeUg.jpg">
+          <article class="door-card open" data-girl="zoe" data-min-tier="freshman" data-name="Zoe" data-title="The mirage" data-avatar="https://myreal.live/assets/zoe-BnozSeUg.jpg">
             <img src="https://myreal.live/assets/zoe-BnozSeUg.jpg" alt="Portrait of Zoe" />
             <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><button class="button door-cta" type="button">Knock on Zoe's door</button></div>
           </article>
-          <article class="door-card locked" data-girl="willow" data-name="Willow" data-title="The quiet lock" data-avatar="https://myreal.live/assets/willow-4w9QsnXR.jpg">
+          <article class="door-card locked" data-girl="willow" data-min-tier="sophomore" data-name="Willow" data-title="The quiet lock" data-avatar="https://myreal.live/assets/willow-4w9QsnXR.jpg">
             <img src="https://myreal.live/assets/willow-4w9QsnXR.jpg" alt="Willow's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p></div>
           </article>
-          <article class="door-card locked" data-girl="brittany" data-name="Brittany" data-title="The sweet trap" data-avatar="https://myreal.live/assets/brittany-DRnJ63HN.jpg">
+          <article class="door-card locked" data-girl="brittany" data-min-tier="sophomore" data-name="Brittany" data-title="The sweet trap" data-avatar="https://myreal.live/assets/brittany-DRnJ63HN.jpg">
             <img src="https://myreal.live/assets/brittany-DRnJ63HN.jpg" alt="Brittany's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p></div>
           </article>
-          <article class="door-card locked" data-girl="sasha" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp">
+          <article class="door-card locked" data-girl="sasha" data-min-tier="junior" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp">
             <img src="assets/sasha.webp" alt="Sasha's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p></div>
           </article>
-          <article class="door-card locked" data-girl="piper" data-name="Piper" data-title="The closed book" data-avatar="https://myreal.live/assets/piper-P4IdzuLV.jpg">
+          <article class="door-card locked" data-girl="piper" data-min-tier="junior" data-name="Piper" data-title="The closed book" data-avatar="https://myreal.live/assets/piper-P4IdzuLV.jpg">
             <img src="https://myreal.live/assets/piper-P4IdzuLV.jpg" alt="Piper's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p></div>
           </article>
-          <article class="door-card locked senior" data-girl="veronica" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp">
+          <article class="door-card locked senior" data-girl="veronica" data-min-tier="senior" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp">
             <img src="assets/veronica.webp" alt="Veronica's locked door" />
             <div class="door-copy"><div class="door-status">Senior exclusive</div><div class="door-name">Veronica</div><div class="door-title">The host</div><p>The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted.</p></div>
           </article>
@@ -706,15 +709,50 @@
 
     // Every card is clickable; openChat refuses locked ones. Which doors are open
     // comes from GET /state for the signed-in account (defaults = freshman set).
-    const DEFAULT_OPEN = ['dakota', 'zoe'];
+    let DEFAULT_OPEN = ['dakota', 'zoe'];
     function setDoors(openList) {
       document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
         const open = openList.includes(card.dataset.girl);
         card.classList.toggle('open', open);
         card.classList.toggle('locked', !open);
         const status = card.querySelector('.door-status');
-        if (status) status.textContent = open ? 'Door open' : (card.classList.contains('senior') ? 'Senior exclusive' : 'Door still shut');
+        if (status) status.textContent = open ? 'Door open' : (card.dataset.minTier === 'senior' ? 'Senior exclusive' : 'Door still shut');
       });
+    }
+
+    // The roster is data now: GET /roster is the list of doors, so a sister added
+    // from the admin console shows up on a reload with no deploy. The markup in
+    // the page is only a fallback for when the API cannot be reached.
+    const doorsGrid = document.getElementById('doors-grid');
+    function escapeHtml(text) {
+      return String(text == null ? '' : text).replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+    function renderRoster(girls) {
+      doorsGrid.innerHTML = girls.map((g) => {
+        const name = escapeHtml(g.name || g.girl);
+        const avatar = escapeHtml(g.avatar_url);
+        return '<article class="door-card locked" data-girl="' + escapeHtml(g.girl) + '"' +
+          ' data-min-tier="' + escapeHtml(g.min_tier || 'freshman') + '"' +
+          ' data-name="' + name + '" data-title="' + escapeHtml(g.door_title) + '"' +
+          ' data-avatar="' + avatar + '">' +
+          (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') +
+          '<div class="door-copy"><div class="door-status">Door still shut</div>' +
+          '<div class="door-name">' + name + '</div>' +
+          '<div class="door-title">' + escapeHtml(g.door_title) + '</div>' +
+          '<p>' + escapeHtml(g.blurb) + '</p>' +
+          '<button class="button door-cta" type="button">Knock on ' + name + '\u2019s door</button></div>' +
+          '</article>';
+      }).join('');
+      DEFAULT_OPEN = girls.filter((g) => (g.min_tier || 'freshman') === 'freshman').map((g) => g.girl);
+    }
+    async function loadRoster() {
+      try {
+        const response = await fetch(API_BASE_URL + '/roster');
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || !Array.isArray(data.girls) || !data.girls.length) return;
+        renderRoster(data.girls);
+      } catch (error) { /* keep the doors already in the page */ }
     }
     // Whoever last wrote the allowance owns it: every send, abort or state read
     // takes the next turn, and a slower answer for an older turn is dropped
@@ -744,10 +782,12 @@
         showRemaining(data.remaining);
       } catch (error) { /* keep whatever is shown */ }
     }
-    document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
-      card.addEventListener('click', () => openChat(card));
+    // Delegated so cards rendered from /roster are clickable too.
+    doorsGrid.addEventListener('click', (event) => {
+      const card = event.target.closest('.door-card[data-girl]');
+      if (card) openChat(card);
     });
-    refreshState();
+    loadRoster().then(refreshState);
     document.getElementById('chat-close').addEventListener('click', closeChat);
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
