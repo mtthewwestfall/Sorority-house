@@ -716,9 +716,22 @@
         if (status) status.textContent = open ? 'Door open' : (card.classList.contains('senior') ? 'Senior exclusive' : 'Door still shut');
       });
     }
+    // Whoever last wrote the allowance owns it: every send, abort or state read
+    // takes the next turn, and a slower answer for an older turn is dropped
+    // rather than replacing a newer count.
+    let turnSeq = 0;
+    function showRemaining(n) {
+      if (typeof n === 'number') chatRemaining.textContent = n + ' messages left';
+    }
+    function shownRemaining() {
+      const found = /^(\d+)/.exec(chatRemaining.textContent);
+      return found ? parseInt(found[1], 10) : null;
+    }
+
     let stateSeq = 0;
     async function refreshState() {
       const seq = ++stateSeq;
+      turnSeq++;
       setDoors(DEFAULT_OPEN); chatRemaining.textContent = '';
       if (!isLoggedIn()) return;
       try {
@@ -728,7 +741,7 @@
         const data = await response.json().catch(() => null);
         if (seq !== stateSeq || !response.ok || !data || !data.girls) return;
         setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open));
-        if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+        showRemaining(data.remaining);
       } catch (error) { /* keep whatever is shown */ }
     }
     document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
@@ -788,14 +801,32 @@
 
     // A cut-off reply is still charged, but 'done' never arrives to carry the new
     // count, so the header would keep showing the pre-send number. The backend
-    // logs the typed part after it notices the drop, so ask a moment later.
+    // only logs the typed part once it notices the drop, and does it on a worker,
+    // so there is no one moment to ask at: poll until the charge shows up.
+    async function resyncRemaining(seq, before) {
+      for (const delay of [400, 1200, 2500]) {
+        await new Promise((done) => setTimeout(done, delay));
+        if (seq !== turnSeq || !isLoggedIn()) return;
+        let data = null;
+        try {
+          const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
+          data = await response.json().catch(() => null);
+        } catch (error) { return; }
+        if (seq !== turnSeq) return;   // a newer turn owns the count now
+        if (!data || typeof data.remaining !== 'number') return;
+        showRemaining(data.remaining);
+        if (before === null || data.remaining < before) return;
+      }
+    }
+
     function abortStreamAndResync() {
-      if (abortStream()) setTimeout(refreshState, 900);
+      if (abortStream()) resyncRemaining(++turnSeq, shownRemaining());
     }
 
     let streamSupported = true;
     async function streamReply(message, typing) {
       const girl = currentGirl;
+      turnSeq++;            // this reply's count supersedes any pending resync
       abortStream();
       const controller = new AbortController();
       streamAbort = controller;
@@ -830,7 +861,7 @@
           bubble.textContent += data.t;
           chatLog.scrollTop = chatLog.scrollHeight;
         } else if (event === 'done') {
-          if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+          showRemaining(data.remaining);
         } else if (event === 'error') {
           failed = data.detail || 'She did not answer. Try again in a moment.';
         }
@@ -862,6 +893,7 @@
 
     async function sendReply(message, typing) {
       const girl = currentGirl;
+      turnSeq++;
       abortStream();
       const controller = new AbortController();
       streamAbort = controller;
@@ -882,7 +914,7 @@
         addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
       } else {
         addMessage('her', data.reply);
-        if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+        showRemaining(data.remaining);
       }
     }
 
