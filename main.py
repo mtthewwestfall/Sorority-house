@@ -1348,10 +1348,12 @@ def _openai_messages(messages):
     (the CONTINUATION note) is delivered as the closing user turn instead."""
     system_parts, turns = [], []
     for m in messages:
-        text = (m.get("content") or "").strip()
-        if not text:
+        text = m.get("content") or ""
+        if not text.strip():
             continue
         role = m.get("role")
+        if role != "assistant":     # typed text keeps its boundary whitespace
+            text = text.strip()
         if role == "system":
             if turns:
                 role, text = "user", "[Instruction]\n" + text
