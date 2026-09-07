@@ -1,6 +1,6 @@
 import unittest
 
-from telegram_bot import BackendError, BotApp
+from telegram_bot import BackendError, BotApp, LinkStore
 
 
 class FakeLinks:
@@ -121,6 +121,18 @@ class TelegramSmokeTest(unittest.TestCase):
         }})
         self.assertIsNone(self.links.get(7))
         self.assertIn("message Mia bot directly", self.telegram.sent[-1][1])
+
+
+class LinkStoreDsnTest(unittest.TestCase):
+    def test_tls_is_required_even_if_the_url_omits_it(self):
+        store = LinkStore("postgres://u:p@host:5432/db")
+        self.assertEqual(store._dsn(), "postgres://u:p@host:5432/db?sslmode=require")
+        store = LinkStore("postgres://u:p@host:5432/db?application_name=mia")
+        self.assertTrue(store._dsn().endswith("&sslmode=require"))
+
+    def test_an_explicit_sslmode_is_left_alone(self):
+        for url in ["postgres://u:p@h/db?sslmode=verify-full", ""]:
+            self.assertEqual(LinkStore(url)._dsn(), url)
 
 
 if __name__ == "__main__":

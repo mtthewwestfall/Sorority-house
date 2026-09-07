@@ -141,10 +141,19 @@ class LinkStore:
         self.database_url = database_url
         self.connect = connect or self._connect
 
+    def _dsn(self) -> str:
+        """The connection string with TLS required, as the backend does it: the row
+        this stores is a live session credential, so it must not cross the network
+        in the clear because someone left sslmode off the URL."""
+        url = self.database_url
+        if url and "sslmode" not in url:
+            url = url + ("&" if "?" in url else "?") + "sslmode=require"
+        return url
+
     def _connect(self):
         import psycopg2
 
-        return psycopg2.connect(self.database_url)
+        return psycopg2.connect(self._dsn())
 
     def init(self) -> None:
         conn = self.connect()
