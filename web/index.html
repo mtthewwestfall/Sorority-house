@@ -730,7 +730,7 @@
       if (!chat.classList.contains('is-open')) return;
       const vv = window.visualViewport;
       if (!vv) return;
-      const keyboard = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const keyboard = Math.max(0, window.innerHeight - vv.height);
       chat.style.setProperty('--kb-offset', `${Math.round(keyboard)}px`);
       chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
       if (window.scrollY) window.scrollTo(0, 0);
