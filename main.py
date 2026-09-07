@@ -606,6 +606,7 @@ def init_db():
                     stage_since  DATE,
                     last_session DATE,
                     active_days  INTEGER NOT NULL DEFAULT 1,
+                    stage_days_talked INTEGER NOT NULL DEFAULT 0,
                     pinned_told  JSONB NOT NULL DEFAULT '[]'::jsonb,
                     pinned_kept  JSONB NOT NULL DEFAULT '[]'::jsonb,
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -638,6 +639,19 @@ def init_db():
                     user_id    TEXT NOT NULL REFERENCES users(user_id),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                -- the per-stage clock counts DAYS THE USER ACTUALLY TALKED to her,
+                -- not calendar days: silence never advances anyone's trust.
+                ALTER TABLE relationships ADD COLUMN IF NOT EXISTS stage_days_talked INTEGER;
+                UPDATE relationships r SET stage_days_talked = (
+                    SELECT COUNT(DISTINCT (c.created_at AT TIME ZONE 'UTC')::date)
+                    FROM chat_logs c
+                    WHERE c.user_id = r.user_id AND c.girl = r.girl
+                      AND c.sender = 'user'
+                      AND (c.created_at AT TIME ZONE 'UTC')::date
+                          >= COALESCE(r.stage_since, CURRENT_DATE))
+                WHERE r.stage_days_talked IS NULL;
+                ALTER TABLE relationships ALTER COLUMN stage_days_talked SET DEFAULT 0;
+                ALTER TABLE relationships ALTER COLUMN stage_days_talked SET NOT NULL;
                 -- free time granted from the admin page: tier is comped until comp_until,
                 -- then falls back to comp_prev_tier.
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_until TIMESTAMPTZ;
@@ -1062,8 +1076,9 @@ def get_relationship(user_id, girl):
             if row is None:
                 cur.execute("""
                     INSERT INTO relationships (user_id, girl, milestone, summary,
-                                               stage_since, last_session, active_days)
-                    VALUES (%s,%s,1,'',CURRENT_DATE,CURRENT_DATE,1)
+                                               stage_since, last_session, active_days,
+                                               stage_days_talked)
+                    VALUES (%s,%s,1,'',NULL,NULL,0,0)
                     ON CONFLICT (user_id, girl) DO NOTHING
                 """, (user_id, girl))
                 conn.commit()
@@ -1073,7 +1088,8 @@ def get_relationship(user_id, girl):
             if row is None:  # safety net (shouldn't happen)
                 return {"user_id": user_id, "girl": girl, "milestone": 1,
                         "summary": "", "since_summary": 0, "stage_since": None,
-                        "last_session": None, "active_days": 1,
+                        "last_session": None, "active_days": 0,
+                        "stage_days_talked": 0,
                         "pinned_told": [], "pinned_kept": []}
             return row
     finally:
@@ -1104,13 +1120,11 @@ def _today():
 
 
 def rel_days_in_stage(rel):
-    """Real days the user has 'lived' at the current milestone.
-    A row with no stage_since yet counts 0 — the first session starts the clock."""
+    """Days of PRESENCE the user has put into the current milestone: only days they
+    actually talked to her count, so a stretch of silence moves nothing. The day the
+    stage opened is day zero, so a stage still costs a further day of showing up."""
     try:
-        d = rel.get("stage_since")
-        if d is None:
-            return 0
-        return max(0, (_today() - d).days)
+        return max(0, int(rel.get("stage_days_talked") or 0) - 1)
     except Exception:
         return 0
 
@@ -1228,8 +1242,9 @@ def build_engine_card(girl, rel):
     kept = rel.get("pinned_kept") or []
     lines = [
         f"- Stage M{cur}/8 · trust band: {band} (about {ball}/100 on her meter).",
-        f"- She has lived this stage {held} real day(s); she opens a stage deeper "
-        f"only after ~{need}, and only if the user keeps acting right.",
+        f"- The user has shown up on {held} day(s) of presence since this stage began "
+        f"(only days they actually talk to you count); she opens a stage deeper only "
+        f"after ~{need}, and only if the user keeps acting right.",
         f"- Pinned: she has shared {len(told)} personal facts; the user has shown "
         f"they remember {len(kept)} of her key details (the next stage needs "
         f"{kept_needed(girl, min(8, cur + 1))}).",
@@ -1370,9 +1385,10 @@ def _summarize(user_id, girl, rel, recent_msgs):
                 SET summary=%s, milestone=%s, since_summary=0,
                     pinned_told=%s, pinned_kept=%s,
                     stage_since = CASE WHEN %s THEN CURRENT_DATE ELSE stage_since END,
+                    stage_days_talked = CASE WHEN %s THEN 1 ELSE stage_days_talked END,
                     updated_at=now()
                 WHERE user_id=%s AND girl=%s
-            """, (summary, milestone, Json(told), Json(kept), changed,
+            """, (summary, milestone, Json(told), Json(kept), changed, changed,
                   user_id, girl))
             conn.commit()
     finally:
@@ -1540,16 +1556,18 @@ def persist_turn(user_id, girl, rel, user_message, reply):
                 INSERT INTO chat_logs (user_id, girl, sender, message)
                 VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
             """, (user_id, girl, user_message, user_id, girl, reply))
-            # per-girl engine: track real days of presence (the slow-burn clock)
+            # per-girl engine: track days of presence (the slow-burn clock). Both
+            # clocks move only on a day the user actually said something to her.
             prev = rel.get("last_session")
             new_day = 1 if (prev is None or prev < _today()) else 0
             cur.execute("""
                 UPDATE relationships
                 SET last_session = CURRENT_DATE,
                     active_days = active_days + %s,
+                    stage_days_talked = stage_days_talked + %s,
                     stage_since = COALESCE(stage_since, CURRENT_DATE)
                 WHERE user_id=%s AND girl=%s
-            """, (new_day, user_id, girl))
+            """, (new_day, new_day, user_id, girl))
             conn.commit()
     finally:
         conn.close()
@@ -2054,7 +2072,7 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp()">End now</button>`:'none'}</div>
   <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div>
   <div>Email</div><div>${a.verified_at?`verified ${dt(a.verified_at)}`:`<span class="pill open">unverified</span> <button class="s" onclick="markVerified()">Mark verified</button>`}</div></div>
-  <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">none yet</td></tr>'}</tbody></table>
+  <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>At stage</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td>${r.stage_days_talked}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=5 class="mut">none yet</td></tr>'}</tbody></table>
  </div><div>
   <h4>Give free time</h4><div class="row2"><select id="gtTier"><option value="senior">Senior</option><option value="junior">Junior</option><option value="sophomore">Sophomore</option></select>
   <input id="gtDays" type="number" min=1 value=30 style="width:90px"> days <button class="p" onclick="grantTime()">Grant</button></div>
@@ -2369,9 +2387,9 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
 
 
 @app.get("/history")
-def history(girl: str, user=Depends(current_user)):
+def history(girl: str, limit: int = 100, user=Depends(current_user)):
     girl = girl.strip().lower()
-    msgs = last_messages(user["user_id"], girl, 100)
+    msgs = last_messages(user["user_id"], girl, max(1, min(200, limit)))
     return {"messages": [{"sender": m["sender"], "message": m["message"]} for m in msgs]}
 
 
@@ -2749,7 +2767,8 @@ def admin_account(email: str):
             """, (user["user_id"],))
             acct["complaints"] = cur.fetchall()
             cur.execute("""
-                SELECT girl, milestone, active_days, stage_since, last_session
+                SELECT girl, milestone, active_days, stage_days_talked,
+                       stage_since, last_session
                 FROM relationships WHERE user_id=%s ORDER BY milestone DESC
             """, (user["user_id"],))
             acct["relationships"] = cur.fetchall()

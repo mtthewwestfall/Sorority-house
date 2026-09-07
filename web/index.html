@@ -701,6 +701,33 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     }
 
+    // Reopening a door picks the conversation back up: the tail of what was already
+    // said is replayed above the composer so it never looks like a fresh stranger.
+    const HISTORY_TAIL = 5;
+    let historySeq = 0;
+    async function loadHistory(girl, placeholder) {
+      const seq = ++historySeq;
+      try {
+        const response = await fetch(
+          API_BASE_URL + '/history?girl=' + encodeURIComponent(girl) +
+          '&limit=' + HISTORY_TAIL, { headers: authHeaders() });
+        if (seq !== historySeq || girl !== currentGirl) return;
+        if (response.status === 401) { handleUnauthorized(); return; }
+        const data = await response.json().catch(() => null);
+        if (seq !== historySeq || girl !== currentGirl) return;
+        if (!response.ok || !data || !Array.isArray(data.messages) || !data.messages.length) return;
+        // The user may already be mid-turn by the time this lands; the tail is only
+        // worth replaying while nothing else has been said in the panel yet.
+        if (chatLog.children.length !== 1 || chatLog.firstChild !== placeholder) return;
+        placeholder.remove();
+        addMessage('note', 'Where you left off.');
+        data.messages.slice(-HISTORY_TAIL).forEach((m) => {
+          addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
+        });
+        chatLog.scrollTop = chatLog.scrollHeight;
+      } catch (error) { /* leave the fresh-start note in place */ }
+    }
+
     let lockedScrollY = 0;
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
@@ -714,7 +741,8 @@
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
       chatLog.innerHTML = '';
-      addMessage('note', 'Her door is open. Say hi.');
+      const opener = addMessage('note', 'Her door is open. Say hi.');
+      loadHistory(currentGirl, opener);
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
