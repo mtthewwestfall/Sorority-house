@@ -481,7 +481,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -548,13 +548,14 @@
     }
     function fitToViewport() {
       const vv = window.visualViewport;
-      if (!vv) return;
+      if (!vv || !document.body.classList.contains('modal-open')) return;
       document.querySelectorAll('.chat-backdrop.is-open').forEach(el => {
         el.style.height = `${vv.height}px`;
         el.style.top = `${vv.offsetTop}px`;
       });
       window.scrollTo(0, 0);
-      chatLog.scrollTop = chatLog.scrollHeight;
+      const log = document.getElementById('chat-log');
+      if (log) log.scrollTop = log.scrollHeight;
     }
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', fitToViewport);
