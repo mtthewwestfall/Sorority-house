@@ -223,13 +223,16 @@ PIECE_CHARS = 24            # granularity the mouth thread hands to the emitter
 SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Pictures (POST /image): she sends a new photo of herself in the style of her door
-# portrait. One is earned per PICTURE_EVERY user messages (all girls combined);
-# packs of PICTURE_PACK_SIZE add credits once a price is set. Portraits are fetched
-# from the site that serves web/assets.
+# portrait. PICTURE_FREE are earned per PICTURE_EVERY user messages (all girls
+# combined); a pack of PICTURE_PACK_SIZE costs PICTURE_PACK_PRICE. PICTURE_PACK_URL
+# is the hosted checkout (e.g. a Stripe Payment Link); its webhook credits the pack
+# via POST /admin/grant-pictures. Portraits are fetched from the site serving web/assets.
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")
 PICTURE_EVERY = int(os.environ.get("PICTURE_EVERY", "100"))
+PICTURE_FREE = int(os.environ.get("PICTURE_FREE", "3"))
 PICTURE_PACK_SIZE = int(os.environ.get("PICTURE_PACK_SIZE", "5"))
-PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "")     # e.g. "$4.99"; blank = not for sale yet
+PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
+PICTURE_PACK_URL = os.environ.get("PICTURE_PACK_URL", "")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -2162,6 +2165,12 @@ class GrantAuditsIn(BaseModel):
     secret: str = ""
 
 
+class GrantPicturesIn(BaseModel):
+    email: str
+    packs: int = 1       # number of picture packs paid for (call from Stripe webhook)
+    secret: str = ""
+
+
 class ComplaintIn(BaseModel):
     subject: str
     body: str
@@ -2405,10 +2414,11 @@ def picture_status(cur, user_id):
     total = int(cur.fetchone()["n"])
     cur.execute("SELECT pics_free_used, pic_credits FROM users WHERE user_id=%s", (user_id,))
     row = cur.fetchone() or {"pics_free_used": 0, "pic_credits": 0}
-    earned = total // PICTURE_EVERY
+    earned = (total // PICTURE_EVERY) * PICTURE_FREE
     free_left = max(0, earned - int(row["pics_free_used"]))
     return {
         "every": PICTURE_EVERY,
+        "free_per": PICTURE_FREE,
         "messages": total,
         "earned": earned,
         "free_left": free_left,
@@ -2417,6 +2427,7 @@ def picture_status(cur, user_id):
         "next_in": PICTURE_EVERY - (total % PICTURE_EVERY),
         "pack_size": PICTURE_PACK_SIZE,
         "pack_price": PICTURE_PACK_PRICE or None,
+        "pack_url": PICTURE_PACK_URL or None,
     }
 
 
@@ -2830,6 +2841,27 @@ def grant_audits(body: GrantAuditsIn):
         conn.close()
     return {"ok": True, "user_id": user["user_id"],
             "audit_credits": int(user["audit_credits"]) + body.amount}
+
+
+@app.post("/admin/grant-pictures")
+def grant_pictures(body: GrantPicturesIn):
+    """Credits PICTURE_PACK_SIZE pictures per pack after a successful payment.
+    Wire this to the Stripe webhook behind PICTURE_PACK_URL."""
+    _check_admin(body.secret, strict=True)
+    if body.packs <= 0 or body.packs > 100:
+        raise HTTPException(status_code=400, detail="packs must be 1..100")
+    user = _user_for_email(body.email)
+    credits = body.packs * PICTURE_PACK_SIZE
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s RETURNING pic_credits",
+                        (credits, user["user_id"]))
+            total = int(cur.fetchone()["pic_credits"])
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": user["user_id"], "pic_credits": total}
 
 
 # ---------------------------------------------------------------------------

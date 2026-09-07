@@ -984,9 +984,10 @@
       const h = document.createElement('h4');
       h.textContent = available > 0 ? `Ask her for a picture (${available} ready)` : 'Ask her for a picture';
       const p = document.createElement('p');
+      const free = s.free_per || 3, every = s.every || 100, packSize = s.pack_size || 5;
       p.textContent = available > 0
         ? 'She picks the moment. Same girl, same style as her door.'
-        : `You earn one picture every ${s.every || 100} messages${s.next_in ? ` — ${s.next_in} to go` : ''}. Or grab a pack of ${s.pack_size || 5}.`;
+        : `You get ${free} free pictures every ${every} messages${s.next_in ? ` — ${s.next_in} to go` : ''}. Want more? Grab a pack of ${packSize}.`;
       const row = document.createElement('div');
       row.className = 'row';
       const ask = document.createElement('button');
@@ -995,8 +996,10 @@
       ask.addEventListener('click', () => { closePicSheet(); requestPicture(); });
       const pack = document.createElement('button');
       pack.type = 'button'; pack.className = 'button ghost';
-      pack.textContent = s.pack_price ? `Pack of ${s.pack_size || 5} · ${s.pack_price}` : `Pack of ${s.pack_size || 5} · coming soon`;
-      pack.disabled = !s.pack_price;
+      pack.textContent = `${packSize} more · ${s.pack_price || '$0.99'}`;
+      pack.disabled = !s.pack_url;
+      if (!s.pack_url) pack.title = 'Checkout coming soon';
+      pack.addEventListener('click', () => { if (s.pack_url) window.open(s.pack_url, '_blank', 'noopener'); });
       const cancel = document.createElement('button');
       cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
       cancel.addEventListener('click', closePicSheet);
