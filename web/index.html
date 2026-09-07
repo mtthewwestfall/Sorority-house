@@ -277,6 +277,11 @@
       .hallway { min-height: 330px; }
       .group-image { height: 290px; }
       .footer-inner { flex-direction: column; text-align: center; }
+      /* Pin the panel to the top of the visual viewport so the on-screen keyboard
+         shrinks it in place instead of pushing the whole chat off screen. */
+      #chat.is-open { place-items: start center; padding: 10px; height: var(--vv-height, 100%); bottom: auto; }
+      #chat .chat-panel { height: 100%; }
+      body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
     }
   </style>
 </head>
@@ -684,6 +689,7 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     }
 
+    let lockedScrollY = 0;
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
       if (!card.classList.contains('open')) return;
@@ -697,6 +703,9 @@
       chatLog.innerHTML = '';
       addMessage('note', 'Her door is open. Say hi.');
       chat.classList.add('is-open');
+      lockedScrollY = window.scrollY;
+      document.body.classList.add('chat-locked');
+      fitChatToViewport();
       chatInput.value = '';
       chatInput.focus();
     }
@@ -704,7 +713,25 @@
     function closeChat() {
       abortStreamAndResync();
       chat.classList.remove('is-open');
+      if (document.body.classList.contains('chat-locked')) {
+        document.body.classList.remove('chat-locked');
+        window.scrollTo(0, lockedScrollY);
+      }
       currentGirl = null;
+    }
+
+    function fitChatToViewport() {
+      if (!chat.classList.contains('is-open')) return;
+      const vv = window.visualViewport;
+      if (!vv) return;
+      chat.style.setProperty('--vv-height', `${Math.round(vv.height)}px`);
+      chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
+      if (window.scrollY) window.scrollTo(0, 0);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', fitChatToViewport);
+      window.visualViewport.addEventListener('scroll', fitChatToViewport);
     }
 
     // Every card is clickable; openChat refuses locked ones. Which doors are open
