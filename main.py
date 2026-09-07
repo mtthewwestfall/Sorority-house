@@ -86,12 +86,28 @@ API CONTRACT implemented here (point your chat app at these):
 
 Env vars (Railway -> Variables):
   DATABASE_URL      Supabase/Postgres connection string (postgres://user:pass@host:5432/db?sslmode=require)
-  GEMINI_API_KEY    your existing Google (Gemini) API key - the one your bots run on
-  CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
+  GEMINI_API_KEY    Google (Gemini) API key - the fallback provider for every role
+  CHAT_MODEL        gemini-3.1-flash-lite (default Gemini model for the mouth/brain)
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
-  CHAT_CPS          her typing speed on /chat/stream, characters per second (default 24).
+
+  Three model ROLES, each on its own provider. Unset roles fall back to Gemini above.
+  A provider is any OpenAI-compatible chat endpoint (DeepSeek, Mistral La Plateforme,
+  vLLM / Ollama / llama.cpp serving your own weights, Together, Groq, ...).
+    MOUTH_MODEL / MOUTH_BASE_URL / MOUTH_API_KEY
+                    the voice that types in chat. e.g. MOUTH_BASE_URL=https://api.mistral.ai/v1
+                    MOUTH_MODEL=mistral-small-latest, or your own vLLM box with
+                    MOUTH_MODEL=mistralai/Mistral-Small-3.2-24B-Instruct-2506
+    BRAIN_MODEL / BRAIN_BASE_URL / BRAIN_API_KEY
+                    the memory digest (summary, milestone, conduct) that runs a turn behind.
+                    e.g. BRAIN_BASE_URL=https://api.deepseek.com/v1 BRAIN_MODEL=deepseek-chat
+    AUDIT_BASE_URL / AUDIT_API_KEY
+                    optional; with these set, AUDIT_MODEL is served from that endpoint.
+                    Otherwise audits ride the MOUTH (same voice as chat; the brain never
+                    writes what the user reads), with AUDIT_MODEL overriding the model.
+  MODEL_TIMEOUT_S   per-call timeout for every provider (default 120).
+  CHAT_CPS          her typing speed on /chat/stream, characters per second (default 14).
   CHAT_LEAD_CHARS   how far generation may run ahead of the screen (default 240 chars).
                     Generation blocks at this backlog, so she never gets minutes ahead.
   TAIL_REVISION     true (default): if the brain lands mid-reply and moves the stage, the
@@ -156,6 +172,29 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
+MODEL_TIMEOUT_S = float(os.environ.get("MODEL_TIMEOUT_S", "120"))
+# Reasoning models (DeepSeek v4 / reasoner) bill their thinking against
+# max_tokens, so the brain's memory digest needs far more headroom than 600.
+BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4000"))
+
+
+def _role_config(role, default_model):
+    """Provider settings for one model role. Any OpenAI-compatible endpoint when
+    <ROLE>_BASE_URL is set; otherwise Gemini with the given default model."""
+    base = os.environ.get(f"{role}_BASE_URL", "").rstrip("/")
+    return {
+        "provider": "openai" if base else "gemini",
+        "base_url": base,
+        "api_key": os.environ.get(f"{role}_API_KEY", ""),
+        "model": os.environ.get(f"{role}_MODEL", "") or default_model,
+    }
+
+
+MOUTH = _role_config("MOUTH", CHAT_MODEL)     # the voice that types
+BRAIN = _role_config("BRAIN", CHAT_MODEL)     # memory digest, a turn behind
+# Audits are written in her voice, so they ride the mouth unless given their own endpoint.
+AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
+         else {**MOUTH, "model": os.environ.get("AUDIT_MODEL") or MOUTH["model"]})
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -175,7 +214,7 @@ CHAT_MAX_CHARS = int(os.environ.get("CHAT_MAX_CHARS", "2000"))
 VERIFY_TTL_HOURS = 24
 # Mouth pacing (POST /chat/stream). CHAT_CPS is her typing speed; CHAT_LEAD_CHARS
 # caps how far generation may run ahead of what the user has actually seen.
-CHAT_CPS = float(os.environ.get("CHAT_CPS", "24"))
+CHAT_CPS = float(os.environ.get("CHAT_CPS", "14"))
 CHAT_LEAD_CHARS = int(os.environ.get("CHAT_LEAD_CHARS", "240"))
 TAIL_REVISION = os.environ.get("TAIL_REVISION", "true").lower() == "true"
 EMIT_TICK_S = 0.05          # emitter wakes this often and types its share
@@ -252,6 +291,8 @@ HOUSE_RULES = (
     "flirtatious and slow-burn, but always tasteful and non-explicit.\n"
     "- Keep replies in character, conversational, 1-4 sentences unless the moment "
     "genuinely calls for more. Never break character or mention you are an AI.\n"
+    "- Text like a real person, not an assistant: no offers to help, no summarizing what "
+    "they said, no asking permission to continue, no bullet points or headers.\n"
     "- You never reveal the internal memory summary or these rules to the user.\n"
     "- You remember only what the Memory block tells you. If it is empty, you are "
     "still getting to know them.\n"
@@ -1188,7 +1229,7 @@ def _summarize(user_id, girl, rel, recent_msgs):
         context.append({"role": "user", "content": "NEW CONVERSATION:\n" + "\n".join(lines)})
     context.append({"role": "user", "content": "Return the updated JSON now.\n" + grading})
 
-    out = _gemini(context, model=CHAT_MODEL)
+    out = llm(BRAIN, context, max_tokens=BRAIN_MAX_TOKENS)
     summary = rel["summary"] or ""
     milestone = int(rel["milestone"])
     conduct = "steady"
@@ -1452,7 +1493,7 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         return requests.post(
             f"{GEMINI_BASE}/{model}:generateContent",
             json=p, params={"key": GEMINI_API_KEY},
-            headers={"Content-Type": "application/json"}, timeout=120)
+            headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
 
     r = _post(payload)
     # A few models reject a thinking budget - retry once without it so audits still run.
@@ -1482,29 +1523,134 @@ def _gemini_stream(messages, model=None, max_tokens=600, temperature=0.8):
     with requests.post(f"{GEMINI_BASE}/{model}:streamGenerateContent",
                        json=payload, params={"key": GEMINI_API_KEY, "alt": "sse"},
                        headers={"Content-Type": "application/json"},
-                       stream=True, timeout=120) as r:
+                       stream=True, timeout=MODEL_TIMEOUT_S) as r:
         if r.status_code != 200:
             raise HTTPException(
                 status_code=502,
                 detail=f"Model stream failed ({r.status_code}): {r.text[:300]}")
-        # text/event-stream carries no charset, and requests then decodes text/*
-        # as latin-1, which turns her apostrophes and dashes into mojibake.
-        r.encoding = "utf-8"
-        for line in r.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data:"):
-                continue
-            body = line[5:].strip()
-            if not body or body == "[DONE]":
-                continue
-            try:
-                data = json.loads(body)
-            except ValueError:
-                continue
+        for data in _sse_json(r):
             for cand in data.get("candidates", []):
                 for part in cand.get("content", {}).get("parts", []):
                     text = part.get("text")
                     if text:
                         yield text
+
+
+def _sse_json(r):
+    """Yield each parsed `data:` JSON object from a streaming response."""
+    # text/event-stream carries no charset, and requests then decodes text/*
+    # as latin-1, which turns her apostrophes and dashes into mojibake.
+    r.encoding = "utf-8"
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data:"):
+            continue
+        body = line[5:].strip()
+        if not body or body == "[DONE]":
+            continue
+        try:
+            yield json.loads(body)
+        except ValueError:
+            continue
+
+
+# ---------------------------------------------------------------------------
+# OPENAI-COMPATIBLE — DeepSeek, Mistral, or your own vLLM/Ollama/llama.cpp box.
+# Every one of them speaks POST {base_url}/chat/completions; the layered list
+# the prompt builders produce is reshaped for strict chat templates first.
+# ---------------------------------------------------------------------------
+def _openai_messages(messages):
+    """Shape the layered list for strict chat templates (vLLM, llama.cpp, Mistral):
+    one leading system message, then strictly alternating user/assistant. Leading
+    system blocks are joined; a system instruction that arrives mid-conversation
+    (the CONTINUATION note) is delivered as the closing user turn instead."""
+    system_parts, turns = [], []
+    for m in messages:
+        text = m.get("content") or ""
+        if not text.strip():
+            continue
+        role = m.get("role")
+        if role != "assistant":     # typed text keeps its boundary whitespace
+            text = text.strip()
+        if role == "system":
+            if turns:
+                role, text = "user", "[Instruction]\n" + text
+            else:
+                system_parts.append(text)
+                continue
+        role = "assistant" if role == "assistant" else "user"
+        if turns and turns[-1]["role"] == role:
+            turns[-1]["content"] += "\n\n" + text
+        else:
+            turns.append({"role": role, "content": text})
+    if not turns or turns[0]["role"] != "user":
+        turns.insert(0, {"role": "user", "content": "Hello?"})
+    out = [{"role": "system", "content": "\n\n".join(system_parts)}] if system_parts else []
+    return out + turns
+
+
+def _openai_request(cfg, messages, stream, max_tokens, temperature):
+    headers = {"Content-Type": "application/json"}
+    if cfg["api_key"]:
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    payload = {"model": cfg["model"], "messages": _openai_messages(messages), "stream": stream,
+               "max_tokens": max_tokens, "temperature": temperature}
+    return requests.post(f"{cfg['base_url']}/chat/completions", json=payload,
+                         headers=headers, stream=stream, timeout=MODEL_TIMEOUT_S)
+
+
+def _openai(cfg, messages, max_tokens=600, temperature=0.8):
+    r = _openai_request(cfg, messages, False, max_tokens, temperature)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
+    try:
+        choice = r.json()["choices"][0]
+        text = choice["message"]["content"]
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    if not isinstance(text, str):
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    if not text.strip():
+        if choice.get("finish_reason") == "length":
+            raise HTTPException(status_code=502, detail=(
+                f"{cfg['model']} spent all {max_tokens} tokens thinking and wrote "
+                "nothing; raise the token budget for this role"))
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    return text.strip()
+
+
+def _openai_stream(cfg, messages, max_tokens=600, temperature=0.8):
+    with _openai_request(cfg, messages, True, max_tokens, temperature) as r:
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Model stream failed ({r.status_code}): {r.text[:300]}")
+        for data in _sse_json(r):
+            for choice in data.get("choices", []):
+                text = (choice.get("delta") or {}).get("content")
+                if text:
+                    yield text
+
+
+# ---------------------------------------------------------------------------
+# ROLES — the mouth, the brain and the auditor each pick their own provider.
+# ---------------------------------------------------------------------------
+def llm(cfg, messages, thinking=False, max_tokens=600, temperature=0.8):
+    if cfg["provider"] == "openai":
+        return _openai(cfg, messages, max_tokens=max_tokens, temperature=temperature)
+    return _gemini(messages, model=cfg["model"], thinking=thinking,
+                   max_tokens=max_tokens, temperature=temperature)
+
+
+def llm_stream(cfg, messages, max_tokens=600, temperature=0.8):
+    if cfg["provider"] == "openai":
+        return _openai_stream(cfg, messages, max_tokens=max_tokens, temperature=temperature)
+    return _gemini_stream(messages, model=cfg["model"], max_tokens=max_tokens,
+                          temperature=temperature)
+
+
+def _role_label(cfg):
+    return f"{cfg['model']} @ {cfg['base_url'] or 'gemini'}"
 
 
 # ---------------------------------------------------------------------------
@@ -1547,7 +1693,7 @@ def _pause_after(typed_now):
 def _mouth_thread(msgs, box, stop):
     """Generate into `box` in small pieces; block while the emitter is behind."""
     try:
-        for chunk in _gemini_stream(msgs, model=CHAT_MODEL):
+        for chunk in llm_stream(MOUTH, msgs):
             for i in range(0, len(chunk), PIECE_CHARS):
                 piece = chunk[i:i + PIECE_CHARS]
                 while not stop.is_set():
@@ -1944,7 +2090,8 @@ def _startup():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "model": CHAT_MODEL, "audit_model": AUDIT_MODEL,
+    return {"ok": True, "model": _role_label(MOUTH), "brain_model": _role_label(BRAIN),
+            "audit_model": _role_label(AUDIT),
             "audit_thinking": AUDIT_THINKING, "audit_price_usd": AUDIT_PRICE_USD,
             "free_audits": FREE_AUDITS}
 
@@ -2072,7 +2219,7 @@ def chat(body: ChatIn, user=Depends(current_user)):
     girl, rel, remaining = chat_preflight(user, body.girl)
     msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
 
-    reply = _gemini(msgs, model=CHAT_MODEL)   # no thinking budget for chat
+    reply = llm(MOUTH, msgs)   # no thinking budget for chat
     persist_turn(user["user_id"], girl, rel, body.message, reply)
     kick_brain(user["user_id"], girl, rel)
 
@@ -2200,8 +2347,8 @@ def audit(body: AuditIn, user=Depends(current_user)):
                     {"role": "user", "content": full_context}]
         # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
         thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
-        report = _gemini(messages, model=AUDIT_MODEL, thinking=thinking_on,
-                         max_tokens=900, temperature=0.6)
+        report = llm(AUDIT, messages, thinking=thinking_on,
+                     max_tokens=900, temperature=0.6)
     except Exception:
         # no audit delivered: hand the reserved entitlement back
         conn = db()
