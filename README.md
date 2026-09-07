@@ -78,3 +78,44 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 - **Dakota:** Quiet strength, authenticity filter.
 - **Sasha:** Strategic power, rewards respectful friction.
 - **Piper:** Emotional catalyst, avoidant flight response.
+
+## Telegram bot
+
+`telegram_bot.py` is a separate long-polling process named Mia bot. It talks to
+the deployed backend only through its public HTTP API; it does not import
+`main.py` or access the product tables. It creates one additional table,
+`telegram_links`, with `CREATE TABLE IF NOT EXISTS` to persist each Telegram
+`chat_id` and its backend bearer token.
+
+Set these environment variables, using the same PostgreSQL connection string as
+the backend:
+
+```bash
+export TELEGRAM_BOT_TOKEN="token from @BotFather"
+export API_BASE_URL="https://sorority-house-production-aeb5.up.railway.app"
+export DATABASE_URL="postgresql://..."
+python telegram_bot.py
+```
+
+In Telegram, use `/signup email password`, confirm the verification email, then
+`/login email password`. `/girls` lists open and locked characters, `/talk
+<name>` selects a character, and subsequent plain messages use `POST /chat`.
+For account privacy, Mia bot accepts account commands and chats only in direct
+messages, not group chats.
+The bot sends a typing action while the synchronous response is generated
+instead of using `/chat/stream`, because long-polling plus a single final
+Telegram message avoids rate-limit-heavy message edits while preserving the
+backend's existing reply and memory behavior. It handles expired sessions,
+locked doors, exhausted message allowances, network errors, and Telegram
+429 retries. Failed updates are retried in order with a bounded backoff; after
+three consecutive failures, Mia logs and drops the poison update so it cannot
+block every later user's messages.
+
+Without a real Telegram token, run the stubbed smoke test:
+
+```bash
+python -m unittest -v test_telegram_bot.py
+```
+
+To go live, create the bot with `@BotFather`, set `TELEGRAM_BOT_TOKEN` along
+with `API_BASE_URL` and `DATABASE_URL`, then run `python telegram_bot.py`.
