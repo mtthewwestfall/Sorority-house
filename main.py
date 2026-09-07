@@ -1136,6 +1136,7 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         # A few models reject a thinking budget - retry once without it so audits still run.
         if r.status_code in (400, 403) and thinking and "thinkingConfig" in payload["generationConfig"]:
             del payload["generationConfig"]["thinkingConfig"]
+            payload["generationConfig"]["maxOutputTokens"] = max_tokens
             r = _post(payload)
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Model call failed: {type(e).__name__}")
