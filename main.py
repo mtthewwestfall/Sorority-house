@@ -1394,7 +1394,9 @@ def _openai(cfg, messages, max_tokens=600, temperature=0.8):
         text = choice["message"]["content"]
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected model response")
-    if not text or not text.strip():
+    if not isinstance(text, str):
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    if not text.strip():
         if choice.get("finish_reason") == "length":
             raise HTTPException(status_code=502, detail=(
                 f"{cfg['model']} spent all {max_tokens} tokens thinking and wrote "
