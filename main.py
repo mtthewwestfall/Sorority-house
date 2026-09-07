@@ -67,6 +67,18 @@ Env vars (Railway -> Variables):
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
+  OPENROUTER_API_KEY  set this to switch chat to the brain/mouth architecture (below).
+                    Unset -> everything stays on Gemini exactly as before.
+  BRAIN_MODEL       deepseek/deepseek-chat (default). Private layer: memory, recall,
+                    trust, heavier reasoning. Writes a brief for the mouth; never speaks.
+  MOUTH_MODEL       mistralai/mistral-small-3.2-24b-instruct (default). The voice that
+                    actually talks. Fallbacks if speed matters more than richness:
+                    qwen/qwen3-8b or meta-llama/llama-3.1-8b-instruct.
+  MOUTH_PASSES      3 (default). "Say it three times, only the last one sticks": each
+                    pass rewrites the previous draft re-anchored to the user's newest
+                    message; only the final pass is sent. 1 disables.
+  BRAIN_TIMEOUT_S   12 (default). If the brain is slower than this the mouth answers
+                    from the memory block alone rather than making the user wait.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
@@ -122,6 +134,13 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
+# Brain/mouth split (active only when OPENROUTER_API_KEY is set; audits stay brain-off).
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+BRAIN_MODEL = os.environ.get("BRAIN_MODEL", "deepseek/deepseek-chat")
+MOUTH_MODEL = os.environ.get("MOUTH_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
+MOUTH_PASSES = max(1, int(os.environ.get("MOUTH_PASSES", "3")))
+BRAIN_TIMEOUT_S = float(os.environ.get("BRAIN_TIMEOUT_S", "12"))
+OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions"
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -196,6 +215,30 @@ HOUSE_RULES = (
     "still getting to know them.\n"
     "- Relationship progress is graded M1-M8 and shown in the Memory block. Play the "
     "stage you are at honestly: walls come down slowly, and pushing too hard closes doors.\n"
+)
+
+# Mouth-only rules: the voice sounds like someone who already knows, never someone
+# visibly calculating. Mass in, smartness out.
+MOUTH_RULES = (
+    "VOICE — always true:\n"
+    "- You may receive a private BRIEF from your own memory. Treat it as things you "
+    "simply know. Never quote it, reference it, or explain how you know something.\n"
+    "- No visible deliberation, no lists of options, no 'as an AI', no robotic "
+    "explanations, no narrating your own feelings in the third person.\n"
+    "- Answer the newest message first and stay anchored to it. Do not race ahead of "
+    "the conversation or pile up several topics at once.\n"
+    "- Reply with the message only: no preamble, no stage directions, no quotes.\n"
+)
+
+BRAIN_INSTRUCTION = (
+    "You are the private BRAIN behind a companion-chat character. You never speak to "
+    "the user. Read her persona, the memory file, the trust/engine state and the recent "
+    "exchange, then write a compact BRIEF (max ~120 words, terse bullet points) for the "
+    "model that will voice her. Cover: what the user's newest message is really doing; "
+    "the one or two remembered details worth using (or none); her honest emotional read "
+    "and the trust stage she must play; any pinned fact she may reveal now (or that she "
+    "must still withhold); any line she should not cross given the user's conduct. Give "
+    "substance, not scripts: do not write her reply, do not suggest wording. Plain text."
 )
 
 AUDIT_INSTRUCTION = (
@@ -962,7 +1005,7 @@ def _summarize(user_id, girl, rel, recent_msgs):
         context.append({"role": "user", "content": "NEW CONVERSATION:\n" + "\n".join(lines)})
     context.append({"role": "user", "content": "Return the updated JSON now.\n" + grading})
 
-    out = _gemini(context, model=CHAT_MODEL)
+    out = _brain_call(context)
     summary = rel["summary"] or ""
     milestone = int(rel["milestone"])
     conduct = "steady"
@@ -1097,6 +1140,90 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         return text.strip()
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected model response")
+
+
+# ---------------------------------------------------------------------------
+# BRAIN / MOUTH — OpenRouter (OpenAI-compatible). Active when OPENROUTER_API_KEY is set.
+# Brain (DeepSeek) does memory, recall, trust and reasoning in private and hands the
+# mouth a brief. Mouth (Mistral Small) is the only thing that speaks. Audits and the
+# Gemini-only deployment are untouched.
+# ---------------------------------------------------------------------------
+def brain_mouth_enabled():
+    return bool(OPENROUTER_API_KEY)
+
+
+def _openrouter(messages, model, max_tokens=600, temperature=0.8, timeout=120):
+    if not OPENROUTER_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY not set")
+    payload = {"model": model, "messages": messages,
+               "max_tokens": max_tokens, "temperature": temperature}
+    r = requests.post(OPENROUTER_BASE, json=payload, timeout=timeout,
+                      headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                               "Content-Type": "application/json",
+                               "X-Title": "Sorority House"})
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
+    try:
+        text = (r.json()["choices"][0]["message"]["content"] or "").strip()
+        # some models emit reasoning tags even when asked not to
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+        if not text:
+            raise ValueError("no text")
+        return text
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+
+
+def _brain_call(messages, max_tokens=600, temperature=0.4):
+    """Heavy private reasoning (summaries, briefs). Brain model when the split is on,
+    otherwise the Gemini chat model exactly as before."""
+    if brain_mouth_enabled():
+        return _openrouter(messages, BRAIN_MODEL, max_tokens=max_tokens, temperature=temperature)
+    return _gemini(messages, model=CHAT_MODEL, max_tokens=max_tokens, temperature=temperature)
+
+
+def _brain_brief(name, persona_text, memory_block, recent, user_message):
+    """Ask the brain for a private brief. Bounded by BRAIN_TIMEOUT_S and never fatal:
+    a slow or failing brain just means the mouth answers from the memory block alone."""
+    lines = [f"{m['sender']}: {m['message']}" for m in recent]
+    msgs = [{"role": "system", "content": BRAIN_INSTRUCTION},
+            {"role": "user", "content":
+                f"CHARACTER: {name}\n{persona_text}\n\n{memory_block}\n\n"
+                "RECENT EXCHANGE:\n" + ("\n".join(lines) if lines else "(first contact)") +
+                f"\n\nNEWEST USER MESSAGE:\n{user_message}\n\nWrite the brief."}]
+    try:
+        return _openrouter(msgs, BRAIN_MODEL, max_tokens=350, temperature=0.3,
+                           timeout=BRAIN_TIMEOUT_S)
+    except Exception:
+        return ""
+
+
+def _mouth_reply(system_text, memory_block, brief, recent, user_message):
+    """Voice the reply. Pass 1 drafts; each later pass rewrites the previous draft
+    re-anchored to the newest message. Only the final pass is returned."""
+    base = [{"role": "system", "content": system_text + "\n" + MOUTH_RULES},
+            {"role": "system", "content": memory_block}]
+    if brief:
+        base.append({"role": "system", "content": "BRIEF (private, things you already know):\n" + brief})
+    for m in recent:
+        base.append({"role": m["sender"], "content": m["message"]})
+    base.append({"role": "user", "content": user_message})
+
+    draft = _openrouter(base, MOUTH_MODEL, max_tokens=400, temperature=0.85)
+    for _ in range(MOUTH_PASSES - 1):
+        redo = base + [
+            {"role": "assistant", "content": draft},
+            {"role": "user", "content":
+                "[not the user] That was a draft, not sent. Say it again fresh: answer only the newest "
+                "message, drop anything that runs ahead of the conversation or stacks "
+                "topics, keep what lands, and keep it to the length the moment needs. "
+                "Reply with the message only."}]
+        try:
+            draft = _openrouter(redo, MOUTH_MODEL, max_tokens=400, temperature=0.7)
+        except HTTPException:
+            break   # a failed re-pass keeps the last good draft
+    return draft
 
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1479,10 @@ def _startup():
 @app.get("/health")
 def health():
     return {"ok": True, "model": CHAT_MODEL, "audit_model": AUDIT_MODEL,
+            "brain_mouth": brain_mouth_enabled(),
+            "brain_model": BRAIN_MODEL if brain_mouth_enabled() else None,
+            "mouth_model": MOUTH_MODEL if brain_mouth_enabled() else None,
+            "mouth_passes": MOUTH_PASSES if brain_mouth_enabled() else None,
             "audit_thinking": AUDIT_THINKING, "audit_price_usd": AUDIT_PRICE_USD,
             "free_audits": FREE_AUDITS}
 
@@ -1498,13 +1629,17 @@ def chat(body: ChatIn, user=Depends(current_user)):
                        else "- You are still getting to know them; nothing meaningful remembered yet."))
 
     # ---- LAYER 3: only the last WINDOW messages ------------------------------
-    msgs = [{"role": "system", "content": system_text},
-            {"role": "system", "content": memory_block}]
-    for m in last_messages(user["user_id"], girl, WINDOW):
-        msgs.append({"role": m["sender"], "content": m["message"]})
-    msgs.append({"role": "user", "content": body.message})
-
-    reply = _gemini(msgs, model=CHAT_MODEL)   # no thinking budget for chat
+    recent = last_messages(user["user_id"], girl, WINDOW)
+    if brain_mouth_enabled():
+        brief = _brain_brief(name, persona_text, memory_block, recent, body.message)
+        reply = _mouth_reply(system_text, memory_block, brief, recent, body.message)
+    else:
+        msgs = [{"role": "system", "content": system_text},
+                {"role": "system", "content": memory_block}]
+        for m in recent:
+            msgs.append({"role": m["sender"], "content": m["message"]})
+        msgs.append({"role": "user", "content": body.message})
+        reply = _gemini(msgs, model=CHAT_MODEL)   # no thinking budget for chat
 
     conn = db()
     try:
