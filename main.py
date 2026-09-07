@@ -1006,18 +1006,31 @@ def _canonical(item, canon):
     return best if score >= 0.5 else None
 
 
-def _same_phrase(a, b):
-    """Two free-text memory phrases describing the same thing. Stricter than
-    _canonical on purpose: there is no canonical list to snap onto, so overlap is
-    measured against BOTH phrases - 'loves painting' and 'loves hiking' share a
-    word but are two facts, while a reworded version of the same fact is one."""
-    a, b = a.strip(), b.strip()
-    if a.casefold() == b.casefold():
-        return True
+_NEG = {"not", "never", "no", "none", "cannot", "cant", "dont", "doesnt", "didnt",
+        "isnt", "wasnt", "arent", "wont", "nothing", "nobody", "without"}
+
+
+def _negated(s):
+    """Whether a phrase asserts the negative. Read from the raw text, because _words
+    drops 'not' and 'never' as noise - which they are for matching, and are not for
+    meaning: 'afraid of dogs' and 'not afraid of dogs' are the same fact, flipped."""
+    toks = re.findall(r"[a-z]+", s.casefold().replace("'", ""))
+    return sum(1 for t in toks if t in _NEG) % 2 == 1
+
+
+def _phrase_match(a, b):
+    """How two free-text memory phrases relate: 'same' fact (a reword or the same
+    fact elaborated), 'opposite' (the same fact with its polarity flipped, which is
+    a correction and must replace what it corrects), or None for two facts. Overlap
+    is measured against the shorter phrase, so 'loves hiking' absorbs 'loves hiking
+    outdoors' while 'loves painting' and 'loves hiking' stay two facts."""
     aw, bw = _words(a), _words(b)
     if not aw or not bw:
-        return False
-    return len(aw & bw) / len(aw | bw) >= 0.7
+        return None
+    if a.strip().casefold() != b.strip().casefold() and \
+            len(aw & bw) / min(len(aw), len(bw)) < 0.8:
+        return None
+    return "same" if _negated(a) == _negated(b) else "opposite"
 
 
 def gate_milestone(girl, rel, proposed, conduct="steady"):
@@ -1166,7 +1179,16 @@ def _summarize(user_id, girl, rel, recent_msgs):
                 it = _canonical(it, canon)
             else:
                 it = it.strip()
-                if not _words(it) or any(_same_phrase(it, o) for o in out):
+                if not _words(it):
+                    continue
+                held = next(((i, m) for i, o in enumerate(out)
+                             if (m := _phrase_match(it, o))), None)
+                if held is not None:
+                    i, how = held
+                    if how == "opposite":
+                        seen.discard(out[i].casefold())
+                        out[i] = it
+                        seen.add(it.casefold())
                     continue
             if it is not None and it.casefold() not in seen and len(out) < cap:
                 out.append(it)
