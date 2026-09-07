@@ -18,6 +18,13 @@ Built to this spec (verified Sept 2026):
                never on every message (that would churn the cache + cost tokens).
       LAYER 3  Only the last WINDOW raw messages of the ACTIVE conversation, scoped
                to that girl. Input size never grows.
+  * MOUTH / BRAIN SPLIT so replies feel instant without the memory getting thinner:
+      MOUTH  the streaming chat call, paced to a human typing speed by the server.
+             Generation is throttled to the emitter, never buffered ahead of it, so
+             she cannot drift minutes in front of what the user is reading.
+      BRAIN  the Layer-2 summary refresh. Runs in a worker thread ONE TURN BEHIND -
+             it digests the previous turn while she answers this one and commits
+             state for the next. A reply never waits on it.
   * Relationship progress (trust / milestone M1-M8) is PER GIRL, never one global score.
   * Message allowance is shared across ALL girls and enforced per tier.
   * Audits read the FULL arc (rolling summary + a wide recent window), not 5 lines.
@@ -36,6 +43,9 @@ API CONTRACT implemented here (point your chat app at these):
                     (403 email_unverified until the link is clicked)
   POST /auth/logout  (bearer)                            -> {"ok"}
   POST /chat        {"girl","message"}  (bearer)        -> {"reply","remaining","milestone","ok"}
+  POST /chat/stream {"girl","message"}  (bearer)        -> text/event-stream, she TYPES:
+                    event: open {"girl"} / delta {"t"} ... / done {"remaining","milestone"}
+                    (event: error {"detail"} instead, only if she never got a word out)
   GET  /history     ?girl=              (bearer)        -> {"messages":[{...}]}
   GET  /state                           (bearer)        -> {"tier","remaining","audit_count",
                                                             "free_audits_left","audit_credits",
@@ -67,6 +77,12 @@ Env vars (Railway -> Variables):
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
+  CHAT_CPS          her typing speed on /chat/stream, characters per second (default 24).
+  CHAT_LEAD_CHARS   how far generation may run ahead of the screen (default 240 chars).
+                    Generation blocks at this backlog, so she never gets minutes ahead.
+  TAIL_REVISION     true (default): if the brain lands mid-reply and moves the stage, the
+                    UNTYPED remainder is regenerated from the new memory. Typed text is
+                    never rewritten. Set false to always keep her first take.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
@@ -97,19 +113,23 @@ requirements.txt for Railway:
 import os
 import re
 import json
+import asyncio
 import hashlib
 import hmac
+import queue
+import random
 import secrets
 import time
 import threading
 from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -139,6 +159,14 @@ AUTH_RATE_WINDOW_S = int(os.environ.get("AUTH_RATE_WINDOW_S", "60"))
 TRUST_PROXY = os.environ.get("TRUST_PROXY", "true").lower() != "false"
 CHAT_MAX_CHARS = int(os.environ.get("CHAT_MAX_CHARS", "2000"))
 VERIFY_TTL_HOURS = 24
+# Mouth pacing (POST /chat/stream). CHAT_CPS is her typing speed; CHAT_LEAD_CHARS
+# caps how far generation may run ahead of what the user has actually seen.
+CHAT_CPS = float(os.environ.get("CHAT_CPS", "24"))
+CHAT_LEAD_CHARS = int(os.environ.get("CHAT_LEAD_CHARS", "240"))
+TAIL_REVISION = os.environ.get("TAIL_REVISION", "true").lower() == "true"
+EMIT_TICK_S = 0.05          # emitter wakes this often and types its share
+PIECE_CHARS = 24            # granularity the mouth thread hands to the emitter
+SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -1041,15 +1069,136 @@ def maybe_refresh_summary(user_id, girl, rel):
 
 
 # ---------------------------------------------------------------------------
+# MOUTH / BRAIN SPLIT
+# The brain (Layer-2 refresh) is the slow part: it re-reads the conversation,
+# rewrites the memory summary and re-grades the milestone. It must never sit in
+# front of a reply, so it runs in a worker thread ONE TURN BEHIND - fired on turn
+# N over turn N-1, committing state the mouth reads on turn N+1. One brain per
+# relationship at a time; if one is still digesting, the next turn skips it (the
+# since_summary counter keeps the cadence).
+# ---------------------------------------------------------------------------
+_BRAIN_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="brain")
+_brain_locks = {}
+_brain_locks_guard = threading.Lock()
+
+
+def _brain_lock(key):
+    with _brain_locks_guard:
+        lock = _brain_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _brain_locks[key] = lock
+        return lock
+
+
+def kick_brain(user_id, girl, rel):
+    """Start the Layer-2 refresh off the request path. Returns a Future whose
+    result is {"summary","milestone"}, or None when one is already running."""
+    lock = _brain_lock((user_id, girl))
+    if not lock.acquire(blocking=False):
+        return None
+    try:
+        return _BRAIN_POOL.submit(_brain_run, lock, user_id, girl, rel)
+    except RuntimeError:
+        lock.release()
+        return None
+
+
+def _brain_run(lock, user_id, girl, rel):
+    try:
+        return maybe_refresh_summary(user_id, girl, rel)
+    finally:
+        lock.release()
+
+
+def brain_milestone(brain, fallback):
+    """The brain's milestone if it already landed, else what we came in with."""
+    if brain is None or not brain.done():
+        return int(fallback)
+    try:
+        return int(brain.result().get("milestone", fallback))
+    except Exception:
+        return int(fallback)
+
+
+# ---------------------------------------------------------------------------
+# ONE TURN — prompt assembly and persistence, shared by /chat and /chat/stream.
+# ---------------------------------------------------------------------------
+def chat_preflight(user, girl_raw):
+    """Tier/door/allowance checks. Returns (girl, relationship row, remaining)."""
+    girl = girl_raw.strip().lower()
+    if not girl_open(user["user_id"], girl, user["tier"]):
+        raise HTTPException(status_code=403, detail="This door is locked for your tier")
+    remaining = remaining_for(user)
+    if remaining <= 0:
+        raise HTTPException(status_code=402, detail="out_of_messages")
+    return girl, get_relationship(user["user_id"], girl), remaining
+
+
+def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
+    """The 3-layer payload. With said_so_far set, the model is asked to continue
+    a reply whose opening has already been typed out to the user."""
+    persona_text, name = get_persona(girl)
+
+    # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
+    system_text = f"You are {name} from the Sorority House.\n\n{persona_text}\n\n{HOUSE_RULES}"
+
+    # ---- LAYER 2: small memory block + the per-girl engine state card --------
+    engine_card = build_engine_card(girl, rel)
+    memory_block = ("MEMORY BLOCK (relationship with this user - internal):\n"
+                    + engine_card + "\n"
+                    + (f"- Summary: {rel['summary']}" if rel["summary"]
+                       else "- You are still getting to know them; nothing meaningful remembered yet."))
+
+    # ---- LAYER 3: only the last WINDOW messages ------------------------------
+    msgs = [{"role": "system", "content": system_text},
+            {"role": "system", "content": memory_block}]
+    for m in last_messages(user_id, girl, WINDOW):
+        msgs.append({"role": m["sender"], "content": m["message"]})
+    msgs.append({"role": "user", "content": user_message})
+    if said_so_far:
+        msgs.append({"role": "assistant", "content": said_so_far})
+        msgs.append({"role": "system", "content": (
+            "CONTINUATION: the opening of your reply above has already been sent to "
+            "the user and cannot change. Continue it from exactly where it stops - "
+            "mid-sentence if that is where it stops - and never repeat, restate or "
+            "re-greet. Finish the thought in a sentence or two.")})
+    return msgs
+
+
+def persist_turn(user_id, girl, rel, user_message, reply):
+    """Log both sides of the turn, spend one message, and advance the day clock."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO chat_logs (user_id, girl, sender, message)
+                VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
+            """, (user_id, girl, user_message, user_id, girl, reply))
+            cur.execute("UPDATE users SET msg_used = msg_used + 1 WHERE user_id=%s",
+                        (user_id,))
+            # per-girl engine: track real days of presence (the slow-burn clock)
+            prev = rel.get("last_session")
+            new_day = 1 if (prev is None or prev < _today()) else 0
+            cur.execute("""
+                UPDATE relationships
+                SET last_session = CURRENT_DATE,
+                    active_days = active_days + %s,
+                    stage_since = COALESCE(stage_since, CURRENT_DATE)
+                WHERE user_id=%s AND girl=%s
+            """, (new_day, user_id, girl))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # GEMINI — one provider, one call function (your existing Google API key).
 # The layered message list (system blocks + user/assistant turns) is converted
 # to Gemini format: system messages become the system_instruction, the rest
 # become contents. Adjacent same-role turns are merged for Gemini's rules.
 # ---------------------------------------------------------------------------
-def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    model = model or CHAT_MODEL
+def _gemini_payload(messages, thinking=False, max_tokens=600, temperature=0.8):
     system_parts = []
     contents = []
     for m in messages:
@@ -1074,6 +1223,15 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         payload["system_instruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
     if thinking:
         payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 2048}
+    return payload
+
+
+def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or CHAT_MODEL
+    payload = _gemini_payload(messages, thinking=thinking, max_tokens=max_tokens,
+                              temperature=temperature)
 
     def _post(p):
         return requests.post(
@@ -1097,6 +1255,180 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         return text.strip()
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected model response")
+
+
+def _gemini_stream(messages, model=None, max_tokens=600, temperature=0.8):
+    """Same call as _gemini, server-sent-events variant: yields text as the model
+    produces it. Blocking generator - always run it off the event loop."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or CHAT_MODEL
+    payload = _gemini_payload(messages, max_tokens=max_tokens, temperature=temperature)
+    with requests.post(f"{GEMINI_BASE}/{model}:streamGenerateContent",
+                       json=payload, params={"key": GEMINI_API_KEY, "alt": "sse"},
+                       headers={"Content-Type": "application/json"},
+                       stream=True, timeout=120) as r:
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Model stream failed ({r.status_code}): {r.text[:300]}")
+        for line in r.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            body = line[5:].strip()
+            if not body or body == "[DONE]":
+                continue
+            try:
+                data = json.loads(body)
+            except ValueError:
+                continue
+            for cand in data.get("candidates", []):
+                for part in cand.get("content", {}).get("parts", []):
+                    text = part.get("text")
+                    if text:
+                        yield text
+
+
+# ---------------------------------------------------------------------------
+# THE MOUTH — paced emitter.
+# The model is faster than a person types, so the naive fixes both fail: type at
+# model speed and it looks pasted; buffer the whole reply and release it slowly
+# and she runs further ahead every turn and never catches up. Instead the emitter
+# owns the clock and generation is throttled to it: the mouth thread hands over
+# small pieces and BLOCKS while the untyped backlog sits at CHAT_LEAD_CHARS, so
+# she stays within about that far ahead of the screen (the cap plus the couple of
+# handover pieces in flight) instead of gaining a fixed lead every turn.
+# Because typed characters are immutable but the rest is not, a brain that lands
+# mid-reply can still be honoured: the untyped remainder is dropped and
+# regenerated from the updated memory, continuing the sentence she was on.
+# ---------------------------------------------------------------------------
+_EOF = object()
+
+
+def _sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _drain(box):
+    while True:
+        try:
+            box.get_nowait()
+        except queue.Empty:
+            return
+
+
+def _pause_after(typed_now):
+    """Keystroke rhythm: a real person lands on punctuation and breathes."""
+    if typed_now[-1:] in tuple(SENTENCE_END):
+        return EMIT_TICK_S + random.uniform(0.28, 0.55)
+    if typed_now[-1:] in (",", ";", ":"):
+        return EMIT_TICK_S + random.uniform(0.08, 0.16)
+    return EMIT_TICK_S * random.uniform(0.8, 1.25)
+
+
+def _mouth_thread(msgs, box, stop):
+    """Generate into `box` in small pieces; block while the emitter is behind."""
+    try:
+        for chunk in _gemini_stream(msgs, model=CHAT_MODEL):
+            for i in range(0, len(chunk), PIECE_CHARS):
+                piece = chunk[i:i + PIECE_CHARS]
+                while not stop.is_set():
+                    try:
+                        box.put(piece, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+                if stop.is_set():
+                    return
+    except Exception:
+        pass
+    finally:
+        if not stop.is_set():
+            try:
+                box.put(_EOF, timeout=1)
+            except queue.Full:
+                pass
+
+
+async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, brain):
+    box = queue.Queue(maxsize=2)
+    stop = threading.Event()
+    threading.Thread(target=_mouth_thread, args=(msgs, box, stop), daemon=True).start()
+
+    typed = []              # on the screen, immutable
+    backlog = ""            # generated, not yet typed
+    finished = False        # the mouth reached the end of the reply
+    revisable = TAIL_REVISION and brain is not None
+    credit = 0.0            # fractional characters owed at this typing speed
+    logged = False
+
+    try:
+        yield _sse("open", {"girl": girl})
+        while True:
+            if await request.is_disconnected():
+                break
+
+            # Pull only while the untyped backlog is under the cap - a full box is
+            # what makes the mouth thread block. This is the backpressure.
+            while len(backlog) < CHAT_LEAD_CHARS:
+                try:
+                    item = box.get_nowait()
+                except queue.Empty:
+                    break
+                if item is _EOF:
+                    finished = True
+                    break
+                backlog += item
+
+            if finished and not backlog:
+                break
+
+            # The brain landed mid-reply and moved the stage: retype the tail.
+            if revisable and brain.done():
+                revisable = False
+                if backlog and brain_milestone(brain, rel["milestone"]) != int(rel["milestone"]):
+                    try:
+                        fresh = await asyncio.to_thread(get_relationship, user_id, girl)
+                        tail_msgs = await asyncio.to_thread(
+                            build_chat_messages, user_id, girl, fresh, user_message,
+                            "".join(typed))
+                    except Exception:
+                        tail_msgs = None
+                    if tail_msgs is not None:
+                        stop.set()
+                        _drain(box)
+                        rel, backlog, finished = fresh, "", False
+                        box, stop = queue.Queue(maxsize=2), threading.Event()
+                        threading.Thread(target=_mouth_thread,
+                                         args=(tail_msgs, box, stop),
+                                         daemon=True).start()
+
+            credit += CHAT_CPS * EMIT_TICK_S
+            take = min(int(credit), len(backlog))
+            if take:
+                credit -= take
+                typed_now, backlog = backlog[:take], backlog[take:]
+                typed.append(typed_now)
+                yield _sse("delta", {"t": typed_now})
+                await asyncio.sleep(_pause_after(typed_now))
+            else:
+                await asyncio.sleep(EMIT_TICK_S)
+
+        reply = "".join(typed).strip()
+        if not reply:
+            yield _sse("error", {"detail": "she_did_not_answer"})
+            return
+        await asyncio.to_thread(persist_turn, user_id, girl, rel, user_message, reply)
+        logged = True
+        yield _sse("done", {"remaining": max(remaining - 1, 0),
+                            "milestone": brain_milestone(brain, rel["milestone"])})
+    finally:
+        stop.set()
+        reply = "".join(typed).strip()
+        if reply and not logged:
+            # dropped connection: log what she actually got to say, off-thread
+            # because the client is already gone and cannot wait for it
+            _BRAIN_POOL.submit(persist_turn, user_id, girl, rel, user_message, reply)
 
 
 # ---------------------------------------------------------------------------
@@ -1474,66 +1806,41 @@ def logout(authorization: str = Header(default=""), user=Depends(current_user)):
 
 @app.post("/chat")
 def chat(body: ChatIn, user=Depends(current_user)):
-    tier = user["tier"]
-    girl = body.girl.strip().lower()
-
-    if not girl_open(user["user_id"], girl, tier):
-        raise HTTPException(status_code=403, detail="This door is locked for your tier")
-
-    remaining = remaining_for(user)
-    if remaining <= 0:
-        raise HTTPException(status_code=402, detail="out_of_messages")
-
-    rel = get_relationship(user["user_id"], girl)
-    persona_text, name = get_persona(girl)
-
-    # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
-    system_text = f"You are {name} from the Sorority House.\n\n{persona_text}\n\n{HOUSE_RULES}"
-
-    # ---- LAYER 2: small memory block + the per-girl engine state card --------
-    engine_card = build_engine_card(girl, rel)
-    memory_block = ("MEMORY BLOCK (relationship with this user - internal):\n"
-                    + engine_card + "\n"
-                    + (f"- Summary: {rel['summary']}" if rel["summary"]
-                       else "- You are still getting to know them; nothing meaningful remembered yet."))
-
-    # ---- LAYER 3: only the last WINDOW messages ------------------------------
-    msgs = [{"role": "system", "content": system_text},
-            {"role": "system", "content": memory_block}]
-    for m in last_messages(user["user_id"], girl, WINDOW):
-        msgs.append({"role": m["sender"], "content": m["message"]})
-    msgs.append({"role": "user", "content": body.message})
+    """Whole reply in one response. The brain runs behind it, so "milestone" here
+    is the stage as of this turn; /state has it once the refresh lands."""
+    girl, rel, remaining = chat_preflight(user, body.girl)
+    msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
 
     reply = _gemini(msgs, model=CHAT_MODEL)   # no thinking budget for chat
-
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO chat_logs (user_id, girl, sender, message)
-                VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
-            """, (user["user_id"], girl, body.message, user["user_id"], girl, reply))
-            cur.execute("UPDATE users SET msg_used = msg_used + 1 WHERE user_id=%s",
-                        (user["user_id"],))
-            # per-girl engine: track real days of presence (the slow-burn clock)
-            prev = rel.get("last_session")
-            new_day = 1 if (prev is None or prev < _today()) else 0
-            cur.execute("""
-                UPDATE relationships
-                SET last_session = CURRENT_DATE,
-                    active_days = active_days + %s,
-                    stage_since = COALESCE(stage_since, CURRENT_DATE)
-                WHERE user_id=%s AND girl=%s
-            """, (new_day, user["user_id"], girl))
-            conn.commit()
-    finally:
-        conn.close()
-
-    # Layer-2 refresh is throttled (every SUMMARY_EVERY messages), not per turn.
-    state = maybe_refresh_summary(user["user_id"], girl, rel)
+    persist_turn(user["user_id"], girl, rel, body.message, reply)
+    kick_brain(user["user_id"], girl, rel)
 
     return {"ok": True, "reply": reply, "remaining": remaining - 1,
-            "milestone": state["milestone"]}
+            "milestone": int(rel["milestone"])}
+
+
+@app.post("/chat/stream")
+async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)):
+    """She types instead of pasting. Same 3-layer payload as /chat; the reply is
+    streamed as SSE at a human rate.
+
+      event: open   {"girl"}                  - accepted, she is thinking
+      event: delta  {"t"}                     - the next few characters she typed
+      event: done   {"remaining","milestone"} - turn logged and spent
+      event: error  {"detail"}                - only before any delta
+
+    What the user has SEEN is the transcript: on a mid-reply disconnect the typed
+    part is what gets logged, so her memory and the screen never disagree."""
+    girl, rel, remaining = await asyncio.to_thread(chat_preflight, user, body.girl)
+    msgs = await asyncio.to_thread(build_chat_messages,
+                                  user["user_id"], girl, rel, body.message)
+    brain = kick_brain(user["user_id"], girl, rel)
+    return StreamingResponse(
+        _type_out(request, user["user_id"], girl, rel, msgs, body.message,
+                  remaining, brain),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"})
 
 
 @app.get("/history")

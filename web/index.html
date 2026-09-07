@@ -769,6 +769,88 @@
       }
     });
 
+    // She types: POST /chat/stream sends her reply as SSE, already paced by the
+    // backend, so the bubble just grows as the events land. Older backends have
+    // no /chat/stream, so a 404 (or any pre-reply failure) falls back to /chat.
+    let streamSupported = true;
+    async function streamReply(message, typing) {
+      const response = await fetch(API_BASE_URL + '/chat/stream', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ girl: currentGirl, message: message }),
+      });
+      if (response.status === 404 || response.status === 405) {
+        streamSupported = false;
+        return false;
+      }
+      if (response.status === 401) { typing.remove(); addMessage('note', 'Your session ended. Sign in to keep talking.'); handleUnauthorized(); return true; }
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
+        typing.remove();
+        addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+        return true;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = '';
+      let bubble = null;
+      let failed = null;
+
+      const handle = (event, data) => {
+        if (event === 'delta' && data.t) {
+          if (!bubble) { typing.remove(); bubble = addMessage('her', ''); }
+          bubble.textContent += data.t;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        } else if (event === 'done') {
+          if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+        } else if (event === 'error') {
+          failed = data.detail || 'She did not answer. Try again in a moment.';
+        }
+      };
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        raw += decoder.decode(value, { stream: true });
+        const blocks = raw.split('\n\n');
+        raw = blocks.pop();
+        for (const block of blocks) {
+          let event = 'message', payload = '';
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) payload += line.slice(5).trim();
+          }
+          if (!payload) continue;
+          try { handle(event, JSON.parse(payload)); } catch (e) { /* ignore a partial frame */ }
+        }
+      }
+      if (!bubble) {
+        typing.remove();
+        addMessage('error', failed === 'she_did_not_answer' ? 'She went quiet. Try again in a moment.' : (failed || 'She did not answer. Try again in a moment.'));
+      }
+      return true;
+    }
+
+    async function sendReply(message, typing) {
+      const response = await fetch(API_BASE_URL + '/chat', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ girl: currentGirl, message: message }),
+      });
+      const data = await response.json().catch(() => null);
+      typing.remove();
+      if (response.status === 401) {
+        addMessage('note', 'Your session ended. Sign in to keep talking.');
+        handleUnauthorized();
+      } else if (!response.ok || !data || data.ok === false) {
+        addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+      } else {
+        addMessage('her', data.reply);
+        if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+      }
+    }
+
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const message = chatInput.value.trim();
@@ -781,24 +863,8 @@
       const typing = addMessage('typing', 'typing…');
 
       try {
-        const response = await fetch(API_BASE_URL + '/chat', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ girl: currentGirl, message: message }),
-        });
-        const data = await response.json().catch(() => null);
-        typing.remove();
-
-        if (response.status === 401) {
-          addMessage('note', 'Your session ended. Sign in to keep talking.');
-          handleUnauthorized();
-        } else if (!response.ok || !data || data.ok === false) {
-          addMessage('error', (data && (data.error || data.detail)) || 'She did not answer. Try again in a moment.');
-        } else {
-          addMessage('her', data.reply);
-          if (typeof data.remaining === 'number') {
-            chatRemaining.textContent = data.remaining + ' messages left';
-          }
+        if (!streamSupported || !(await streamReply(message, typing))) {
+          await sendReply(message, typing);
         }
       } catch (error) {
         typing.remove();

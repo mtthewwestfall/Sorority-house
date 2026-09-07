@@ -34,7 +34,15 @@ Each girl has a "Development Bible" containing:
 - **The Paywall:** Triggered at message 25.
 - **The Delivery:** Once subscribed, the promised photo is delivered at message 10 of the paid tier.
 
-### 4. Admin Console
+### 4. The Mouth and the Brain (how a reply is produced)
+Two model roles, deliberately unequal in speed, so replies land instantly without thinning her memory:
+- **The mouth** (`POST /chat/stream`) is the streaming chat call, paced **server-side** to a human typing rate (`CHAT_CPS`). Generation is throttled to the typing, not buffered ahead of it: the emitter owns the clock and the generator blocks once the untyped backlog hits `CHAT_LEAD_CHARS`. That is what stops her from getting a growing head start she can never give back.
+- **The brain** is the Layer-2 memory refresh (rolling summary + milestone re-grade + conduct grade). It runs in a worker thread **one turn behind**: fired on turn N over turn N-1, committing state the mouth reads on turn N+1. A reply never waits on it, and one relationship only ever has one brain digesting at a time.
+- **Tail revision** (`TAIL_REVISION`, on by default): typed characters are immutable, the rest is not. If the brain lands mid-reply and moves the stage, the untyped remainder is dropped and regenerated from the new memory, continuing the sentence she was on. The user never sees a rewrite - only the part she hadn't typed yet changes.
+- **What was seen is what is remembered:** the transcript logs the text that actually reached the screen, so a dropped connection cannot leave her remembering a paragraph the user never read.
+- `POST /chat` still returns whole replies for any client that doesn't stream, and the web frontend falls back to it automatically.
+
+### 5. Admin Console
 Open `https://<your-app>/admin` and enter `ADMIN_SECRET`. From there you can:
 - **Accounts:** search by email / name / id, see tier, messages left, audits, girls & stages, and leave a private admin note.
 - **Free time:** comp any account to a paid tier for N days (`/admin/grant-time {email, tier, days}`). They get a fresh allowance immediately; when the time is up they drop back to whatever tier they had before (a used-up trial stays used up). Granting again extends; "End now" cuts it short; a real Stripe tier change cancels the comp.
@@ -53,6 +61,9 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | `STRIPE_WEBHOOK_SECRET` | Key to verify payment events | Stripe Dashboard |
 | `IMAGE_API_KEY` | Key for autonomous photo generation | Image Provider API |
 | `SHOPIFY_API_KEY` | Integration for merch store | Shopify Admin |
+| `CHAT_CPS` | Her typing speed on `/chat/stream`, characters per second (default `24`) | You choose it |
+| `CHAT_LEAD_CHARS` | How far generation may run ahead of the screen (default `240`) | You choose it |
+| `TAIL_REVISION` | `true` (default) lets a mid-reply brain rewrite only the untyped tail | You choose it |
 
 ---
 
