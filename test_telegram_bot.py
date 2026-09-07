@@ -190,6 +190,28 @@ class TelegramSmokeTest(unittest.TestCase):
         self.assertTrue(processed)
         self.assertEqual(failures, {})
 
+    def test_recovered_update_clears_retry_state(self):
+        class RecoveringApp:
+            def __init__(self):
+                self.attempts = 0
+
+            def handle(self, update):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise RuntimeError("temporary failure")
+
+        app = RecoveringApp()
+        with self.assertLogs("sorority.telegram", level="ERROR"):
+            offset, processed, failures = process_updates(
+                app, [{"update_id": 2}], 2
+            )
+        self.assertEqual((offset, processed, failures), (2, False, {2: 1}))
+
+        offset, processed, failures = process_updates(
+            app, [{"update_id": 2}], 2, failures
+        )
+        self.assertEqual((offset, processed, failures), (3, True, {}))
+
 
 class LinkStoreDsnTest(unittest.TestCase):
     def test_tls_is_required_even_if_the_url_omits_it(self):

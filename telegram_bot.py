@@ -393,6 +393,8 @@ def process_updates(
                 return offset, False, failures
             LOG.exception("Dropping Telegram update after %d failures", failures[update_id])
             failures.pop(update_id)
+        else:
+            failures.pop(update_id, None)
         offset = update_id + 1
     return offset, True, failures
 
