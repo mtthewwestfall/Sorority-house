@@ -133,11 +133,12 @@ class TelegramSmokeTest(unittest.TestCase):
                     raise RuntimeError("temporary failure")
 
         app = FailingApp()
-        offset, processed = process_updates(
-            app,
-            [{"update_id": 1}, {"update_id": 2}, {"update_id": 3}],
-            1,
-        )
+        with self.assertLogs("sorority.telegram", level="ERROR"):
+            offset, processed = process_updates(
+                app,
+                [{"update_id": 1}, {"update_id": 2}, {"update_id": 3}],
+                1,
+            )
         self.assertEqual(app.seen, [1, 2])
         self.assertEqual(offset, 2)
         self.assertFalse(processed)
