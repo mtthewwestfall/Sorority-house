@@ -287,7 +287,7 @@
          overlays its lower half and the composer floats above the keyboard. */
       #chat.is-open { place-items: start center; padding: 10px; }
       #chat .chat-panel { height: 100%; position: relative; }
-      #chat .chat-log { padding-bottom: var(--foot-h, 96px); }
+      #chat .chat-log { padding-bottom: calc(var(--foot-h, 96px) + var(--kb-offset, 0px)); }
       #chat .chat-foot {
         position: absolute; left: 0; right: 0; bottom: var(--kb-offset, 0px); z-index: 2;
         background: rgba(21, 14, 35, .55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
