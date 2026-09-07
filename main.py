@@ -235,6 +235,7 @@ PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
 PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
+WEBHOOK_MAX_BYTES = 1024 * 1024
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -2437,8 +2438,24 @@ def picture_status(cur, user_id):
         "pack_size": PICTURE_PACK_SIZE,
         "pack_price": PICTURE_PACK_PRICE or None,
         "pack_handle": PICTURE_PACK_HANDLE,
-        "user_id": user_id,
+        "pack_sku": PICTURE_PACK_SKU,
+        "pack_ready": bool(SHOPIFY_WEBHOOK_SECRET),
+        "pack_ref": _pack_ref(user_id) if SHOPIFY_WEBHOOK_SECRET else None,
     }
+
+
+def _pack_ref(user_id):
+    """Signed buyer reference carried through the Shopify cart, so the order
+    webhook can trust which account paid."""
+    sig = hmac.new(SHOPIFY_WEBHOOK_SECRET.encode(), user_id.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{user_id}.{sig}"
+
+
+def _user_from_pack_ref(ref):
+    user_id, _, sig = (ref or "").strip().rpartition(".")
+    if not user_id or not sig:
+        return ""
+    return user_id if hmac.compare_digest(_pack_ref(user_id), f"{user_id}.{sig}") else ""
 
 
 PORTRAIT_MAX_BYTES = 4 * 1024 * 1024
@@ -2894,7 +2911,13 @@ async def shopify_order_webhook(request: Request):
     falling back to the order email. Anything else in the order is ignored."""
     if not SHOPIFY_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="SHOPIFY_WEBHOOK_SECRET must be set")
-    raw = await request.body()
+    if int(request.headers.get("Content-Length") or 0) > WEBHOOK_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > WEBHOOK_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Payload too large")
     digest = base64.b64encode(hmac.new(SHOPIFY_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).digest()).decode()
     if not hmac.compare_digest(digest, request.headers.get("X-Shopify-Hmac-Sha256", "")):
         raise HTTPException(status_code=401, detail="Bad Shopify signature")
@@ -2907,7 +2930,7 @@ async def shopify_order_webhook(request: Request):
     if packs <= 0:
         return {"ok": True, "ignored": True}
     attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
-    user_id = (attrs.get("lockeddoor_user") or "").strip()
+    user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
     if user_id:
         conn = db()
         try:

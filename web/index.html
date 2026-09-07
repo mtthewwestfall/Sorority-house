@@ -588,9 +588,11 @@
       document.getElementById('nav-auth').textContent = label;
       document.getElementById('footer-auth').textContent = label;
     }
+    let picStatus = null;   // picture entitlements for the signed-in account (see /image)
     function signOut() {
       const t = getToken();
       localStorage.removeItem(TOKEN_KEY);
+      picStatus = null;
       updateAuthLinks(); closeChat(); refreshState();
       if (t) fetch(API_BASE_URL + '/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } }).catch(() => {});
     }
@@ -701,6 +703,7 @@
     // Called when the API says the token is missing/expired.
     function handleUnauthorized() {
       abortStream();   // refreshState runs below, once the token is cleared
+      picStatus = null;
       if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); refreshState(); }
       openAuth('login', 'Sign in to keep talking.');
     }
@@ -962,15 +965,15 @@
 
     // Pictures: the + button stays hidden until the backend exposes /image.
     // One picture is earned per PICTURE_EVERY messages; packs add credits.
-    let picStatus = null;
     fetch(API_BASE_URL + '/image', { method: 'HEAD' })
       .then((r) => { if (r.status !== 404) chatPhotoBtn.hidden = false; })
       .catch(() => {});
     async function loadPictureStatus() {
       if (chatPhotoBtn.hidden || !isLoggedIn()) return;
+      const token = getToken();
       try {
         const r = await fetch(API_BASE_URL + '/image', { headers: authHeaders() });
-        if (r.ok) picStatus = await r.json();
+        if (r.ok && getToken() === token) picStatus = await r.json();
       } catch (_) {}
     }
     let picSheet = null;
@@ -997,6 +1000,8 @@
       const pack = document.createElement('button');
       pack.type = 'button'; pack.className = 'button ghost';
       pack.textContent = `${packSize} more · ${s.pack_price || '$0.99'}`;
+      pack.disabled = !(s.pack_ready && s.pack_ref);
+      if (pack.disabled) pack.title = 'Checkout coming soon';
       pack.addEventListener('click', () => buyPicturePack(s, pack));
       const cancel = document.createElement('button');
       cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
@@ -1273,19 +1278,22 @@
     // Picture packs are a Shopify product too; the cart carries the player's id so
     // the order webhook knows whose credits to top up.
     async function buyPicturePack(status, button) {
+      if (!status.pack_ready || !status.pack_ref) return;
       const label = button.textContent;
       button.disabled = true;
       button.textContent = 'Opening checkout…';
       try {
         const data = await shopify(
-          'query($h:String!){ product(handle:$h){ variants(first:1){ edges{ node{ id availableForSale } } } } }',
+          'query($h:String!){ product(handle:$h){ variants(first:20){ edges{ node{ id sku availableForSale } } } } }',
           { h: status.pack_handle || 'picture-pack' }
         );
-        const v = data.product && data.product.variants.edges[0] && data.product.variants.edges[0].node;
-        if (!v || !v.availableForSale) throw new Error('the picture pack is not in the store yet');
+        const sku = String(status.pack_sku || '').toUpperCase();
+        const v = ((data.product && data.product.variants.edges) || []).map(e => e.node)
+          .find(n => n.availableForSale && String(n.sku || '').toUpperCase() === sku);
+        if (!v) throw new Error('the picture pack is not in the store yet');
         const cart = await shopify(
           'mutation($lines:[CartLineInput!]!,$attrs:[AttributeInput!]!){ cartCreate(input:{lines:$lines,attributes:$attrs}){ cart{ checkoutUrl } userErrors{ message } } }',
-          { lines: [{ merchandiseId: v.id, quantity: 1 }], attrs: [{ key: 'lockeddoor_user', value: String(status.user_id || '') }] }
+          { lines: [{ merchandiseId: v.id, quantity: 1 }], attrs: [{ key: 'lockeddoor_user', value: String(status.pack_ref) }] }
         );
         const err = cart.cartCreate.userErrors[0];
         if (err) throw new Error(err.message);
