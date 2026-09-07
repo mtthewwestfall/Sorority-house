@@ -662,6 +662,12 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pics_free_used INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_credits INTEGER NOT NULL DEFAULT 0;
+                CREATE TABLE IF NOT EXISTS picture_payments (
+                    payment_id TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL,
+                    credits    INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
                 -- distinct days the user actually talked to her at the current stage;
                 -- existing rows are seeded from the chat log (days after the stage moved)
                 ALTER TABLE relationships ADD COLUMN IF NOT EXISTS stage_days INTEGER;
@@ -2168,6 +2174,7 @@ class GrantAuditsIn(BaseModel):
 class GrantPicturesIn(BaseModel):
     email: str
     packs: int = 1       # number of picture packs paid for (call from Stripe webhook)
+    payment_id: str      # Stripe event / checkout-session id; repeats are a no-op
     secret: str = ""
 
 
@@ -2850,18 +2857,27 @@ def grant_pictures(body: GrantPicturesIn):
     _check_admin(body.secret, strict=True)
     if body.packs <= 0 or body.packs > 100:
         raise HTTPException(status_code=400, detail="packs must be 1..100")
+    payment_id = body.payment_id.strip()
+    if not payment_id:
+        raise HTTPException(status_code=400, detail="payment_id required")
     user = _user_for_email(body.email)
     credits = body.packs * PICTURE_PACK_SIZE
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s RETURNING pic_credits",
-                        (credits, user["user_id"]))
+            cur.execute("INSERT INTO picture_payments (payment_id, user_id, credits) VALUES (%s,%s,%s) "
+                        "ON CONFLICT (payment_id) DO NOTHING", (payment_id, user["user_id"], credits))
+            granted = cur.rowcount == 1
+            if granted:
+                cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s RETURNING pic_credits",
+                            (credits, user["user_id"]))
+            else:
+                cur.execute("SELECT pic_credits FROM users WHERE user_id=%s", (user["user_id"],))
             total = int(cur.fetchone()["pic_credits"])
             conn.commit()
     finally:
         conn.close()
-    return {"ok": True, "user_id": user["user_id"], "pic_credits": total}
+    return {"ok": True, "user_id": user["user_id"], "pic_credits": total, "duplicate": not granted}
 
 
 # ---------------------------------------------------------------------------
