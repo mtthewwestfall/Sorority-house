@@ -474,7 +474,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "http://localhost:8000";
+    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -643,7 +643,7 @@
 
     // Called when the API says the token is missing/expired.
     function handleUnauthorized() {
-      abortStream();
+      abortStream();   // refreshState runs below, once the token is cleared
       if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); refreshState(); }
       openAuth('login', 'Sign in to keep talking.');
     }
@@ -684,7 +684,7 @@
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
       if (!card.classList.contains('open')) return;
-      abortStream();
+      abortStreamAndResync();
       currentGirl = card.dataset.girl;
       document.getElementById('chat-name').textContent = card.dataset.name;
       document.getElementById('chat-title').textContent = card.dataset.title;
@@ -699,7 +699,7 @@
     }
 
     function closeChat() {
-      abortStream();
+      abortStreamAndResync();
       chat.classList.remove('is-open');
       currentGirl = null;
     }
@@ -780,7 +780,17 @@
     // goes on generating text nobody is reading. Both paths share the handle.
     let streamAbort = null;
     function abortStream() {
-      if (streamAbort) { streamAbort.abort(); streamAbort = null; }
+      if (!streamAbort) return false;
+      streamAbort.abort();
+      streamAbort = null;
+      return true;
+    }
+
+    // A cut-off reply is still charged, but 'done' never arrives to carry the new
+    // count, so the header would keep showing the pre-send number. The backend
+    // logs the typed part after it notices the drop, so ask a moment later.
+    function abortStreamAndResync() {
+      if (abortStream()) setTimeout(refreshState, 900);
     }
 
     let streamSupported = true;
