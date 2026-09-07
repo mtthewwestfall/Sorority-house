@@ -67,13 +67,17 @@ Env vars (Railway -> Variables):
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
-  OPENROUTER_API_KEY  set this to switch chat to the brain/mouth architecture (below).
-                    Unset -> everything stays on Gemini exactly as before.
-  BRAIN_MODEL       deepseek/deepseek-chat (default). Private layer: memory, recall,
-                    trust, heavier reasoning. Writes a brief for the mouth; never speaks.
-  MOUTH_MODEL       mistralai/mistral-small-3.2-24b-instruct (default). The voice that
-                    actually talks. Fallbacks if speed matters more than richness:
-                    qwen/qwen3-8b or meta-llama/llama-3.1-8b-instruct.
+  BRAIN_MOUTH       true (default): chat runs the brain/mouth architecture below.
+                    false -> the old single-call chat.
+  BRAIN_MODEL       private layer: memory, recall, trust, heavier reasoning. Writes a
+                    brief for the mouth; never speaks. Default = CHAT_MODEL (Gemini) run
+                    WITH a thinking budget. Set an OpenRouter id such as
+                    deepseek/deepseek-chat (needs OPENROUTER_API_KEY) to move it.
+  MOUTH_MODEL       the voice that actually talks, no thinking. Default = CHAT_MODEL
+                    (Gemini). OpenRouter options: mistralai/mistral-small-3.2-24b-instruct,
+                    or qwen/qwen3-8b / meta-llama/llama-3.1-8b-instruct for raw speed.
+  OPENROUTER_API_KEY  only needed when BRAIN_MODEL or MOUTH_MODEL is an OpenRouter id
+                    (anything containing a '/').
   MOUTH_PASSES      3 (default). "Say it three times, only the last one sticks": each
                     pass rewrites the previous draft re-anchored to the user's newest
                     message; only the final pass is sent. 1 disables.
@@ -134,10 +138,11 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
-# Brain/mouth split (active only when OPENROUTER_API_KEY is set; audits stay brain-off).
+# Brain/mouth split (audits stay brain-off). Models with a '/' are OpenRouter ids.
+BRAIN_MOUTH = os.environ.get("BRAIN_MOUTH", "true").lower() == "true"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-BRAIN_MODEL = os.environ.get("BRAIN_MODEL", "deepseek/deepseek-chat")
-MOUTH_MODEL = os.environ.get("MOUTH_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
+BRAIN_MODEL = os.environ.get("BRAIN_MODEL", CHAT_MODEL)
+MOUTH_MODEL = os.environ.get("MOUTH_MODEL", CHAT_MODEL)
 MOUTH_PASSES = max(1, int(os.environ.get("MOUTH_PASSES", "3")))
 BRAIN_TIMEOUT_S = float(os.environ.get("BRAIN_TIMEOUT_S", "12"))
 OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions"
@@ -1089,7 +1094,7 @@ def maybe_refresh_summary(user_id, girl, rel):
 # to Gemini format: system messages become the system_instruction, the rest
 # become contents. Adjacent same-role turns are merged for Gemini's rules.
 # ---------------------------------------------------------------------------
-def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
+def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8, timeout=120):
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
     model = model or CHAT_MODEL
@@ -1116,19 +1121,24 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
     if system_parts:
         payload["system_instruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
     if thinking:
+        # maxOutputTokens covers thinking too; leave room so the answer isn't cut off
         payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 2048}
+        payload["generationConfig"]["maxOutputTokens"] = max_tokens + 2048
 
     def _post(p):
         return requests.post(
             f"{GEMINI_BASE}/{model}:generateContent",
             json=p, params={"key": GEMINI_API_KEY},
-            headers={"Content-Type": "application/json"}, timeout=120)
+            headers={"Content-Type": "application/json"}, timeout=timeout)
 
-    r = _post(payload)
-    # A few models reject a thinking budget - retry once without it so audits still run.
-    if r.status_code in (400, 403) and thinking and "thinkingConfig" in payload["generationConfig"]:
-        del payload["generationConfig"]["thinkingConfig"]
+    try:
         r = _post(payload)
+        # A few models reject a thinking budget - retry once without it so audits still run.
+        if r.status_code in (400, 403) and thinking and "thinkingConfig" in payload["generationConfig"]:
+            del payload["generationConfig"]["thinkingConfig"]
+            r = _post(payload)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {type(e).__name__}")
     if r.status_code != 200:
         raise HTTPException(status_code=502,
                             detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
@@ -1143,13 +1153,25 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
 
 
 # ---------------------------------------------------------------------------
-# BRAIN / MOUTH — OpenRouter (OpenAI-compatible). Active when OPENROUTER_API_KEY is set.
-# Brain (DeepSeek) does memory, recall, trust and reasoning in private and hands the
-# mouth a brief. Mouth (Mistral Small) is the only thing that speaks. Audits and the
-# Gemini-only deployment are untouched.
+# BRAIN / MOUTH. The brain does memory, recall, trust and reasoning in private and
+# hands the mouth a brief. The mouth is the only thing that speaks. Both default to
+# the Gemini chat model (brain with a thinking budget, mouth without); either can be
+# pointed at an OpenRouter model ('provider/model' id). Audits are untouched.
 # ---------------------------------------------------------------------------
 def brain_mouth_enabled():
-    return bool(OPENROUTER_API_KEY)
+    return BRAIN_MOUTH
+
+
+def _is_openrouter(model):
+    return "/" in model
+
+
+def _llm(messages, model, thinking=False, max_tokens=600, temperature=0.8, timeout=120):
+    if _is_openrouter(model):
+        return _openrouter(messages, model, max_tokens=max_tokens,
+                           temperature=temperature, timeout=timeout)
+    return _gemini(messages, model=model, thinking=thinking, max_tokens=max_tokens,
+                   temperature=temperature, timeout=timeout)
 
 
 def _openrouter(messages, model, max_tokens=600, temperature=0.8, timeout=120):
@@ -1180,9 +1202,10 @@ def _openrouter(messages, model, max_tokens=600, temperature=0.8, timeout=120):
 
 def _brain_call(messages, max_tokens=600, temperature=0.4):
     """Heavy private reasoning (summaries, briefs). Brain model when the split is on,
-    otherwise the Gemini chat model exactly as before."""
+    otherwise the chat model exactly as before."""
     if brain_mouth_enabled():
-        return _openrouter(messages, BRAIN_MODEL, max_tokens=max_tokens, temperature=temperature)
+        return _llm(messages, BRAIN_MODEL, thinking=True, max_tokens=max_tokens,
+                    temperature=temperature)
     return _gemini(messages, model=CHAT_MODEL, max_tokens=max_tokens, temperature=temperature)
 
 
@@ -1196,8 +1219,8 @@ def _brain_brief(name, persona_text, memory_block, recent, user_message):
                 "RECENT EXCHANGE:\n" + ("\n".join(lines) if lines else "(first contact)") +
                 f"\n\nNEWEST USER MESSAGE:\n{user_message}\n\nWrite the brief."}]
     try:
-        return _openrouter(msgs, BRAIN_MODEL, max_tokens=350, temperature=0.3,
-                           timeout=BRAIN_TIMEOUT_S)
+        return _llm(msgs, BRAIN_MODEL, thinking=True, max_tokens=350, temperature=0.3,
+                    timeout=BRAIN_TIMEOUT_S)
     except Exception:
         return ""
 
@@ -1213,17 +1236,17 @@ def _mouth_reply(system_text, memory_block, brief, recent, user_message):
         base.append({"role": m["sender"], "content": m["message"]})
     base.append({"role": "user", "content": user_message})
 
-    draft = _openrouter(base, MOUTH_MODEL, max_tokens=400, temperature=0.85)
+    draft = _llm(base, MOUTH_MODEL, max_tokens=400, temperature=0.85)
     for _ in range(MOUTH_PASSES - 1):
         redo = base + [
             {"role": "assistant", "content": draft},
             {"role": "user", "content":
-                "[not the user] That was a draft, not sent. Say it again fresh: answer only the newest "
-                "message, drop anything that runs ahead of the conversation or stacks "
-                "topics, keep what lands, and keep it to the length the moment needs. "
-                "Reply with the message only."}]
+                "[not the user] That was a draft, not sent. Say it again fresh: respond to "
+                "everything the newest message actually said or asked, and nothing beyond "
+                "it - no running ahead, no new threads of your own. Keep what lands, keep "
+                "it to the length the moment needs. Reply with the message only."}]
         try:
-            draft = _openrouter(redo, MOUTH_MODEL, max_tokens=400, temperature=0.7)
+            draft = _llm(redo, MOUTH_MODEL, max_tokens=400, temperature=0.7)
         except HTTPException:
             break   # a failed re-pass keeps the last good draft
     return draft
