@@ -1,0 +1,28 @@
+# Publishes web/ to the lockeddoor Netlify site on every push to main.
+# Needs repo secrets NETLIFY_AUTH_TOKEN (personal access token) and NETLIFY_SITE_ID.
+name: Deploy frontend to Netlify
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/deploy-frontend.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload web/ as a new deploy
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          set -euo pipefail
+          (cd web && zip -qr ../site.zip .)
+          curl --fail -sS -X POST \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            -H "Content-Type: application/zip" \
+            --data-binary @site.zip \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys?title=${GITHUB_SHA::7}" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["state"], d.get("ssl_url"))'
