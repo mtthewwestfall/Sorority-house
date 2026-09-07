@@ -1273,6 +1273,9 @@ def _gemini_stream(messages, model=None, max_tokens=600, temperature=0.8):
             raise HTTPException(
                 status_code=502,
                 detail=f"Model stream failed ({r.status_code}): {r.text[:300]}")
+        # text/event-stream carries no charset, and requests then decodes text/*
+        # as latin-1, which turns her apostrophes and dashes into mojibake.
+        r.encoding = "utf-8"
         for line in r.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data:"):
                 continue

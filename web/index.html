@@ -474,7 +474,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -775,9 +775,9 @@
     // She types: POST /chat/stream sends her reply as SSE, already paced by the
     // backend, so the bubble just grows as the events land. Older backends have
     // no /chat/stream, so a 404 (or any pre-reply failure) falls back to /chat.
-    // Leaving her room while she is still typing has to cut the connection, or
-    // her remaining deltas land in whatever chat replaced it - and the backend
-    // goes on generating text nobody is reading.
+    // Leaving her room while a reply is in flight has to cut the connection, or
+    // what is left of it lands in whatever chat replaced it - and the backend
+    // goes on generating text nobody is reading. Both paths share the handle.
     let streamAbort = null;
     function abortStream() {
       if (streamAbort) { streamAbort.abort(); streamAbort = null; }
@@ -851,13 +851,20 @@
     }
 
     async function sendReply(message, typing) {
+      const girl = currentGirl;
+      abortStream();
+      const controller = new AbortController();
+      streamAbort = controller;
       const response = await fetch(API_BASE_URL + '/chat', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ girl: currentGirl, message: message }),
+        body: JSON.stringify({ girl: girl, message: message }),
+        signal: controller.signal,
       });
       const data = await response.json().catch(() => null);
+      if (streamAbort === controller) streamAbort = null;
       typing.remove();
+      if (girl !== currentGirl) return;   // her room is gone; drop the reply
       if (response.status === 401) {
         addMessage('note', 'Your session ended. Sign in to keep talking.');
         handleUnauthorized();
