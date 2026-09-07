@@ -997,9 +997,7 @@
       const pack = document.createElement('button');
       pack.type = 'button'; pack.className = 'button ghost';
       pack.textContent = `${packSize} more · ${s.pack_price || '$0.99'}`;
-      pack.disabled = !s.pack_url;
-      if (!s.pack_url) pack.title = 'Checkout coming soon';
-      pack.addEventListener('click', () => { if (s.pack_url) window.open(s.pack_url, '_blank', 'noopener'); });
+      pack.addEventListener('click', () => buyPicturePack(s, pack));
       const cancel = document.createElement('button');
       cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
       cancel.addEventListener('click', closePicSheet);
@@ -1268,6 +1266,33 @@
       } catch (e) {
         button.disabled = false;
         button.textContent = 'Buy now';
+        alert('Checkout could not open: ' + e.message);
+      }
+    }
+
+    // Picture packs are a Shopify product too; the cart carries the player's id so
+    // the order webhook knows whose credits to top up.
+    async function buyPicturePack(status, button) {
+      const label = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Opening checkout…';
+      try {
+        const data = await shopify(
+          'query($h:String!){ product(handle:$h){ variants(first:1){ edges{ node{ id availableForSale } } } } }',
+          { h: status.pack_handle || 'picture-pack' }
+        );
+        const v = data.product && data.product.variants.edges[0] && data.product.variants.edges[0].node;
+        if (!v || !v.availableForSale) throw new Error('the picture pack is not in the store yet');
+        const cart = await shopify(
+          'mutation($lines:[CartLineInput!]!,$attrs:[AttributeInput!]!){ cartCreate(input:{lines:$lines,attributes:$attrs}){ cart{ checkoutUrl } userErrors{ message } } }',
+          { lines: [{ merchandiseId: v.id, quantity: 1 }], attrs: [{ key: 'lockeddoor_user', value: String(status.user_id || '') }] }
+        );
+        const err = cart.cartCreate.userErrors[0];
+        if (err) throw new Error(err.message);
+        window.location.href = cart.cartCreate.cart.checkoutUrl;
+      } catch (e) {
+        button.disabled = false;
+        button.textContent = label;
         alert('Checkout could not open: ' + e.message);
       }
     }

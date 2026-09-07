@@ -224,15 +224,17 @@ SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Pictures (POST /image): she sends a new photo of herself in the style of her door
 # portrait. PICTURE_FREE are earned per PICTURE_EVERY user messages (all girls
-# combined); a pack of PICTURE_PACK_SIZE costs PICTURE_PACK_PRICE. PICTURE_PACK_URL
-# is the hosted checkout (e.g. a Stripe Payment Link); its webhook credits the pack
-# via POST /admin/grant-pictures. Portraits are fetched from the site serving web/assets.
+# combined); a pack of PICTURE_PACK_SIZE is sold as a Shopify product (checkout via the
+# storefront cart, credited by the /webhooks/shopify/orders webhook). Portraits are
+# fetched from the site serving web/assets.
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")
 PICTURE_EVERY = int(os.environ.get("PICTURE_EVERY", "100"))
 PICTURE_FREE = int(os.environ.get("PICTURE_FREE", "3"))
 PICTURE_PACK_SIZE = int(os.environ.get("PICTURE_PACK_SIZE", "5"))
 PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
-PICTURE_PACK_URL = os.environ.get("PICTURE_PACK_URL", "")
+PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
+PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
+SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -2434,7 +2436,8 @@ def picture_status(cur, user_id):
         "next_in": PICTURE_EVERY - (total % PICTURE_EVERY),
         "pack_size": PICTURE_PACK_SIZE,
         "pack_price": PICTURE_PACK_PRICE or None,
-        "pack_url": PICTURE_PACK_URL or None,
+        "pack_handle": PICTURE_PACK_HANDLE,
+        "user_id": user_id,
     }
 
 
@@ -2850,10 +2853,30 @@ def grant_audits(body: GrantAuditsIn):
             "audit_credits": int(user["audit_credits"]) + body.amount}
 
 
+def _grant_picture_packs(user_id, packs, payment_id):
+    """Credits packs*PICTURE_PACK_SIZE once per payment_id; repeats are a no-op."""
+    credits = packs * PICTURE_PACK_SIZE
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO picture_payments (payment_id, user_id, credits) VALUES (%s,%s,%s) "
+                        "ON CONFLICT (payment_id) DO NOTHING", (payment_id, user_id, credits))
+            granted = cur.rowcount == 1
+            if granted:
+                cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s RETURNING pic_credits",
+                            (credits, user_id))
+            else:
+                cur.execute("SELECT pic_credits FROM users WHERE user_id=%s", (user_id,))
+            total = int(cur.fetchone()["pic_credits"])
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": user_id, "pic_credits": total, "duplicate": not granted}
+
+
 @app.post("/admin/grant-pictures")
 def grant_pictures(body: GrantPicturesIn):
-    """Credits PICTURE_PACK_SIZE pictures per pack after a successful payment.
-    Wire this to the Stripe webhook behind PICTURE_PACK_URL."""
+    """Manual credit of picture packs (the Shopify webhook below does it automatically)."""
     _check_admin(body.secret, strict=True)
     if body.packs <= 0 or body.packs > 100:
         raise HTTPException(status_code=400, detail="packs must be 1..100")
@@ -2861,23 +2884,45 @@ def grant_pictures(body: GrantPicturesIn):
     if not payment_id:
         raise HTTPException(status_code=400, detail="payment_id required")
     user = _user_for_email(body.email)
-    credits = body.packs * PICTURE_PACK_SIZE
-    conn = db()
+    return _grant_picture_packs(user["user_id"], body.packs, payment_id)
+
+
+@app.post("/webhooks/shopify/orders")
+async def shopify_order_webhook(request: Request):
+    """Shopify 'Order payment' webhook. Picture packs are a Shopify product (SKU
+    PICTURE_PACK_SKU); the cart carries the buyer's user_id as a note attribute,
+    falling back to the order email. Anything else in the order is ignored."""
+    if not SHOPIFY_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="SHOPIFY_WEBHOOK_SECRET must be set")
+    raw = await request.body()
+    digest = base64.b64encode(hmac.new(SHOPIFY_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).digest()).decode()
+    if not hmac.compare_digest(digest, request.headers.get("X-Shopify-Hmac-Sha256", "")):
+        raise HTTPException(status_code=401, detail="Bad Shopify signature")
     try:
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO picture_payments (payment_id, user_id, credits) VALUES (%s,%s,%s) "
-                        "ON CONFLICT (payment_id) DO NOTHING", (payment_id, user["user_id"], credits))
-            granted = cur.rowcount == 1
-            if granted:
-                cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s RETURNING pic_credits",
-                            (credits, user["user_id"]))
-            else:
-                cur.execute("SELECT pic_credits FROM users WHERE user_id=%s", (user["user_id"],))
-            total = int(cur.fetchone()["pic_credits"])
-            conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True, "user_id": user["user_id"], "pic_credits": total, "duplicate": not granted}
+        order = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Bad JSON")
+    packs = sum(int(li.get("quantity") or 0) for li in order.get("line_items") or []
+                if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
+    if packs <= 0:
+        return {"ok": True, "ignored": True}
+    attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
+    user_id = (attrs.get("lockeddoor_user") or "").strip()
+    if user_id:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
+                if cur.fetchone() is None:
+                    user_id = ""
+        finally:
+            conn.close()
+    if not user_id:
+        email = (order.get("email") or order.get("contact_email") or "").strip()
+        if not email:
+            raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
+        user_id = _user_for_email(email)["user_id"]
+    return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
 
 
 # ---------------------------------------------------------------------------
