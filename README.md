@@ -78,3 +78,4 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 - **Dakota:** Quiet strength, authenticity filter.
 - **Sasha:** Strategic power, rewards respectful friction.
 - **Piper:** Emotional catalyst, avoidant flight response.
+- **Mia:** Finnish exchange student; replies in Finnish by default, mirrors the user's language otherwise. Junior+ door.
