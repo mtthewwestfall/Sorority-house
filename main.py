@@ -1074,8 +1074,9 @@ def maybe_refresh_summary(user_id, girl, rel):
 # rewrites the memory summary and re-grades the milestone. It must never sit in
 # front of a reply, so it runs in a worker thread ONE TURN BEHIND - fired on turn
 # N over turn N-1, committing state the mouth reads on turn N+1. One brain per
-# relationship at a time; if one is still digesting, the next turn skips it (the
-# since_summary counter keeps the cadence).
+# relationship at a time; while one is digesting, the next turn skips its kick -
+# the turn is still in chat_logs, so the following refresh reads it, it just is
+# not counted toward the SUMMARY_EVERY cadence.
 # ---------------------------------------------------------------------------
 _BRAIN_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="brain")
 _brain_locks = {}
