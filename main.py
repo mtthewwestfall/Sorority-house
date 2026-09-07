@@ -660,10 +660,15 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pics_free_used INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_credits INTEGER NOT NULL DEFAULT 0;
                 -- distinct days the user actually talked to her at the current stage;
-                -- existing rows are seeded from the calendar clock, capped by days talked
+                -- existing rows are seeded from the chat log (days after the stage moved)
                 ALTER TABLE relationships ADD COLUMN IF NOT EXISTS stage_days INTEGER;
-                UPDATE relationships
-                   SET stage_days = LEAST(active_days, GREATEST(0, CURRENT_DATE - COALESCE(stage_since, CURRENT_DATE)))
+                UPDATE relationships r
+                   SET stage_days = (
+                     SELECT count(DISTINCT (c.created_at AT TIME ZONE 'UTC')::date)
+                       FROM chat_logs c
+                      WHERE c.user_id = r.user_id AND c.girl = r.girl AND c.sender = 'user'
+                        AND (c.created_at AT TIME ZONE 'UTC')::date > COALESCE(r.stage_since, CURRENT_DATE)
+                   )
                  WHERE stage_days IS NULL;
                 ALTER TABLE relationships ALTER COLUMN stage_days SET DEFAULT 0;
                 -- accounts that pre-date verification are grandfathered in as verified
@@ -1558,17 +1563,18 @@ def persist_turn(user_id, girl, rel, user_message, reply):
                 INSERT INTO chat_logs (user_id, girl, sender, message)
                 VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
             """, (user_id, girl, user_message, user_id, girl, reply))
-            # per-girl engine: track real days of presence (the slow-burn clock)
-            prev = rel.get("last_session")
-            new_day = 1 if (prev is None or prev < _today()) else 0
+            # per-girl engine: track real days of presence (the slow-burn clock).
+            # Decided against the row itself so concurrent turns can't double-count a day.
             cur.execute("""
                 UPDATE relationships
-                SET last_session = CURRENT_DATE,
-                    active_days = active_days + %s,
-                    stage_days = COALESCE(stage_days, 0) + %s,
+                SET active_days = active_days
+                        + CASE WHEN last_session IS NULL OR last_session < CURRENT_DATE THEN 1 ELSE 0 END,
+                    stage_days = COALESCE(stage_days, 0)
+                        + CASE WHEN last_session IS NULL OR last_session < CURRENT_DATE THEN 1 ELSE 0 END,
+                    last_session = CURRENT_DATE,
                     stage_since = COALESCE(stage_since, CURRENT_DATE)
                 WHERE user_id=%s AND girl=%s
-            """, (new_day, new_day, user_id, girl))
+            """, (user_id, girl))
             conn.commit()
     finally:
         conn.close()
@@ -2414,17 +2420,29 @@ def picture_status(cur, user_id):
     }
 
 
+PORTRAIT_MAX_BYTES = 4 * 1024 * 1024
+
+
 def _portrait_bytes(avatar_url):
-    """Her door portrait, as (mime, bytes), or None when it can't be fetched."""
-    if not avatar_url:
+    """Her door portrait, as (mime, bytes), or None when it can't be fetched.
+    Only paths on our own site are fetched (roster art lives in web/assets), so a
+    stored URL can never point the server at something else."""
+    if not avatar_url or "://" in avatar_url or avatar_url.startswith("//"):
         return None
-    url = avatar_url if avatar_url.startswith("http") else f"{SITE_URL}/{avatar_url.lstrip('/')}"
+    url = f"{SITE_URL}/{avatar_url.lstrip('/')}"
     try:
-        r = requests.get(url, timeout=15)
-        if r.status_code != 200 or not r.content:
-            return None
-        mime = r.headers.get("Content-Type", "").split(";")[0].strip() or "image/jpeg"
-        return mime, r.content
+        with requests.get(url, timeout=15, stream=True, allow_redirects=False) as r:
+            if r.status_code != 200:
+                return None
+            mime = r.headers.get("Content-Type", "").split(";")[0].strip()
+            if not mime.startswith("image/"):
+                return None
+            buf = bytearray()
+            for chunk in r.iter_content(64 * 1024):
+                buf.extend(chunk)
+                if len(buf) > PORTRAIT_MAX_BYTES:
+                    return None
+        return (mime, bytes(buf)) if buf else None
     except requests.RequestException:
         return None
 
@@ -2509,7 +2527,7 @@ def image(body: ImageIn, user=Depends(current_user)):
         avatar_url = row["avatar_url"] if row else ""
         try:
             mime, b64 = generate_picture(girl, name, avatar_url)
-        except HTTPException:
+        except Exception:
             # refund: a failed generation must not eat the entitlement
             with conn.cursor() as cur:
                 if spent == "free":
