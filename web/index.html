@@ -701,12 +701,14 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     }
 
-    // Reopening a door picks the conversation back up: the tail of what was already
-    // said is replayed above the composer so it never looks like a fresh stranger.
-    const HISTORY_TAIL = 5;
+    // Closing a door pauses a conversation, it never ends one: reopening drops the
+    // user back into the tail of what was already said, with no reset and no
+    // re-introduction. Only a girl who has never been spoken to gets an opener.
+    const HISTORY_TAIL = 8;
     let historySeq = 0;
-    async function loadHistory(girl, placeholder) {
+    async function loadHistory(girl) {
       const seq = ++historySeq;
+      let messages = [];
       try {
         const response = await fetch(
           API_BASE_URL + '/history?girl=' + encodeURIComponent(girl) +
@@ -715,17 +717,17 @@
         if (response.status === 401) { handleUnauthorized(); return; }
         const data = await response.json().catch(() => null);
         if (seq !== historySeq || girl !== currentGirl) return;
-        if (!response.ok || !data || !Array.isArray(data.messages) || !data.messages.length) return;
-        // The user may already be mid-turn by the time this lands; the tail is only
-        // worth replaying while nothing else has been said in the panel yet.
-        if (chatLog.children.length !== 1 || chatLog.firstChild !== placeholder) return;
-        placeholder.remove();
-        addMessage('note', 'Where you left off.');
-        data.messages.slice(-HISTORY_TAIL).forEach((m) => {
-          addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
-        });
-        chatLog.scrollTop = chatLog.scrollHeight;
-      } catch (error) { /* leave the fresh-start note in place */ }
+        if (response.ok && data && Array.isArray(data.messages)) messages = data.messages;
+      } catch (error) { /* offline: fall through to the opener */ }
+      if (seq !== historySeq || girl !== currentGirl) return;
+      // The user may already be mid-turn by the time this lands; the tail is only
+      // worth replaying while the panel is still untouched.
+      if (chatLog.children.length) return;
+      if (!messages.length) { addMessage('note', 'Her door is open. Say hi.'); return; }
+      messages.slice(-HISTORY_TAIL).forEach((m) => {
+        addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
+      });
+      chatLog.scrollTop = chatLog.scrollHeight;
     }
 
     let lockedScrollY = 0;
@@ -741,8 +743,7 @@
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
       chatLog.innerHTML = '';
-      const opener = addMessage('note', 'Her door is open. Say hi.');
-      loadHistory(currentGirl, opener);
+      loadHistory(currentGirl);
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
