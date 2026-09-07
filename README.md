@@ -40,6 +40,15 @@ Open `https://<your-app>/admin` and enter `ADMIN_SECRET`. From there you can:
 - **Free time:** comp any account to a paid tier for N days (`/admin/grant-time {email, tier, days}`). They get a fresh allowance immediately; when the time is up they drop back to whatever tier they had before (a used-up trial stays used up). Granting again extends; "End now" cuts it short; a real Stripe tier change cancels the comp.
 - **Complaints:** players file them with `POST /complaints {subject, body}` (logged in) and see status/notes at `GET /complaints`. Admin reads the inbox, adds a note and resolves/reopens.
 
+### 5. Ava — Sales / Personal Assistant
+A public chat bubble (bottom-right of the site) that sells for you and takes messages while you are away.
+- **Knows the products:** plans, prices, extra messages, audits, "suggest a girl", merch — the catalogue lives in `ASSISTANT_CATALOGUE` in `main.py`. Save a persona named `assistant` from the Personas tab to add personality, extra products or a current offer without redeploying.
+- **Honest closer:** may talk the product up, never invents prices/discounts/refunds. Asks for the sale and suggests a next step.
+- **Intake:** logs **leads** (buying intent), **messages for you** (name / contact / what they want), and **red flags** (underage claims, chargeback threats, fishing for freebies, explicit requests, prompt injection). All land in **Admin → Ava**, where you can read the full conversation and mark items handled.
+- **Daily report:** **Admin → Ava → Run report** shows sales by tier, sign-ups, active users, messages, complaints and Ava's inbox, with a plain-English write-up. Set `REPORT_EMAIL_TO` (plus `RESEND_API_KEY`) and it is emailed to you every day at `REPORT_HOUR_UTC`.
+- **Any site:** paste `<script src="https://<your-api>/assistant/widget.js"></script>` before `</body>` on any page you own.
+- **Model:** Gemini by default; set `DEEPSEEK_API_KEY` to run Ava on DeepSeek instead (the girls always stay on Gemini).
+
 ---
 
 ## 🛠️ Configuration (Environment Variables)
@@ -53,6 +62,10 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | `STRIPE_WEBHOOK_SECRET` | Key to verify payment events | Stripe Dashboard |
 | `IMAGE_API_KEY` | Key for autonomous photo generation | Image Provider API |
 | `SHOPIFY_API_KEY` | Integration for merch store | Shopify Admin |
+| `DEEPSEEK_API_KEY` | Optional — runs Ava (sales assistant) on DeepSeek instead of Gemini | DeepSeek Platform |
+| `REPORT_EMAIL_TO` | Optional — your email for Ava's daily report (needs `RESEND_API_KEY`) | You choose it |
+| `REPORT_HOUR_UTC` | Optional — hour (0-23 UTC) the daily report goes out; default 13 | You choose it |
+| `ASSISTANT_SESSION_SECRET` | Optional — signs Ava's visitor session ids; auto-generated and stored in the database if unset | Any long random string |
 
 ---
 
