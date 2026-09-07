@@ -494,7 +494,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -705,20 +705,26 @@
     // user back into the tail of what was already said, with no reset and no
     // re-introduction. Only a girl who has never been spoken to gets an opener.
     const HISTORY_TAIL = 8;
+    const HISTORY_TIMEOUT_MS = 4000;
     let historySeq = 0;
     async function loadHistory(girl) {
       const seq = ++historySeq;
       let messages = [];
+      // A stalled network must never leave the panel staring back blankly: give up on
+      // the tail after a moment and open the door the old way.
+      const cutoff = new AbortController();
+      const timer = setTimeout(() => cutoff.abort(), HISTORY_TIMEOUT_MS);
       try {
         const response = await fetch(
           API_BASE_URL + '/history?girl=' + encodeURIComponent(girl) +
-          '&limit=' + HISTORY_TAIL, { headers: authHeaders() });
+          '&limit=' + HISTORY_TAIL, { headers: authHeaders(), signal: cutoff.signal });
         if (seq !== historySeq || girl !== currentGirl) return;
         if (response.status === 401) { handleUnauthorized(); return; }
         const data = await response.json().catch(() => null);
         if (seq !== historySeq || girl !== currentGirl) return;
         if (response.ok && data && Array.isArray(data.messages)) messages = data.messages;
-      } catch (error) { /* offline: fall through to the opener */ }
+      } catch (error) { /* offline or too slow: fall through to the opener */
+      } finally { clearTimeout(timer); }
       if (seq !== historySeq || girl !== currentGirl) return;
       // The user may already be mid-turn by the time this lands; the tail is only
       // worth replaying while the panel is still untouched.
