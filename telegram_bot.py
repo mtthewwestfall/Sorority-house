@@ -362,6 +362,17 @@ class BotApp:
         return error.detail
 
 
+def process_updates(app: BotApp, updates: list[dict], offset: int | None) -> tuple[int | None, bool]:
+    for update in updates:
+        try:
+            app.handle(update)
+        except Exception:
+            LOG.exception("Unhandled Telegram update")
+            return offset, False
+        offset = update["update_id"] + 1
+    return offset, True
+
+
 def run() -> None:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -378,13 +389,9 @@ def run() -> None:
             LOG.exception("Telegram polling failed")
             time.sleep(5)
             continue
-        for update in updates:
-            try:
-                app.handle(update)
-            except Exception:
-                LOG.exception("Unhandled Telegram update")
-            else:
-                offset = update["update_id"] + 1
+        offset, processed = process_updates(app, updates, offset)
+        if not processed:
+            time.sleep(5)
 
 
 if __name__ == "__main__":

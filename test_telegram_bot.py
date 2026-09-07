@@ -1,6 +1,6 @@
 import unittest
 
-from telegram_bot import BackendError, BotApp, LinkStore
+from telegram_bot import BackendError, BotApp, LinkStore, process_updates
 
 
 class FakeLinks:
@@ -121,6 +121,26 @@ class TelegramSmokeTest(unittest.TestCase):
         }})
         self.assertIsNone(self.links.get(7))
         self.assertIn("message Mia bot directly", self.telegram.sent[-1][1])
+
+    def test_failed_update_stops_batch_without_skipping_it(self):
+        class FailingApp:
+            def __init__(self):
+                self.seen = []
+
+            def handle(self, update):
+                self.seen.append(update["update_id"])
+                if update["update_id"] == 2:
+                    raise RuntimeError("temporary failure")
+
+        app = FailingApp()
+        offset, processed = process_updates(
+            app,
+            [{"update_id": 1}, {"update_id": 2}, {"update_id": 3}],
+            1,
+        )
+        self.assertEqual(app.seen, [1, 2])
+        self.assertEqual(offset, 2)
+        self.assertFalse(processed)
 
 
 class LinkStoreDsnTest(unittest.TestCase):
