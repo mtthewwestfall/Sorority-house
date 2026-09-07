@@ -18,6 +18,13 @@ Built to this spec (verified Sept 2026):
                never on every message (that would churn the cache + cost tokens).
       LAYER 3  Only the last WINDOW raw messages of the ACTIVE conversation, scoped
                to that girl. Input size never grows.
+  * MOUTH / BRAIN SPLIT so replies feel instant without the memory getting thinner:
+      MOUTH  the streaming chat call, paced to a human typing speed by the server.
+             Generation is throttled to the emitter, never buffered ahead of it, so
+             she cannot drift minutes in front of what the user is reading.
+      BRAIN  the Layer-2 summary refresh. Runs in a worker thread ONE TURN BEHIND -
+             it digests the previous turn while she answers this one and commits
+             state for the next. A reply never waits on it.
   * Relationship progress (trust / milestone M1-M8) is PER GIRL, never one global score.
   * Message allowance is shared across ALL girls and enforced per tier.
   * Audits read the FULL arc (rolling summary + a wide recent window), not 5 lines.
@@ -36,6 +43,9 @@ API CONTRACT implemented here (point your chat app at these):
                     (403 email_unverified until the link is clicked)
   POST /auth/logout  (bearer)                            -> {"ok"}
   POST /chat        {"girl","message"}  (bearer)        -> {"reply","remaining","milestone","ok"}
+  POST /chat/stream {"girl","message"}  (bearer)        -> text/event-stream, she TYPES:
+                    event: open {"girl"} / delta {"t"} ... / done {"remaining","milestone"}
+                    (event: error {"detail"} instead, only if she never got a word out)
   GET  /history     ?girl=              (bearer)        -> {"messages":[{...}]}
   GET  /state                           (bearer)        -> {"tier","remaining","audit_count",
                                                             "free_audits_left","audit_credits",
@@ -58,15 +68,51 @@ API CONTRACT implemented here (point your chat app at these):
                                                             frontend shows * when audit_count>=5
   POST /admin/persona {"girl","name","door_title","persona","secret"} (upsert; paste full
                                                             doc; REQUIRES ADMIN_SECRET)
+  GET  /roster                                          -> {"tiers":[...],"girls":[{girl,name,
+                                                            door_title,blurb,avatar_url,
+                                                            min_tier,tier_label}]}
+                                                            the doors to render; door text and
+                                                            art only, never the persona doc
+  POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,min_tier,sort_order,
+                            active,difficulty,persona}     -> add or rewrite a sister; the
+                                                            roster is data, so no deploy.
+                                                            difficulty (easy|normal|hard|ice)
+                                                            scales her real-day trust floors
+  POST /admin/console/girl/{girl}/active ?active=          -> take her off the doors / put her
+                                                            back. Her chats are kept either way
+  GET  /admin/console/export                              -> the roster as JSON (backup)
+  (the /admin/console/* endpoints take ADMIN_SECRET as the X-Admin-Secret header)
   GET  /health
 
 Env vars (Railway -> Variables):
   DATABASE_URL      Supabase/Postgres connection string (postgres://user:pass@host:5432/db?sslmode=require)
-  GEMINI_API_KEY    your existing Google (Gemini) API key - the one your bots run on
-  CHAT_MODEL        gemini-3.1-flash-lite (default; set the exact model your key runs)
+  GEMINI_API_KEY    Google (Gemini) API key - the fallback provider for every role
+  CHAT_MODEL        gemini-3.1-flash-lite (default Gemini model for the mouth/brain)
   AUDIT_MODEL       same as CHAT_MODEL (audits run the same model WITH a thinking budget)
   AUDIT_THINKING    true (default): adds a thinking budget for audits. Set false if your
                     model rejects the thinking flag.
+
+  Three model ROLES, each on its own provider. Unset roles fall back to Gemini above.
+  A provider is any OpenAI-compatible chat endpoint (DeepSeek, Mistral La Plateforme,
+  vLLM / Ollama / llama.cpp serving your own weights, Together, Groq, ...).
+    MOUTH_MODEL / MOUTH_BASE_URL / MOUTH_API_KEY
+                    the voice that types in chat. e.g. MOUTH_BASE_URL=https://api.mistral.ai/v1
+                    MOUTH_MODEL=mistral-small-latest, or your own vLLM box with
+                    MOUTH_MODEL=mistralai/Mistral-Small-3.2-24B-Instruct-2506
+    BRAIN_MODEL / BRAIN_BASE_URL / BRAIN_API_KEY
+                    the memory digest (summary, milestone, conduct) that runs a turn behind.
+                    e.g. BRAIN_BASE_URL=https://api.deepseek.com/v1 BRAIN_MODEL=deepseek-chat
+    AUDIT_BASE_URL / AUDIT_API_KEY
+                    optional; with these set, AUDIT_MODEL is served from that endpoint.
+                    Otherwise audits ride the MOUTH (same voice as chat; the brain never
+                    writes what the user reads), with AUDIT_MODEL overriding the model.
+  MODEL_TIMEOUT_S   per-call timeout for every provider (default 120).
+  CHAT_CPS          her typing speed on /chat/stream, characters per second (default 14).
+  CHAT_LEAD_CHARS   how far generation may run ahead of the screen (default 240 chars).
+                    Generation blocks at this backlog, so she never gets minutes ahead.
+  TAIL_REVISION     true (default): if the brain lands mid-reply and moves the stage, the
+                    UNTYPED remainder is regenerated from the new memory. Typed text is
+                    never rewritten. Set false to always keep her first take.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
@@ -97,19 +143,23 @@ requirements.txt for Railway:
 import os
 import re
 import json
+import asyncio
 import hashlib
 import hmac
+import queue
+import random
 import secrets
 import time
 import threading
 from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -122,6 +172,29 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
+MODEL_TIMEOUT_S = float(os.environ.get("MODEL_TIMEOUT_S", "120"))
+# Reasoning models (DeepSeek v4 / reasoner) bill their thinking against
+# max_tokens, so the brain's memory digest needs far more headroom than 600.
+BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4000"))
+
+
+def _role_config(role, default_model):
+    """Provider settings for one model role. Any OpenAI-compatible endpoint when
+    <ROLE>_BASE_URL is set; otherwise Gemini with the given default model."""
+    base = os.environ.get(f"{role}_BASE_URL", "").rstrip("/")
+    return {
+        "provider": "openai" if base else "gemini",
+        "base_url": base,
+        "api_key": os.environ.get(f"{role}_API_KEY", ""),
+        "model": os.environ.get(f"{role}_MODEL", "") or default_model,
+    }
+
+
+MOUTH = _role_config("MOUTH", CHAT_MODEL)     # the voice that types
+BRAIN = _role_config("BRAIN", CHAT_MODEL)     # memory digest, a turn behind
+# Audits are written in her voice, so they ride the mouth unless given their own endpoint.
+AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
+         else {**MOUTH, "model": os.environ.get("AUDIT_MODEL") or MOUTH["model"]})
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -139,6 +212,14 @@ AUTH_RATE_WINDOW_S = int(os.environ.get("AUTH_RATE_WINDOW_S", "60"))
 TRUST_PROXY = os.environ.get("TRUST_PROXY", "true").lower() != "false"
 CHAT_MAX_CHARS = int(os.environ.get("CHAT_MAX_CHARS", "2000"))
 VERIFY_TTL_HOURS = 24
+# Mouth pacing (POST /chat/stream). CHAT_CPS is her typing speed; CHAT_LEAD_CHARS
+# caps how far generation may run ahead of what the user has actually seen.
+CHAT_CPS = float(os.environ.get("CHAT_CPS", "14"))
+CHAT_LEAD_CHARS = int(os.environ.get("CHAT_LEAD_CHARS", "240"))
+TAIL_REVISION = os.environ.get("TAIL_REVISION", "true").lower() == "true"
+EMIT_TICK_S = 0.05          # emitter wakes this often and types its share
+PIECE_CHARS = 24            # granularity the mouth thread hands to the emitter
+SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -162,13 +243,32 @@ TIERS = {
     "senior":     {"label": "Senior",    "limit": 4000},
 }
 
-# Which girls each tier can open. Girls not listed are locked for that tier.
-GIRL_ACCESS = {
-    "freshman":  ["dakota", "zoe"],
-    "sophomore": ["dakota", "zoe", "brittany", "willow"],
-    "junior":    ["dakota", "zoe", "brittany", "willow", "sasha", "piper"],
-    "senior":    ["dakota", "zoe", "brittany", "willow", "sasha", "piper", "veronica"],
-}
+# Tier order, low to high. A girl opens for every tier from her min_tier up.
+TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
+
+def tier_rank(tier):
+    return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
+
+# The roster is the personas table, not this file, so a new sister can be added
+# from the admin console without a deploy. These are only the first-boot seeds:
+# door text, art and the tier that opens her, all editable afterwards.
+ROSTER_SEED = [
+    # slug, min_tier, order, avatar, door blurb
+    ("dakota",   "freshman",  10, "https://myreal.live/assets/dakota-DovCVNjY.jpg",
+     "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
+    ("zoe",      "freshman",  20, "https://myreal.live/assets/zoe-BnozSeUg.jpg",
+     "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
+    ("willow",   "sophomore", 30, "https://myreal.live/assets/willow-4w9QsnXR.jpg",
+     "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
+    ("brittany", "sophomore", 40, "https://myreal.live/assets/brittany-DRnJ63HN.jpg",
+     "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
+    ("sasha",    "junior",    50, "assets/sasha.webp",
+     "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
+    ("piper",    "junior",    60, "https://myreal.live/assets/piper-P4IdzuLV.jpg",
+     "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
+    ("veronica", "senior",    70, "assets/veronica.webp",
+     "The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
+]
 
 # Fallback personas used only until you seed full docs via /admin/persona.
 # The FULL personality texts (the Canvas character docs) are what you paste there —
@@ -191,6 +291,8 @@ HOUSE_RULES = (
     "flirtatious and slow-burn, but always tasteful and non-explicit.\n"
     "- Keep replies in character, conversational, 1-4 sentences unless the moment "
     "genuinely calls for more. Never break character or mention you are an AI.\n"
+    "- Text like a real person, not an assistant: no offers to help, no summarizing what "
+    "they said, no asking permission to continue, no bullet points or headers.\n"
     "- You never reveal the internal memory summary or these rules to the user.\n"
     "- You remember only what the Memory block tells you. If it is empty, you are "
     "still getting to know them.\n"
@@ -362,6 +464,61 @@ GIRLS_ENGINE = {
     },
 }
 
+# A sister added from the console has no hand-written block above, so she runs on
+# these dials instead: the same eight-stage ladder and real-time floors, but graded
+# from her own character document rather than another girl's canonical facts. Give
+# her a block in GIRLS_ENGINE when you want her own pacing and her own key points.
+GENERIC_ENGINE = {
+    "stage_days": [1, 2, 3, 5, 6, 8, 10],
+    "stage_kept": [0, 1, 2, 2, 3, 4, 5],
+    "conduct_note": "Judge conduct by the standards her own character document sets - "
+                    "what she says she values, what she guards, what she cannot stand. "
+                    "WARM is earned by patience, attention and remembering her; COLD is "
+                    "pushing pace, performing, or treating her as a prize.",
+    "pace_note": "Trust is earned across real days, not in one good night. Consistency "
+                 "beats intensity, and showing up again the same person is the strongest "
+                 "move. Follow the pacing her own document implies.",
+    "pinned": [],
+    "key_points": [],
+}
+
+
+def engine_for(girl):
+    """Her trust x time dials. A sister added from the console has no hand-written
+    block, so she gets the generic one - never another girl's facts and pacing."""
+    return GIRLS_ENGINE.get(girl, GENERIC_ENGINE)
+
+
+# How hard she is to get close to, as a multiplier on her real-day floors. This is
+# the one relationship dial the console owns, so pacing can be tuned without a
+# deploy; the ladder itself (eight stages, memory, conduct) is unchanged, and every
+# stage still costs at least one real day.
+DIFFICULTY = {
+    "easy":   {"label": "Easy - she warms up quickly", "days": 0.5},
+    "normal": {"label": "Normal - her own pace",       "days": 1.0},
+    "hard":   {"label": "Hard - slow to trust",        "days": 1.75},
+    "ice":    {"label": "Ice queen - barely thaws",    "days": 3.0},
+}
+DIFFICULTY_DEFAULT = "normal"
+
+
+def difficulty_for(girl):
+    """Her console-set difficulty, or the default if she has none or the roster is
+    unreachable: pacing must never be the thing that breaks a reply."""
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT difficulty FROM personas WHERE girl=%s", (girl,))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return DIFFICULTY_DEFAULT
+    d = (row or {}).get("difficulty") or DIFFICULTY_DEFAULT
+    return d if d in DIFFICULTY else DIFFICULTY_DEFAULT
+
+
 # How each milestone reads on the shared 0-100 trust meter (for display only).
 STAGE_META = {
     1: ("Stranger",  "~10"),
@@ -499,9 +656,50 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
             """)
+            # The roster lives with the persona doc: which tier opens her door, what
+            # the door shows, and whether she is in the house at all. Rows written
+            # before these columns existed get their door filled in once, here - after
+            # that the console owns them and startup never touches them again.
+            cur.execute("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'personas' AND column_name = 'min_tier'
+            """)
+            legacy_rows = cur.fetchone() is None
+            cur.execute("""
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS min_tier TEXT NOT NULL DEFAULT 'freshman';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 100;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'normal';
+            """)
+            _seed_roster(cur, backfill=legacy_rows)
         conn.commit()
     finally:
         conn.close()
+
+
+def _seed_roster(cur, backfill=False):
+    """Put the seven original sisters in the table so the roster has a starting point.
+    A row that already exists is never rewritten: the seed is a floor, not the truth,
+    and the console owns her after. `backfill` is the one-time upgrade of rows written
+    before the roster columns existed, and runs only on the migration that adds them -
+    so a door the owner deliberately saved blank stays blank."""
+    for girl, min_tier, order, avatar, blurb in ROSTER_SEED:
+        name, title, fallback = DEFAULT_PERSONAS[girl]
+        cur.execute("""
+            INSERT INTO personas (girl, name, door_title, persona,
+                                  min_tier, sort_order, avatar_url, blurb)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (girl) DO NOTHING
+        """, (girl, name, title, fallback, min_tier, order, avatar, blurb))
+        if backfill:
+            cur.execute("""
+                UPDATE personas SET min_tier = %s, sort_order = %s,
+                                    avatar_url = %s, blurb = %s
+                WHERE girl = %s
+            """, (min_tier, order, avatar, blurb, girl))
 
 
 def _check_admin(secret: str, strict: bool = False):
@@ -739,8 +937,33 @@ def remaining_for(user):
     return max(0, limit - int(user["msg_used"]))
 
 
+def roster(include_retired=False):
+    """The house, in door order. Rows are dicts with girl, name, door_title,
+    blurb, avatar_url, min_tier, sort_order, active, difficulty."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT girl, name, door_title, blurb, avatar_url,
+                       min_tier, sort_order, active, difficulty
+                FROM personas
+                WHERE active OR %s
+                ORDER BY sort_order, girl
+            """, (include_retired,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def girls_for_tier(tier, house=None):
+    """Slugs this tier can open: every active girl from her min_tier up."""
+    rank = tier_rank(tier)
+    return [r["girl"] for r in (house if house is not None else roster())
+            if r["active"] and tier_rank(r["min_tier"]) <= rank]
+
+
 def girl_open(user_id, girl, tier):
-    return girl in GIRL_ACCESS.get(tier, [])
+    return girl in girls_for_tier(tier)
 
 
 def free_audits_left(user):
@@ -816,15 +1039,17 @@ def rel_days_in_stage(rel):
 
 
 def stage_days_needed(girl, cur):
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
-    return cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
+    cfg = engine_for(girl)
+    base = cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
+    return max(1, int(round(base * DIFFICULTY[difficulty_for(girl)]["days"])))
 
 
 def kept_needed(girl, target):
     """Key points the user must have demonstrably REMEMBERED (pinned_kept) before
     this girl opens to stage M(target). stage_kept[i] applies to reaching M(i+2);
-    each girl's ladder reflects her own backstory."""
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    each girl's ladder reflects her own backstory. A sister with no canonical key
+    points cannot be asked to have remembered them, so only the time floor applies."""
+    cfg = engine_for(girl)
     ladder = cfg["stage_kept"]
     idx = max(0, min(len(ladder) - 1, target - 2))
     return min(ladder[idx], len(cfg["key_points"]))
@@ -854,6 +1079,40 @@ def _canonical(item, canon):
         if s > score:
             best, score = c, s
     return best if score >= 0.5 else None
+
+
+_NEG = {"not", "never", "no", "none", "cannot", "cant", "dont", "doesnt", "didnt",
+        "isnt", "wasnt", "arent", "wont", "nothing", "nobody", "without"}
+
+
+def _content(s):
+    """Words that carry the fact, with polarity words removed: they are what makes
+    two phrases opposites, so counting them as content would stop a correction from
+    ever matching what it corrects ('cannot drive' against 'can drive')."""
+    return {w.replace("'", "") for w in _words(s)} - _NEG
+
+
+def _negated(s):
+    """Whether a phrase asserts the negative. Read from the raw text, because _words
+    drops 'not' and 'never' as noise - which they are for matching, and are not for
+    meaning: 'afraid of dogs' and 'not afraid of dogs' are the same fact, flipped."""
+    toks = re.findall(r"[a-z]+", s.casefold().replace("'", ""))
+    return sum(1 for t in toks if t in _NEG) % 2 == 1
+
+
+def _phrase_match(a, b):
+    """How two free-text memory phrases relate: 'same' fact (a reword or the same
+    fact elaborated), 'opposite' (the same fact with its polarity flipped, which is
+    a correction and must replace what it corrects), or None for two facts. Overlap
+    is measured against the shorter phrase, so 'loves hiking' absorbs 'loves hiking
+    outdoors' while 'loves painting' and 'loves hiking' stay two facts."""
+    aw, bw = _content(a), _content(b)
+    if not aw or not bw:
+        return None
+    if a.strip().casefold() != b.strip().casefold() and \
+            len(aw & bw) / min(len(aw), len(bw)) < 0.8:
+        return None
+    return "same" if _negated(a) == _negated(b) else "opposite"
 
 
 def gate_milestone(girl, rel, proposed, conduct="steady"):
@@ -917,17 +1176,23 @@ def _summarize(user_id, girl, rel, recent_msgs):
     and re-grades the milestone (M1-M8) under the per-girl TIME floor, and bookkeeps
     which PINNED facts she has revealed and which KEY POINTS the user has demonstrated
     remembering. Called only at milestones / every N messages, never every turn."""
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    cfg = engine_for(girl)
     persona_text, name = get_persona(girl)
     told = rel.get("pinned_told") or []
     kept = rel.get("pinned_kept") or []
 
+    canonical = bool(cfg["pinned"] or cfg["key_points"])
     grading = (
         "You also bookkeep two lists for this girl (canonical below). "
         "PINNED = personal facts she reveals about herself only at natural moments. "
         "KEY POINTS = the handful of details the user is expected to remember about her.\n"
-        "Pinned facts: " + " | ".join(cfg["pinned"]) + "\n"
-        "Key points: " + " | ".join(cfg["key_points"]) + "\n"
+        + ("Pinned facts: " + " | ".join(cfg["pinned"]) + "\n"
+           "Key points: " + " | ".join(cfg["key_points"]) + "\n"
+           if canonical else
+           "This girl has no canonical lists yet: take both from HER CHARACTER DOC "
+           "below - the personal facts it says she guards, and the details about her "
+           "that matter. Use a short phrase for each and reuse the exact same "
+           "phrasing on later turns.\n") +
         "Already revealed to the user: " + ("; ".join(told) if told else "(none)") + "\n"
         "Key points already shown remembered: " + ("; ".join(kept) if kept else "(none)") + "\n"
         "In the NEW messages: if she revealed a pinned fact for the first time, add its "
@@ -936,6 +1201,8 @@ def _summarize(user_id, girl, rel, recent_msgs):
         "new_kept. Copy the canonical phrase from the lists above verbatim - never "
         "paraphrase. Never add items already listed above. Empty arrays when nothing new."
     )
+    if not canonical:
+        grading += "\n\nHER CHARACTER DOC:\n" + persona_text[:4000]
     context = [
         {"role": "system", "content": (
             "You maintain a confidential per-relationship memory file for a companion "
@@ -962,7 +1229,7 @@ def _summarize(user_id, girl, rel, recent_msgs):
         context.append({"role": "user", "content": "NEW CONVERSATION:\n" + "\n".join(lines)})
     context.append({"role": "user", "content": "Return the updated JSON now.\n" + grading})
 
-    out = _gemini(context, model=CHAT_MODEL)
+    out = llm(BRAIN, context, max_tokens=BRAIN_MAX_TOKENS)
     summary = rel["summary"] or ""
     milestone = int(rel["milestone"])
     conduct = "steady"
@@ -985,10 +1252,26 @@ def _summarize(user_id, girl, rel, recent_msgs):
         pass
 
     def _merge(existing, items, canon, cap=12):
-        # legacy rows may hold free-text paraphrases; fold them onto canon too
+        # legacy rows may hold free-text paraphrases; fold them onto canon too.
+        # A sister with no canonical list keeps the grader's own phrases, folded
+        # onto whichever one she has already recorded, so her memory still builds.
         out, seen = [], set()
         for it in list(existing) + list(items):
-            it = _canonical(it, canon)
+            if canon:
+                it = _canonical(it, canon)
+            else:
+                it = it.strip()
+                if not _words(it):
+                    continue
+                held = next(((i, m) for i, o in enumerate(out)
+                             if (m := _phrase_match(it, o))), None)
+                if held is not None:
+                    i, how = held
+                    if how == "opposite":
+                        seen.discard(out[i].casefold())
+                        out[i] = it
+                        seen.add(it.casefold())
+                    continue
             if it is not None and it.casefold() not in seen and len(out) < cap:
                 out.append(it)
                 seen.add(it.casefold())
@@ -1041,15 +1324,167 @@ def maybe_refresh_summary(user_id, girl, rel):
 
 
 # ---------------------------------------------------------------------------
+# MOUTH / BRAIN SPLIT
+# The brain (Layer-2 refresh) is the slow part: it re-reads the conversation,
+# rewrites the memory summary and re-grades the milestone. It must never sit in
+# front of a reply, so it runs in a worker thread ONE TURN BEHIND - fired on turn
+# N over turn N-1, committing state the mouth reads on turn N+1. One brain per
+# relationship at a time; while one is digesting, the next turn skips its kick -
+# the turn is still in chat_logs, so the following refresh reads it, it just is
+# not counted toward the SUMMARY_EVERY cadence.
+# ---------------------------------------------------------------------------
+_BRAIN_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="brain")
+_brain_locks = {}
+_brain_locks_guard = threading.Lock()
+
+
+def _brain_lock(key):
+    with _brain_locks_guard:
+        lock = _brain_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _brain_locks[key] = lock
+        return lock
+
+
+def kick_brain(user_id, girl, rel):
+    """Start the Layer-2 refresh off the request path. Returns a Future whose
+    result is {"summary","milestone"}, or None when one is already running."""
+    lock = _brain_lock((user_id, girl))
+    if not lock.acquire(blocking=False):
+        return None
+    try:
+        return _BRAIN_POOL.submit(_brain_run, lock, user_id, girl, rel)
+    except RuntimeError:
+        lock.release()
+        return None
+
+
+def _brain_run(lock, user_id, girl, rel):
+    try:
+        return maybe_refresh_summary(user_id, girl, rel)
+    finally:
+        lock.release()
+
+
+def brain_milestone(brain, fallback):
+    """The brain's milestone if it already landed, else what we came in with."""
+    if brain is None or not brain.done():
+        return int(fallback)
+    try:
+        return int(brain.result().get("milestone", fallback))
+    except Exception:
+        return int(fallback)
+
+
+# ---------------------------------------------------------------------------
+# ONE TURN — prompt assembly and persistence, shared by /chat and /chat/stream.
+# ---------------------------------------------------------------------------
+def chat_preflight(user, girl_raw):
+    """Tier/door/allowance checks. Reserves one message atomically (conditional
+    UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
+    remaining AFTER this turn). Callers refund_message() if no reply is delivered."""
+    girl = girl_raw.strip().lower()
+    if not girl_open(user["user_id"], girl, user["tier"]):
+        raise HTTPException(status_code=403, detail="This door is locked for your tier")
+    limit = TIERS.get(user["tier"], TIERS["freshman"])["limit"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET msg_used = msg_used + 1
+                WHERE user_id=%s AND msg_used < %s
+                RETURNING msg_used
+            """, (user["user_id"], limit))
+            got = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if got is None:
+        raise HTTPException(status_code=402, detail="out_of_messages")
+    remaining = max(0, limit - int(got["msg_used"]))
+    try:
+        return girl, get_relationship(user["user_id"], girl), remaining
+    except Exception:
+        refund_message(user["user_id"])
+        raise
+
+
+def refund_message(user_id):
+    """Hand back the message reserved by chat_preflight when she never answered."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET msg_used = GREATEST(msg_used - 1, 0) WHERE user_id=%s",
+                        (user_id,))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
+    """The 3-layer payload. With said_so_far set, the model is asked to continue
+    a reply whose opening has already been typed out to the user."""
+    persona_text, name = get_persona(girl)
+
+    # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
+    system_text = f"You are {name} from the Sorority House.\n\n{persona_text}\n\n{HOUSE_RULES}"
+
+    # ---- LAYER 2: small memory block + the per-girl engine state card --------
+    engine_card = build_engine_card(girl, rel)
+    memory_block = ("MEMORY BLOCK (relationship with this user - internal):\n"
+                    + engine_card + "\n"
+                    + (f"- Summary: {rel['summary']}" if rel["summary"]
+                       else "- You are still getting to know them; nothing meaningful remembered yet."))
+
+    # ---- LAYER 3: only the last WINDOW messages ------------------------------
+    msgs = [{"role": "system", "content": system_text},
+            {"role": "system", "content": memory_block}]
+    for m in last_messages(user_id, girl, WINDOW):
+        msgs.append({"role": m["sender"], "content": m["message"]})
+    msgs.append({"role": "user", "content": user_message})
+    if said_so_far:
+        msgs.append({"role": "assistant", "content": said_so_far})
+        msgs.append({"role": "system", "content": (
+            "CONTINUATION: the opening of your reply above has already been sent to "
+            "the user and cannot change. Continue it from exactly where it stops - "
+            "mid-sentence if that is where it stops - and never repeat, restate or "
+            "re-greet. Finish the thought in a sentence or two.")})
+    return msgs
+
+
+def persist_turn(user_id, girl, rel, user_message, reply):
+    """Log both sides of the turn and advance the day clock. The message itself
+    was already spent by chat_preflight."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO chat_logs (user_id, girl, sender, message)
+                VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
+            """, (user_id, girl, user_message, user_id, girl, reply))
+            # per-girl engine: track real days of presence (the slow-burn clock)
+            prev = rel.get("last_session")
+            new_day = 1 if (prev is None or prev < _today()) else 0
+            cur.execute("""
+                UPDATE relationships
+                SET last_session = CURRENT_DATE,
+                    active_days = active_days + %s,
+                    stage_since = COALESCE(stage_since, CURRENT_DATE)
+                WHERE user_id=%s AND girl=%s
+            """, (new_day, user_id, girl))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # GEMINI — one provider, one call function (your existing Google API key).
 # The layered message list (system blocks + user/assistant turns) is converted
 # to Gemini format: system messages become the system_instruction, the rest
 # become contents. Adjacent same-role turns are merged for Gemini's rules.
 # ---------------------------------------------------------------------------
-def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    model = model or CHAT_MODEL
+def _gemini_payload(messages, thinking=False, max_tokens=600, temperature=0.8):
     system_parts = []
     contents = []
     for m in messages:
@@ -1074,12 +1509,21 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         payload["system_instruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
     if thinking:
         payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 2048}
+    return payload
+
+
+def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.8):
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or CHAT_MODEL
+    payload = _gemini_payload(messages, thinking=thinking, max_tokens=max_tokens,
+                              temperature=temperature)
 
     def _post(p):
         return requests.post(
             f"{GEMINI_BASE}/{model}:generateContent",
             json=p, params={"key": GEMINI_API_KEY},
-            headers={"Content-Type": "application/json"}, timeout=120)
+            headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
 
     r = _post(payload)
     # A few models reject a thinking budget - retry once without it so audits still run.
@@ -1097,6 +1541,294 @@ def _gemini(messages, model=None, thinking=False, max_tokens=600, temperature=0.
         return text.strip()
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected model response")
+
+
+def _gemini_stream(messages, model=None, max_tokens=600, temperature=0.8):
+    """Same call as _gemini, server-sent-events variant: yields text as the model
+    produces it. Blocking generator - always run it off the event loop."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    model = model or CHAT_MODEL
+    payload = _gemini_payload(messages, max_tokens=max_tokens, temperature=temperature)
+    with requests.post(f"{GEMINI_BASE}/{model}:streamGenerateContent",
+                       json=payload, params={"key": GEMINI_API_KEY, "alt": "sse"},
+                       headers={"Content-Type": "application/json"},
+                       stream=True, timeout=MODEL_TIMEOUT_S) as r:
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Model stream failed ({r.status_code}): {r.text[:300]}")
+        for data in _sse_json(r):
+            for cand in data.get("candidates", []):
+                for part in cand.get("content", {}).get("parts", []):
+                    text = part.get("text")
+                    if text:
+                        yield text
+
+
+def _sse_json(r):
+    """Yield each parsed `data:` JSON object from a streaming response."""
+    # text/event-stream carries no charset, and requests then decodes text/*
+    # as latin-1, which turns her apostrophes and dashes into mojibake.
+    r.encoding = "utf-8"
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data:"):
+            continue
+        body = line[5:].strip()
+        if not body or body == "[DONE]":
+            continue
+        try:
+            yield json.loads(body)
+        except ValueError:
+            continue
+
+
+# ---------------------------------------------------------------------------
+# OPENAI-COMPATIBLE — DeepSeek, Mistral, or your own vLLM/Ollama/llama.cpp box.
+# Every one of them speaks POST {base_url}/chat/completions; the layered list
+# the prompt builders produce is reshaped for strict chat templates first.
+# ---------------------------------------------------------------------------
+def _openai_messages(messages):
+    """Shape the layered list for strict chat templates (vLLM, llama.cpp, Mistral):
+    one leading system message, then strictly alternating user/assistant. Leading
+    system blocks are joined; a system instruction that arrives mid-conversation
+    (the CONTINUATION note) is delivered as the closing user turn instead."""
+    system_parts, turns = [], []
+    for m in messages:
+        text = m.get("content") or ""
+        if not text.strip():
+            continue
+        role = m.get("role")
+        if role != "assistant":     # typed text keeps its boundary whitespace
+            text = text.strip()
+        if role == "system":
+            if turns:
+                role, text = "user", "[Instruction]\n" + text
+            else:
+                system_parts.append(text)
+                continue
+        role = "assistant" if role == "assistant" else "user"
+        if turns and turns[-1]["role"] == role:
+            turns[-1]["content"] += "\n\n" + text
+        else:
+            turns.append({"role": role, "content": text})
+    if not turns or turns[0]["role"] != "user":
+        turns.insert(0, {"role": "user", "content": "Hello?"})
+    out = [{"role": "system", "content": "\n\n".join(system_parts)}] if system_parts else []
+    return out + turns
+
+
+def _openai_request(cfg, messages, stream, max_tokens, temperature):
+    headers = {"Content-Type": "application/json"}
+    if cfg["api_key"]:
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    payload = {"model": cfg["model"], "messages": _openai_messages(messages), "stream": stream,
+               "max_tokens": max_tokens, "temperature": temperature}
+    return requests.post(f"{cfg['base_url']}/chat/completions", json=payload,
+                         headers=headers, stream=stream, timeout=MODEL_TIMEOUT_S)
+
+
+def _openai(cfg, messages, max_tokens=600, temperature=0.8):
+    r = _openai_request(cfg, messages, False, max_tokens, temperature)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
+    try:
+        choice = r.json()["choices"][0]
+        text = choice["message"]["content"]
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    if not isinstance(text, str):
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    if not text.strip():
+        if choice.get("finish_reason") == "length":
+            raise HTTPException(status_code=502, detail=(
+                f"{cfg['model']} spent all {max_tokens} tokens thinking and wrote "
+                "nothing; raise the token budget for this role"))
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+    return text.strip()
+
+
+def _openai_stream(cfg, messages, max_tokens=600, temperature=0.8):
+    with _openai_request(cfg, messages, True, max_tokens, temperature) as r:
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Model stream failed ({r.status_code}): {r.text[:300]}")
+        for data in _sse_json(r):
+            for choice in data.get("choices", []):
+                text = (choice.get("delta") or {}).get("content")
+                if text:
+                    yield text
+
+
+# ---------------------------------------------------------------------------
+# ROLES — the mouth, the brain and the auditor each pick their own provider.
+# ---------------------------------------------------------------------------
+def llm(cfg, messages, thinking=False, max_tokens=600, temperature=0.8):
+    if cfg["provider"] == "openai":
+        return _openai(cfg, messages, max_tokens=max_tokens, temperature=temperature)
+    return _gemini(messages, model=cfg["model"], thinking=thinking,
+                   max_tokens=max_tokens, temperature=temperature)
+
+
+def llm_stream(cfg, messages, max_tokens=600, temperature=0.8):
+    if cfg["provider"] == "openai":
+        return _openai_stream(cfg, messages, max_tokens=max_tokens, temperature=temperature)
+    return _gemini_stream(messages, model=cfg["model"], max_tokens=max_tokens,
+                          temperature=temperature)
+
+
+def _role_label(cfg):
+    return f"{cfg['model']} @ {cfg['base_url'] or 'gemini'}"
+
+
+# ---------------------------------------------------------------------------
+# THE MOUTH — paced emitter.
+# The model is faster than a person types, so the naive fixes both fail: type at
+# model speed and it looks pasted; buffer the whole reply and release it slowly
+# and she runs further ahead every turn and never catches up. Instead the emitter
+# owns the clock and generation is throttled to it: the mouth thread hands over
+# small pieces and BLOCKS while the untyped backlog sits at CHAT_LEAD_CHARS, so
+# she stays within about that far ahead of the screen (the cap plus the couple of
+# handover pieces in flight) instead of gaining a fixed lead every turn.
+# Because typed characters are immutable but the rest is not, a brain that lands
+# mid-reply can still be honoured: the untyped remainder is dropped and
+# regenerated from the updated memory, continuing the sentence she was on.
+# ---------------------------------------------------------------------------
+_EOF = object()
+
+
+def _sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _drain(box):
+    while True:
+        try:
+            box.get_nowait()
+        except queue.Empty:
+            return
+
+
+def _pause_after(typed_now):
+    """Keystroke rhythm: a real person lands on punctuation and breathes."""
+    if typed_now[-1:] in tuple(SENTENCE_END):
+        return EMIT_TICK_S + random.uniform(0.28, 0.55)
+    if typed_now[-1:] in (",", ";", ":"):
+        return EMIT_TICK_S + random.uniform(0.08, 0.16)
+    return EMIT_TICK_S * random.uniform(0.8, 1.25)
+
+
+def _mouth_thread(msgs, box, stop):
+    """Generate into `box` in small pieces; block while the emitter is behind."""
+    try:
+        for chunk in llm_stream(MOUTH, msgs):
+            for i in range(0, len(chunk), PIECE_CHARS):
+                piece = chunk[i:i + PIECE_CHARS]
+                while not stop.is_set():
+                    try:
+                        box.put(piece, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+                if stop.is_set():
+                    return
+    except Exception:
+        pass
+    finally:
+        # The sentinel is how the emitter learns the reply ended, so it has to
+        # land: a full box here only means she is still catching up.
+        while not stop.is_set():
+            try:
+                box.put(_EOF, timeout=0.2)
+                break
+            except queue.Full:
+                continue
+
+
+async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, brain):
+    box = queue.Queue(maxsize=2)
+    stop = threading.Event()
+    threading.Thread(target=_mouth_thread, args=(msgs, box, stop), daemon=True).start()
+
+    typed = []              # on the screen, immutable
+    backlog = ""            # generated, not yet typed
+    finished = False        # the mouth reached the end of the reply
+    revisable = TAIL_REVISION and brain is not None
+    credit = 0.0            # fractional characters owed at this typing speed
+    logged = False
+
+    try:
+        yield _sse("open", {"girl": girl})
+        while True:
+            if await request.is_disconnected():
+                break
+
+            # Pull only while the untyped backlog is under the cap - a full box is
+            # what makes the mouth thread block. This is the backpressure.
+            while len(backlog) < CHAT_LEAD_CHARS:
+                try:
+                    item = box.get_nowait()
+                except queue.Empty:
+                    break
+                if item is _EOF:
+                    finished = True
+                    break
+                backlog += item
+
+            if finished and not backlog:
+                break
+
+            # The brain landed mid-reply and moved the stage: retype the tail.
+            if revisable and brain.done():
+                revisable = False
+                if backlog and brain_milestone(brain, rel["milestone"]) != int(rel["milestone"]):
+                    try:
+                        fresh = await asyncio.to_thread(get_relationship, user_id, girl)
+                        tail_msgs = await asyncio.to_thread(
+                            build_chat_messages, user_id, girl, fresh, user_message,
+                            "".join(typed))
+                    except Exception:
+                        tail_msgs = None
+                    if tail_msgs is not None:
+                        stop.set()
+                        _drain(box)
+                        rel, backlog, finished = fresh, "", False
+                        box, stop = queue.Queue(maxsize=2), threading.Event()
+                        threading.Thread(target=_mouth_thread,
+                                         args=(tail_msgs, box, stop),
+                                         daemon=True).start()
+
+            credit += CHAT_CPS * EMIT_TICK_S
+            take = min(int(credit), len(backlog))
+            if take:
+                credit -= take
+                typed_now, backlog = backlog[:take], backlog[take:]
+                typed.append(typed_now)
+                yield _sse("delta", {"t": typed_now})
+                await asyncio.sleep(_pause_after(typed_now))
+            else:
+                await asyncio.sleep(EMIT_TICK_S)
+
+        reply = "".join(typed).strip()
+        if not reply:
+            yield _sse("error", {"detail": "she_did_not_answer"})
+            return
+        await asyncio.to_thread(persist_turn, user_id, girl, rel, user_message, reply)
+        logged = True
+        yield _sse("done", {"remaining": remaining,
+                            "milestone": brain_milestone(brain, rel["milestone"])})
+    finally:
+        stop.set()
+        reply = "".join(typed).strip()
+        if reply and not logged:
+            # dropped connection: log what she actually got to say, off-thread
+            # because the client is already gone and cannot wait for it
+            _BRAIN_POOL.submit(persist_turn, user_id, girl, rel, user_message, reply)
+        elif not reply:
+            # she never said a word: the reserved message goes back
+            _BRAIN_POOL.submit(refund_message, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1138,7 +1870,7 @@ pre{white-space:pre-wrap;margin:0}
 <nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
-<button id="tabPer" onclick="show('per')">Personas</button></nav>
+<button id="tabPer" onclick="show('per')">Roster</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
@@ -1171,7 +1903,11 @@ pre{white-space:pre-wrap;margin:0}
 
 <section id="per" class="hid">
 <div class="card"><div class="plist" id="plist"></div>
-<div class="mut" style="margin-top:8px">The persona text is the girl's Layer-1 system block. Paste her FULL character doc; unseeded girls run on the short built-in fallback.</div></div>
+<div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
+<button class="s" onclick="exportRoster()">Download backup</button></div>
+<div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the tier that unlocks her and her
+full character doc, which is her Layer-1 system block. Changes are live on the next reload - no deploy.
+Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
 <div id="pedit" class="card hid"></div>
 </section>
 </main>
@@ -1193,16 +1929,38 @@ async function loadOverview(){try{const s=await api('/admin/overview');const st=
  const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
  $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
-let PERS=[];
-async function loadPersonas(sel){try{PERS=await api('/admin/personas');$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name)} ${p.seeded?'':'<span class="mut">(fallback)</span>'}</button>`).join('');if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
+let PERS=[],CURP=null;const TIERS=['freshman','sophomore','junior','senior'];
+const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:'Hard - slow to trust',ice:'Ice queen - barely thaws'};
+function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
+async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function editPersona(i){const p=PERS[i];if(!p)return;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
- el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl)}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback'}</span></div>
- <div class="row2"><label>Name <input id="pName" value="${esc(p.name)}"></label><label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:220px"></label></div>
- <textarea id="pDoc" style="min-height:320px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
- <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="savePersona(this.dataset.girl)">Save</button><span class="mut" id="pLen">${p.persona.length} chars</span></div>`;
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'freshman',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
+ el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
+ <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
+ <label>Name <input id="pName" value="${esc(p.name)}"></label>
+ <label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:200px"></label>
+ <label>Unlocks at <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
+ <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label>
+ <label>Difficulty <select id="pDiff">${Object.keys(DIFFS).map(d=>`<option value="${d}"${d===(p.difficulty||'normal')?' selected':''}>${DIFFS[d]}</option>`).join('')}</select></label></div>
+ <div class="mut">Difficulty only stretches the real days each trust stage takes - she still has to be treated right, and remembered, to open up.</div>
+ <div class="row2"><label style="flex:1">Avatar URL <input id="pAvatar" value="${esc(p.avatar_url)}" style="width:100%"></label></div>
+ <label class="mut">Door blurb</label><textarea id="pBlurb" style="min-height:60px">${esc(p.blurb)}</textarea>
+ <label class="mut">Character doc (her system block)</label>
+ <textarea id="pDoc" style="min-height:300px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
+ <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="saveGirl(this.dataset.girl)">Save</button>
+ ${p.isNew?'':`<button class="s" onclick="setActive('${esc(p.girl)}',${p.active?'false':'true'})">${p.active?'Retire her':'Bring her back'}</button>`}
+ <span class="mut" id="pLen">${(p.persona||'').length} chars</span></div>`;
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
-async function savePersona(girl){try{await api('/admin/console/persona',{method:'POST',body:JSON.stringify({girl,name:$('#pName').value,door_title:$('#pTitle').value,persona:$('#pDoc').value})});toast('Persona saved');loadPersonas(girl)}catch(e){toast(e.message,true)}}
+async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
+ try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
+  blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
+  persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
+async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
+ try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
+async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+ a.download='sorority-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
 async function loadChat(girl){const email=CUR;try{const rows=await api('/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl));document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',b.dataset.girl===girl));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
@@ -1344,6 +2102,20 @@ class AdminPersonaIn(BaseModel):
     persona: str
 
 
+class AdminGirlIn(BaseModel):
+    """Everything about a sister that used to need a deploy."""
+    girl: str
+    name: str
+    persona: str
+    door_title: str = ""
+    blurb: str = ""
+    avatar_url: str = ""
+    min_tier: str = "freshman"
+    sort_order: int = 100
+    difficulty: str = DIFFICULTY_DEFAULT
+    active: bool = True
+
+
 @app.on_event("startup")
 def _startup():
     init_db()
@@ -1351,7 +2123,8 @@ def _startup():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "model": CHAT_MODEL, "audit_model": AUDIT_MODEL,
+    return {"ok": True, "model": _role_label(MOUTH), "brain_model": _role_label(BRAIN),
+            "audit_model": _role_label(AUDIT),
             "audit_thinking": AUDIT_THINKING, "audit_price_usd": AUDIT_PRICE_USD,
             "free_audits": FREE_AUDITS}
 
@@ -1474,66 +2247,48 @@ def logout(authorization: str = Header(default=""), user=Depends(current_user)):
 
 @app.post("/chat")
 def chat(body: ChatIn, user=Depends(current_user)):
-    tier = user["tier"]
-    girl = body.girl.strip().lower()
-
-    if not girl_open(user["user_id"], girl, tier):
-        raise HTTPException(status_code=403, detail="This door is locked for your tier")
-
-    remaining = remaining_for(user)
-    if remaining <= 0:
-        raise HTTPException(status_code=402, detail="out_of_messages")
-
-    rel = get_relationship(user["user_id"], girl)
-    persona_text, name = get_persona(girl)
-
-    # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
-    system_text = f"You are {name} from the Sorority House.\n\n{persona_text}\n\n{HOUSE_RULES}"
-
-    # ---- LAYER 2: small memory block + the per-girl engine state card --------
-    engine_card = build_engine_card(girl, rel)
-    memory_block = ("MEMORY BLOCK (relationship with this user - internal):\n"
-                    + engine_card + "\n"
-                    + (f"- Summary: {rel['summary']}" if rel["summary"]
-                       else "- You are still getting to know them; nothing meaningful remembered yet."))
-
-    # ---- LAYER 3: only the last WINDOW messages ------------------------------
-    msgs = [{"role": "system", "content": system_text},
-            {"role": "system", "content": memory_block}]
-    for m in last_messages(user["user_id"], girl, WINDOW):
-        msgs.append({"role": m["sender"], "content": m["message"]})
-    msgs.append({"role": "user", "content": body.message})
-
-    reply = _gemini(msgs, model=CHAT_MODEL)   # no thinking budget for chat
-
-    conn = db()
+    """Whole reply in one response. The brain runs behind it, so "milestone" here
+    is the stage as of this turn; /state has it once the refresh lands."""
+    girl, rel, remaining = chat_preflight(user, body.girl)
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO chat_logs (user_id, girl, sender, message)
-                VALUES (%s,%s,'user',%s), (%s,%s,'assistant',%s)
-            """, (user["user_id"], girl, body.message, user["user_id"], girl, reply))
-            cur.execute("UPDATE users SET msg_used = msg_used + 1 WHERE user_id=%s",
-                        (user["user_id"],))
-            # per-girl engine: track real days of presence (the slow-burn clock)
-            prev = rel.get("last_session")
-            new_day = 1 if (prev is None or prev < _today()) else 0
-            cur.execute("""
-                UPDATE relationships
-                SET last_session = CURRENT_DATE,
-                    active_days = active_days + %s,
-                    stage_since = COALESCE(stage_since, CURRENT_DATE)
-                WHERE user_id=%s AND girl=%s
-            """, (new_day, user["user_id"], girl))
-            conn.commit()
-    finally:
-        conn.close()
+        msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
+        reply = llm(MOUTH, msgs)   # no thinking budget for chat
+        persist_turn(user["user_id"], girl, rel, body.message, reply)
+    except Exception:
+        refund_message(user["user_id"])
+        raise
+    kick_brain(user["user_id"], girl, rel)
 
-    # Layer-2 refresh is throttled (every SUMMARY_EVERY messages), not per turn.
-    state = maybe_refresh_summary(user["user_id"], girl, rel)
+    return {"ok": True, "reply": reply, "remaining": remaining,
+            "milestone": int(rel["milestone"])}
 
-    return {"ok": True, "reply": reply, "remaining": remaining - 1,
-            "milestone": state["milestone"]}
+
+@app.post("/chat/stream")
+async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)):
+    """She types instead of pasting. Same 3-layer payload as /chat; the reply is
+    streamed as SSE at a human rate.
+
+      event: open   {"girl"}                  - accepted, she is thinking
+      event: delta  {"t"}                     - the next few characters she typed
+      event: done   {"remaining","milestone"} - turn logged and spent
+      event: error  {"detail"}                - only before any delta
+
+    What the user has SEEN is the transcript: on a mid-reply disconnect the typed
+    part is what gets logged, so her memory and the screen never disagree."""
+    girl, rel, remaining = await asyncio.to_thread(chat_preflight, user, body.girl)
+    try:
+        msgs = await asyncio.to_thread(build_chat_messages,
+                                      user["user_id"], girl, rel, body.message)
+    except Exception:
+        await asyncio.to_thread(refund_message, user["user_id"])
+        raise
+    brain = kick_brain(user["user_id"], girl, rel)
+    return StreamingResponse(
+        _type_out(request, user["user_id"], girl, rel, msgs, body.message,
+                  remaining, brain),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"})
 
 
 @app.get("/history")
@@ -1543,18 +2298,30 @@ def history(girl: str, user=Depends(current_user)):
     return {"messages": [{"sender": m["sender"], "message": m["message"]} for m in msgs]}
 
 
+@app.get("/roster")
+def public_roster():
+    """The doors to render, newest roster edits included. Public: door text and
+    art only - never the persona doc, which is the model's system prompt."""
+    return {"tiers": TIER_ORDER,
+            "girls": [{"girl": r["girl"], "name": r["name"],
+                       "door_title": r["door_title"], "blurb": r["blurb"],
+                       "avatar_url": r["avatar_url"], "min_tier": r["min_tier"],
+                       "tier_label": TIERS.get(r["min_tier"], {}).get("label", "")}
+                      for r in roster()]}
+
+
 @app.get("/state")
 def state(user=Depends(current_user)):
+    house = roster()
     girls = {}
-    for g in GIRL_ACCESS.get(user["tier"], []):
+    for g in girls_for_tier(user["tier"], house):
         rel = get_relationship(user["user_id"], g)
         band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
         girls[g] = {"open": True, "milestone": rel["milestone"], "band": band,
                     "kept": len(rel.get("pinned_kept") or [])}
     # locked girls still show so the frontend can render the shut doors
-    for g in GIRL_ACCESS["senior"]:
-        if g not in girls:
-            girls[g] = {"open": False, "milestone": 0, "band": "", "kept": 0}
+    for row in house:
+        girls.setdefault(row["girl"], {"open": False, "milestone": 0, "band": "", "kept": 0})
     return {"tier": user["tier"], "remaining": remaining_for(user),
             "audit_count": int(user["total_audits_used"]),
             "free_audits_left": free_audits_left(user),
@@ -1620,8 +2387,8 @@ def audit(body: AuditIn, user=Depends(current_user)):
                     {"role": "user", "content": full_context}]
         # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
         thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
-        report = _gemini(messages, model=AUDIT_MODEL, thinking=thinking_on,
-                         max_tokens=900, temperature=0.6)
+        report = llm(AUDIT, messages, thinking=thinking_on,
+                     max_tokens=900, temperature=0.6)
     except Exception:
         # no audit delivered: hand the reserved entitlement back
         conn = db()
@@ -1693,7 +2460,7 @@ def set_persona(body: PersonaIn):
     Strict: personas are the model's system prompt, so this must never be public."""
     _check_admin(body.secret, strict=True)
     girl = body.girl.strip().lower()
-    if girl not in GIRL_ACCESS["senior"]:
+    if girl not in [r["girl"] for r in roster(include_retired=True)]:
         raise HTTPException(status_code=400, detail="Unknown girl slug")
     conn = db()
     try:
@@ -2100,22 +2867,15 @@ def admin_overview():
 
 @app.get("/admin/personas", dependencies=[Depends(admin_required)])
 def admin_personas():
-    """Every girl with her seeded doc (or the built-in fallback when none is seeded)."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT girl, name, door_title, persona FROM personas")
-            seeded = {r["girl"]: r for r in cur.fetchall()}
-    finally:
-        conn.close()
+    """The whole roster, retired sisters included, with her doc and door settings.
+    "seeded" is false while she is still running on the built-in placeholder."""
     out = []
-    for girl in GIRL_ACCESS["senior"]:
-        name, title, blurb = DEFAULT_PERSONAS.get(girl, (girl.title(), "New sister", ""))
-        row = seeded.get(girl)
-        out.append({"girl": girl, "seeded": row is not None,
-                    "name": row["name"] if row else name,
-                    "door_title": row["door_title"] if row else title,
-                    "persona": row["persona"] if row else blurb})
+    for row in roster(include_retired=True):
+        persona, _name = get_persona(row["girl"])
+        seed = DEFAULT_PERSONAS.get(row["girl"])
+        out.append(dict(row, persona=persona,
+                        seeded=not (seed and persona.strip() == seed[2].strip()),
+                        tiers=TIER_ORDER))
     return out
 
 
@@ -2125,6 +2885,77 @@ def admin_console_persona(body: AdminPersonaIn):
         raise HTTPException(status_code=400, detail="name and persona are required")
     return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
                                  persona=body.persona, secret=ADMIN_SECRET))
+
+
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
+
+
+@app.post("/admin/console/girl", dependencies=[Depends(admin_required)])
+def admin_console_girl(body: AdminGirlIn):
+    """Add a sister or rewrite an existing one - door, art, tier gate and doc.
+    This is the whole roster, so it never needs a deploy to change."""
+    girl = body.girl.strip().lower()
+    if not _SLUG_RE.match(girl):
+        raise HTTPException(status_code=400,
+                            detail="slug must be lowercase letters, digits, - or _ (2-31 chars)")
+    if not body.name.strip() or not body.persona.strip():
+        raise HTTPException(status_code=400, detail="name and persona are required")
+    if body.min_tier not in TIER_ORDER:
+        raise HTTPException(status_code=400, detail="min_tier must be one of " + ", ".join(TIER_ORDER))
+    if body.difficulty not in DIFFICULTY:
+        raise HTTPException(status_code=400,
+                            detail="difficulty must be one of " + ", ".join(DIFFICULTY))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO personas (girl, name, door_title, persona, blurb,
+                                      avatar_url, min_tier, sort_order, active,
+                                      difficulty)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (girl) DO UPDATE
+                SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
+                    persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
+                    avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
+                    sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
+                    difficulty=EXCLUDED.difficulty
+            """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
+                  body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
+                  max(0, min(9999, int(body.sort_order))), bool(body.active),
+                  body.difficulty))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "girl": girl}
+
+
+@app.post("/admin/console/girl/{girl}/active", dependencies=[Depends(admin_required)])
+def admin_console_girl_active(girl: str, active: bool = True):
+    """Take a sister off the doors or put her back. Her chats and relationships
+    are kept, so bringing her back resumes every conversation where it stopped."""
+    girl = girl.strip().lower()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET active=%s WHERE girl=%s RETURNING girl",
+                        (bool(active), girl))
+            found = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if not found:
+        raise HTTPException(status_code=404, detail="Unknown girl slug")
+    return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/admin/console/export", dependencies=[Depends(admin_required)])
+def admin_console_export():
+    """The roster as JSON: every door, every persona doc. Keep a copy somewhere
+    safe - it is enough to rebuild the house on an empty database."""
+    return {"exported_at": datetime.now(timezone.utc).isoformat(),
+            "tiers": TIERS,
+            "girls": [dict(r, persona=get_persona(r["girl"])[0])
+                      for r in roster(include_retired=True)]}
 
 
 @app.get("/admin/accounts/{email}/chat", dependencies=[Depends(admin_required)])

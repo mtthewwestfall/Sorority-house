@@ -113,7 +113,8 @@
     .door-card img { width: 100%; height: 285px; display: block; object-fit: cover; }
     .door-card.locked img { filter: blur(18px) brightness(.42) saturate(.7); transform: scale(1.06); }
     .door-card.locked::after { content: "🔒  DOOR STILL SHUT"; position: absolute; top: 126px; left: 0; right: 0; text-align: center; color: var(--gold); letter-spacing: .24em; font-size: .78rem; font-weight: 700; }
-    .door-card.senior::after { content: "🔒  SENIOR EXCLUSIVE"; }
+    .door-card.senior::after,
+    .door-card.locked[data-min-tier="senior"]::after { content: "🔒  SENIOR EXCLUSIVE"; }
     .door-copy { padding: 25px 25px 28px; }
     .door-status { color: var(--pink); letter-spacing: .3em; text-transform: uppercase; font-size: .72rem; font-weight: 700; }
     .locked .door-status { color: var(--gold); }
@@ -313,32 +314,34 @@
           <h2>Every door hides a different challenge.</h2>
           <p>28 doors line one house and hide a whole lot of emotional armor. Two are open. The others are waiting to see whether you are worth letting in.</p>
         </div>
-        <div class="doors">
-          <article class="door-card open" data-girl="dakota" data-name="Dakota" data-title="The gatekeeper" data-avatar="https://myreal.live/assets/dakota-DovCVNjY.jpg">
+        <!-- These seven are the fallback: GET /roster replaces them with whatever
+             the house holds now, so a new sister needs no deploy. -->
+        <div class="doors" id="doors-grid">
+          <article class="door-card open" data-girl="dakota" data-min-tier="freshman" data-name="Dakota" data-title="The gatekeeper" data-avatar="https://myreal.live/assets/dakota-DovCVNjY.jpg">
             <img src="https://myreal.live/assets/dakota-DovCVNjY.jpg" alt="Portrait of Dakota" />
             <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Dakota</div><div class="door-title">The gatekeeper</div><p>Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly.</p><button class="button door-cta" type="button">Knock on Dakota's door</button></div>
           </article>
-          <article class="door-card open" data-girl="zoe" data-name="Zoe" data-title="The mirage" data-avatar="https://myreal.live/assets/zoe-BnozSeUg.jpg">
+          <article class="door-card open" data-girl="zoe" data-min-tier="freshman" data-name="Zoe" data-title="The mirage" data-avatar="https://myreal.live/assets/zoe-BnozSeUg.jpg">
             <img src="https://myreal.live/assets/zoe-BnozSeUg.jpg" alt="Portrait of Zoe" />
             <div class="door-copy"><div class="door-status">Door open</div><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><button class="button door-cta" type="button">Knock on Zoe's door</button></div>
           </article>
-          <article class="door-card locked" data-girl="willow" data-name="Willow" data-title="The quiet lock" data-avatar="https://myreal.live/assets/willow-4w9QsnXR.jpg">
+          <article class="door-card locked" data-girl="willow" data-min-tier="sophomore" data-name="Willow" data-title="The quiet lock" data-avatar="https://myreal.live/assets/willow-4w9QsnXR.jpg">
             <img src="https://myreal.live/assets/willow-4w9QsnXR.jpg" alt="Willow's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p></div>
           </article>
-          <article class="door-card locked" data-girl="brittany" data-name="Brittany" data-title="The sweet trap" data-avatar="https://myreal.live/assets/brittany-DRnJ63HN.jpg">
+          <article class="door-card locked" data-girl="brittany" data-min-tier="sophomore" data-name="Brittany" data-title="The sweet trap" data-avatar="https://myreal.live/assets/brittany-DRnJ63HN.jpg">
             <img src="https://myreal.live/assets/brittany-DRnJ63HN.jpg" alt="Brittany's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p></div>
           </article>
-          <article class="door-card locked" data-girl="sasha" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp">
+          <article class="door-card locked" data-girl="sasha" data-min-tier="junior" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp">
             <img src="assets/sasha.webp" alt="Sasha's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p></div>
           </article>
-          <article class="door-card locked" data-girl="piper" data-name="Piper" data-title="The closed book" data-avatar="https://myreal.live/assets/piper-P4IdzuLV.jpg">
+          <article class="door-card locked" data-girl="piper" data-min-tier="junior" data-name="Piper" data-title="The closed book" data-avatar="https://myreal.live/assets/piper-P4IdzuLV.jpg">
             <img src="https://myreal.live/assets/piper-P4IdzuLV.jpg" alt="Piper's locked door" />
             <div class="door-copy"><div class="door-status">Door still shut</div><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p></div>
           </article>
-          <article class="door-card locked senior" data-girl="veronica" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp">
+          <article class="door-card locked senior" data-girl="veronica" data-min-tier="senior" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp">
             <img src="assets/veronica.webp" alt="Veronica's locked door" />
             <div class="door-copy"><div class="door-status">Senior exclusive</div><div class="door-name">Veronica</div><div class="door-title">The host</div><p>The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted.</p></div>
           </article>
@@ -643,6 +646,7 @@
 
     // Called when the API says the token is missing/expired.
     function handleUnauthorized() {
+      abortStream();   // refreshState runs below, once the token is cleared
       if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); refreshState(); }
       openAuth('login', 'Sign in to keep talking.');
     }
@@ -683,6 +687,7 @@
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her door.'); return; }
       if (!card.classList.contains('open')) return;
+      abortStreamAndResync();
       currentGirl = card.dataset.girl;
       document.getElementById('chat-name').textContent = card.dataset.name;
       document.getElementById('chat-title').textContent = card.dataset.title;
@@ -697,25 +702,76 @@
     }
 
     function closeChat() {
+      abortStreamAndResync();
       chat.classList.remove('is-open');
       currentGirl = null;
     }
 
     // Every card is clickable; openChat refuses locked ones. Which doors are open
     // comes from GET /state for the signed-in account (defaults = freshman set).
-    const DEFAULT_OPEN = ['dakota', 'zoe'];
+    let DEFAULT_OPEN = ['dakota', 'zoe'];
     function setDoors(openList) {
       document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
         const open = openList.includes(card.dataset.girl);
         card.classList.toggle('open', open);
         card.classList.toggle('locked', !open);
         const status = card.querySelector('.door-status');
-        if (status) status.textContent = open ? 'Door open' : (card.classList.contains('senior') ? 'Senior exclusive' : 'Door still shut');
+        if (status) status.textContent = open ? 'Door open' : (card.dataset.minTier === 'senior' ? 'Senior exclusive' : 'Door still shut');
       });
     }
+
+    // The roster is data now: GET /roster is the list of doors, so a sister added
+    // from the admin console shows up on a reload with no deploy. The markup in
+    // the page is only a fallback for when the API cannot be reached.
+    const doorsGrid = document.getElementById('doors-grid');
+    function escapeHtml(text) {
+      return String(text == null ? '' : text).replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+    function renderRoster(girls) {
+      doorsGrid.innerHTML = girls.map((g) => {
+        const name = escapeHtml(g.name || g.girl);
+        const avatar = escapeHtml(g.avatar_url);
+        return '<article class="door-card locked" data-girl="' + escapeHtml(g.girl) + '"' +
+          ' data-min-tier="' + escapeHtml(g.min_tier || 'freshman') + '"' +
+          ' data-name="' + name + '" data-title="' + escapeHtml(g.door_title) + '"' +
+          ' data-avatar="' + avatar + '">' +
+          (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') +
+          '<div class="door-copy"><div class="door-status">Door still shut</div>' +
+          '<div class="door-name">' + name + '</div>' +
+          '<div class="door-title">' + escapeHtml(g.door_title) + '</div>' +
+          '<p>' + escapeHtml(g.blurb) + '</p>' +
+          '<button class="button door-cta" type="button">Knock on ' + name + '\u2019s door</button></div>' +
+          '</article>';
+      }).join('');
+      DEFAULT_OPEN = girls.filter((g) => (g.min_tier || 'freshman') === 'freshman').map((g) => g.girl);
+    }
+    async function loadRoster() {
+      try {
+        const response = await fetch(API_BASE_URL + '/roster');
+        const data = await response.json().catch(() => null);
+        // An empty house is an answer too: retiring everyone must clear the doors,
+        // not fall back to the seven in the markup.
+        if (!response.ok || !data || !Array.isArray(data.girls)) return;
+        renderRoster(data.girls);
+      } catch (error) { /* keep the doors already in the page */ }
+    }
+    // Whoever last wrote the allowance owns it: every send, abort or state read
+    // takes the next turn, and a slower answer for an older turn is dropped
+    // rather than replacing a newer count.
+    let turnSeq = 0;
+    function showRemaining(n) {
+      if (typeof n === 'number') chatRemaining.textContent = n + ' messages left';
+    }
+    function shownRemaining() {
+      const found = /^(\d+)/.exec(chatRemaining.textContent);
+      return found ? parseInt(found[1], 10) : null;
+    }
+
     let stateSeq = 0;
     async function refreshState() {
       const seq = ++stateSeq;
+      turnSeq++;
       setDoors(DEFAULT_OPEN); chatRemaining.textContent = '';
       if (!isLoggedIn()) return;
       try {
@@ -725,13 +781,15 @@
         const data = await response.json().catch(() => null);
         if (seq !== stateSeq || !response.ok || !data || !data.girls) return;
         setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open));
-        if (typeof data.remaining === 'number') chatRemaining.textContent = data.remaining + ' messages left';
+        showRemaining(data.remaining);
       } catch (error) { /* keep whatever is shown */ }
     }
-    document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
-      card.addEventListener('click', () => openChat(card));
+    // Delegated so cards rendered from /roster are clickable too.
+    doorsGrid.addEventListener('click', (event) => {
+      const card = event.target.closest('.door-card[data-girl]');
+      if (card) openChat(card);
     });
-    refreshState();
+    loadRoster().then(refreshState);
     document.getElementById('chat-close').addEventListener('click', closeChat);
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
@@ -769,6 +827,139 @@
       }
     });
 
+    // She types: POST /chat/stream sends her reply as SSE, already paced by the
+    // backend, so the bubble just grows as the events land. Older backends have
+    // no /chat/stream, so a 404 (or any pre-reply failure) falls back to /chat.
+    // Leaving her room while a reply is in flight has to cut the connection, or
+    // what is left of it lands in whatever chat replaced it - and the backend
+    // goes on generating text nobody is reading. Both paths share the handle.
+    let streamAbort = null;
+    function abortStream() {
+      if (!streamAbort) return false;
+      streamAbort.abort();
+      streamAbort = null;
+      return true;
+    }
+
+    // A cut-off reply is still charged, but 'done' never arrives to carry the new
+    // count, so the header would keep showing the pre-send number. The backend
+    // only logs the typed part once it notices the drop, and does it on a worker,
+    // so there is no one moment to ask at: poll until the charge shows up.
+    async function resyncRemaining(seq, before) {
+      for (const delay of [400, 1200, 2500]) {
+        await new Promise((done) => setTimeout(done, delay));
+        if (seq !== turnSeq || !isLoggedIn()) return;
+        let data = null;
+        try {
+          const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
+          data = await response.json().catch(() => null);
+        } catch (error) { return; }
+        if (seq !== turnSeq) return;   // a newer turn owns the count now
+        if (!data || typeof data.remaining !== 'number') return;
+        showRemaining(data.remaining);
+        if (before === null || data.remaining < before) return;
+      }
+    }
+
+    function abortStreamAndResync() {
+      if (abortStream()) resyncRemaining(++turnSeq, shownRemaining());
+    }
+
+    let streamSupported = true;
+    async function streamReply(message, typing) {
+      const girl = currentGirl;
+      turnSeq++;            // this reply's count supersedes any pending resync
+      abortStream();
+      const controller = new AbortController();
+      streamAbort = controller;
+      const response = await fetch(API_BASE_URL + '/chat/stream', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ girl: girl, message: message }),
+        signal: controller.signal,
+      });
+      if (response.status === 404 || response.status === 405) {
+        streamSupported = false;
+        return false;
+      }
+      if (response.status === 401) { typing.remove(); addMessage('note', 'Your session ended. Sign in to keep talking.'); handleUnauthorized(); return true; }
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
+        typing.remove();
+        addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+        return true;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = '';
+      let bubble = null;
+      let failed = null;
+
+      const handle = (event, data) => {
+        if (girl !== currentGirl) return;   // her room is gone; drop the rest
+        if (event === 'delta' && data.t) {
+          if (!bubble) { typing.remove(); bubble = addMessage('her', ''); }
+          bubble.textContent += data.t;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        } else if (event === 'done') {
+          showRemaining(data.remaining);
+        } else if (event === 'error') {
+          failed = data.detail || 'She did not answer. Try again in a moment.';
+        }
+      };
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        raw += decoder.decode(value, { stream: true });
+        const blocks = raw.split('\n\n');
+        raw = blocks.pop();
+        for (const block of blocks) {
+          let event = 'message', payload = '';
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) payload += line.slice(5).trim();
+          }
+          if (!payload) continue;
+          try { handle(event, JSON.parse(payload)); } catch (e) { /* ignore a partial frame */ }
+        }
+      }
+      if (streamAbort === controller) streamAbort = null;
+      if (!bubble && girl === currentGirl) {
+        typing.remove();
+        addMessage('error', failed === 'she_did_not_answer' ? 'She went quiet. Try again in a moment.' : (failed || 'She did not answer. Try again in a moment.'));
+      }
+      return true;
+    }
+
+    async function sendReply(message, typing) {
+      const girl = currentGirl;
+      turnSeq++;
+      abortStream();
+      const controller = new AbortController();
+      streamAbort = controller;
+      const response = await fetch(API_BASE_URL + '/chat', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ girl: girl, message: message }),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => null);
+      if (streamAbort === controller) streamAbort = null;
+      typing.remove();
+      if (girl !== currentGirl) return;   // her room is gone; drop the reply
+      if (response.status === 401) {
+        addMessage('note', 'Your session ended. Sign in to keep talking.');
+        handleUnauthorized();
+      } else if (!response.ok || !data || data.ok === false) {
+        addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+      } else {
+        addMessage('her', data.reply);
+        showRemaining(data.remaining);
+      }
+    }
+
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const message = chatInput.value.trim();
@@ -781,28 +972,14 @@
       const typing = addMessage('typing', 'typing…');
 
       try {
-        const response = await fetch(API_BASE_URL + '/chat', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ girl: currentGirl, message: message }),
-        });
-        const data = await response.json().catch(() => null);
-        typing.remove();
-
-        if (response.status === 401) {
-          addMessage('note', 'Your session ended. Sign in to keep talking.');
-          handleUnauthorized();
-        } else if (!response.ok || !data || data.ok === false) {
-          addMessage('error', (data && (data.error || data.detail)) || 'She did not answer. Try again in a moment.');
-        } else {
-          addMessage('her', data.reply);
-          if (typeof data.remaining === 'number') {
-            chatRemaining.textContent = data.remaining + ' messages left';
-          }
+        if (!streamSupported || !(await streamReply(message, typing))) {
+          await sendReply(message, typing);
         }
       } catch (error) {
         typing.remove();
-        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+        if (error.name !== 'AbortError') {   // she was cut off on purpose
+          addMessage('error', 'Could not reach the house. Check your connection and try again.');
+        }
       } finally {
         sending = false;
         chatSend.disabled = false;
