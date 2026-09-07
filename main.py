@@ -74,8 +74,10 @@ API CONTRACT implemented here (point your chat app at these):
                                                             the doors to render; door text and
                                                             art only, never the persona doc
   POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,min_tier,sort_order,
-                            active,persona}                -> add or rewrite a sister; the
-                                                            roster is data, so no deploy
+                            active,difficulty,persona}     -> add or rewrite a sister; the
+                                                            roster is data, so no deploy.
+                                                            difficulty (easy|normal|hard|ice)
+                                                            scales her real-day trust floors
   POST /admin/console/girl/{girl}/active ?active=          -> take her off the doors / put her
                                                             back. Her chats are kept either way
   GET  /admin/console/export                              -> the roster as JSON (backup)
@@ -446,6 +448,36 @@ def engine_for(girl):
     return GIRLS_ENGINE.get(girl, GENERIC_ENGINE)
 
 
+# How hard she is to get close to, as a multiplier on her real-day floors. This is
+# the one relationship dial the console owns, so pacing can be tuned without a
+# deploy; the ladder itself (eight stages, memory, conduct) is unchanged, and every
+# stage still costs at least one real day.
+DIFFICULTY = {
+    "easy":   {"label": "Easy - she warms up quickly", "days": 0.5},
+    "normal": {"label": "Normal - her own pace",       "days": 1.0},
+    "hard":   {"label": "Hard - slow to trust",        "days": 1.75},
+    "ice":    {"label": "Ice queen - barely thaws",    "days": 3.0},
+}
+DIFFICULTY_DEFAULT = "normal"
+
+
+def difficulty_for(girl):
+    """Her console-set difficulty, or the default if she has none or the roster is
+    unreachable: pacing must never be the thing that breaks a reply."""
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT difficulty FROM personas WHERE girl=%s", (girl,))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return DIFFICULTY_DEFAULT
+    d = (row or {}).get("difficulty") or DIFFICULTY_DEFAULT
+    return d if d in DIFFICULTY else DIFFICULTY_DEFAULT
+
+
 # How each milestone reads on the shared 0-100 trust meter (for display only).
 STAGE_META = {
     1: ("Stranger",  "~10"),
@@ -599,6 +631,7 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'normal';
             """)
             _seed_roster(cur, backfill=legacy_rows)
         conn.commit()
@@ -865,13 +898,13 @@ def remaining_for(user):
 
 def roster(include_retired=False):
     """The house, in door order. Rows are dicts with girl, name, door_title,
-    blurb, avatar_url, min_tier, sort_order, active."""
+    blurb, avatar_url, min_tier, sort_order, active, difficulty."""
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT girl, name, door_title, blurb, avatar_url,
-                       min_tier, sort_order, active
+                       min_tier, sort_order, active, difficulty
                 FROM personas
                 WHERE active OR %s
                 ORDER BY sort_order, girl
@@ -966,7 +999,8 @@ def rel_days_in_stage(rel):
 
 def stage_days_needed(girl, cur):
     cfg = engine_for(girl)
-    return cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
+    base = cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
+    return max(1, int(round(base * DIFFICULTY[difficulty_for(girl)]["days"])))
 
 
 def kept_needed(girl, target):
@@ -1717,17 +1751,20 @@ async function loadOverview(){try{const s=await api('/admin/overview');const st=
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
  $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
 let PERS=[],CURP=null;const TIERS=['freshman','sophomore','junior','senior'];
+const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:'Hard - slow to trust',ice:'Ice queen - barely thaws'};
 function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
 async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'freshman',sort_order:100,active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'freshman',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
 function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
  <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
  <label>Name <input id="pName" value="${esc(p.name)}"></label>
  <label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:200px"></label>
  <label>Unlocks at <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
- <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label></div>
+ <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label>
+ <label>Difficulty <select id="pDiff">${Object.keys(DIFFS).map(d=>`<option value="${d}"${d===(p.difficulty||'normal')?' selected':''}>${DIFFS[d]}</option>`).join('')}</select></label></div>
+ <div class="mut">Difficulty only stretches the real days each trust stage takes - she still has to be treated right, and remembered, to open up.</div>
  <div class="row2"><label style="flex:1">Avatar URL <input id="pAvatar" value="${esc(p.avatar_url)}" style="width:100%"></label></div>
  <label class="mut">Door blurb</label><textarea id="pBlurb" style="min-height:60px">${esc(p.blurb)}</textarea>
  <label class="mut">Character doc (her system block)</label>
@@ -1738,7 +1775,7 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
 async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
  try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
-  blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,
+  blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
   persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
@@ -1896,6 +1933,7 @@ class AdminGirlIn(BaseModel):
     avatar_url: str = ""
     min_tier: str = "freshman"
     sort_order: int = 100
+    difficulty: str = DIFFICULTY_DEFAULT
     active: bool = True
 
 
@@ -2677,21 +2715,27 @@ def admin_console_girl(body: AdminGirlIn):
         raise HTTPException(status_code=400, detail="name and persona are required")
     if body.min_tier not in TIER_ORDER:
         raise HTTPException(status_code=400, detail="min_tier must be one of " + ", ".join(TIER_ORDER))
+    if body.difficulty not in DIFFICULTY:
+        raise HTTPException(status_code=400,
+                            detail="difficulty must be one of " + ", ".join(DIFFICULTY))
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
-                                      avatar_url, min_tier, sort_order, active)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                      avatar_url, min_tier, sort_order, active,
+                                      difficulty)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
                     avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
-                    sort_order=EXCLUDED.sort_order, active=EXCLUDED.active
+                    sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
+                    difficulty=EXCLUDED.difficulty
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
                   body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
-                  max(0, min(9999, int(body.sort_order))), bool(body.active)))
+                  max(0, min(9999, int(body.sort_order))), bool(body.active),
+                  body.difficulty))
             conn.commit()
     finally:
         conn.close()
