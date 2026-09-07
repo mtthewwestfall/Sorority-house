@@ -421,6 +421,31 @@ GIRLS_ENGINE = {
     },
 }
 
+# A sister added from the console has no hand-written block above, so she runs on
+# these dials instead: the same eight-stage ladder and real-time floors, but graded
+# from her own character document rather than another girl's canonical facts. Give
+# her a block in GIRLS_ENGINE when you want her own pacing and her own key points.
+GENERIC_ENGINE = {
+    "stage_days": [1, 2, 3, 5, 6, 8, 10],
+    "stage_kept": [0, 1, 2, 2, 3, 4, 5],
+    "conduct_note": "Judge conduct by the standards her own character document sets - "
+                    "what she says she values, what she guards, what she cannot stand. "
+                    "WARM is earned by patience, attention and remembering her; COLD is "
+                    "pushing pace, performing, or treating her as a prize.",
+    "pace_note": "Trust is earned across real days, not in one good night. Consistency "
+                 "beats intensity, and showing up again the same person is the strongest "
+                 "move. Follow the pacing her own document implies.",
+    "pinned": [],
+    "key_points": [],
+}
+
+
+def engine_for(girl):
+    """Her trust x time dials. A sister added from the console has no hand-written
+    block, so she gets the generic one - never another girl's facts and pacing."""
+    return GIRLS_ENGINE.get(girl, GENERIC_ENGINE)
+
+
 # How each milestone reads on the shared 0-100 trust meter (for display only).
 STAGE_META = {
     1: ("Stranger",  "~10"),
@@ -557,35 +582,50 @@ def init_db():
                     resolved_at TIMESTAMPTZ
                 );
                 CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
-                -- the roster lives with the persona doc: which tier opens her door,
-                -- what the door shows, and whether she is in the house at all.
+            """)
+            # The roster lives with the persona doc: which tier opens her door, what
+            # the door shows, and whether she is in the house at all. Rows written
+            # before these columns existed get their door filled in once, here - after
+            # that the console owns them and startup never touches them again.
+            cur.execute("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'personas' AND column_name = 'min_tier'
+            """)
+            legacy_rows = cur.fetchone() is None
+            cur.execute("""
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS min_tier TEXT NOT NULL DEFAULT 'freshman';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 100;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
             """)
-            _seed_roster(cur)
+            _seed_roster(cur, backfill=legacy_rows)
         conn.commit()
     finally:
         conn.close()
 
 
-def _seed_roster(cur):
-    """Put the seven original sisters in the table so the roster has a starting
-    point. A girl whose door has already been configured (avatar set) is left
-    alone - the seed is a floor, not the truth, and the console owns her after."""
+def _seed_roster(cur, backfill=False):
+    """Put the seven original sisters in the table so the roster has a starting point.
+    A row that already exists is never rewritten: the seed is a floor, not the truth,
+    and the console owns her after. `backfill` is the one-time upgrade of rows written
+    before the roster columns existed, and runs only on the migration that adds them -
+    so a door the owner deliberately saved blank stays blank."""
     for girl, min_tier, order, avatar, blurb in ROSTER_SEED:
         name, title, fallback = DEFAULT_PERSONAS[girl]
         cur.execute("""
             INSERT INTO personas (girl, name, door_title, persona,
                                   min_tier, sort_order, avatar_url, blurb)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (girl) DO UPDATE
-            SET min_tier = EXCLUDED.min_tier, sort_order = EXCLUDED.sort_order,
-                avatar_url = EXCLUDED.avatar_url, blurb = EXCLUDED.blurb
-            WHERE personas.avatar_url = ''
+            ON CONFLICT (girl) DO NOTHING
         """, (girl, name, title, fallback, min_tier, order, avatar, blurb))
+        if backfill:
+            cur.execute("""
+                UPDATE personas SET min_tier = %s, sort_order = %s,
+                                    avatar_url = %s, blurb = %s
+                WHERE girl = %s
+            """, (min_tier, order, avatar, blurb, girl))
 
 
 def _check_admin(secret: str, strict: bool = False):
@@ -925,15 +965,16 @@ def rel_days_in_stage(rel):
 
 
 def stage_days_needed(girl, cur):
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    cfg = engine_for(girl)
     return cfg["stage_days"][min(len(cfg["stage_days"]) - 1, cur - 1)]
 
 
 def kept_needed(girl, target):
     """Key points the user must have demonstrably REMEMBERED (pinned_kept) before
     this girl opens to stage M(target). stage_kept[i] applies to reaching M(i+2);
-    each girl's ladder reflects her own backstory."""
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    each girl's ladder reflects her own backstory. A sister with no canonical key
+    points cannot be asked to have remembered them, so only the time floor applies."""
+    cfg = engine_for(girl)
     ladder = cfg["stage_kept"]
     idx = max(0, min(len(ladder) - 1, target - 2))
     return min(ladder[idx], len(cfg["key_points"]))
@@ -1026,17 +1067,23 @@ def _summarize(user_id, girl, rel, recent_msgs):
     and re-grades the milestone (M1-M8) under the per-girl TIME floor, and bookkeeps
     which PINNED facts she has revealed and which KEY POINTS the user has demonstrated
     remembering. Called only at milestones / every N messages, never every turn."""
-    cfg = GIRLS_ENGINE.get(girl, GIRLS_ENGINE["dakota"])
+    cfg = engine_for(girl)
     persona_text, name = get_persona(girl)
     told = rel.get("pinned_told") or []
     kept = rel.get("pinned_kept") or []
 
+    canonical = bool(cfg["pinned"] or cfg["key_points"])
     grading = (
         "You also bookkeep two lists for this girl (canonical below). "
         "PINNED = personal facts she reveals about herself only at natural moments. "
         "KEY POINTS = the handful of details the user is expected to remember about her.\n"
-        "Pinned facts: " + " | ".join(cfg["pinned"]) + "\n"
-        "Key points: " + " | ".join(cfg["key_points"]) + "\n"
+        + ("Pinned facts: " + " | ".join(cfg["pinned"]) + "\n"
+           "Key points: " + " | ".join(cfg["key_points"]) + "\n"
+           if canonical else
+           "This girl has no canonical lists yet: take both from HER CHARACTER DOC "
+           "below - the personal facts it says she guards, and the details about her "
+           "that matter. Use a short phrase for each and reuse the exact same "
+           "phrasing on later turns.\n") +
         "Already revealed to the user: " + ("; ".join(told) if told else "(none)") + "\n"
         "Key points already shown remembered: " + ("; ".join(kept) if kept else "(none)") + "\n"
         "In the NEW messages: if she revealed a pinned fact for the first time, add its "
@@ -1045,6 +1092,8 @@ def _summarize(user_id, girl, rel, recent_msgs):
         "new_kept. Copy the canonical phrase from the lists above verbatim - never "
         "paraphrase. Never add items already listed above. Empty arrays when nothing new."
     )
+    if not canonical:
+        grading += "\n\nHER CHARACTER DOC:\n" + persona_text[:4000]
     context = [
         {"role": "system", "content": (
             "You maintain a confidential per-relationship memory file for a companion "
