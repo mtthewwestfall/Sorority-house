@@ -1413,9 +1413,12 @@ def send_daily_report():
         try:
             data = assistant_report_data(1)
             text = assistant_report_text(data)
+            # date-keyed idempotency: if the sent-marker write below fails after
+            # Resend accepted the mail, a lease takeover re-sends as a no-op
             r = requests.post(
                 "https://api.resend.com/emails",
-                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                         "Idempotency-Key": f"daily-report/{today}"},
                 json={"from": MAIL_FROM, "to": [REPORT_EMAIL_TO],
                       "subject": f"{ASSISTANT_NAME}'s daily report - {today}",
                       "text": text},
