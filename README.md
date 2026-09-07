@@ -41,6 +41,7 @@ Two model roles, deliberately unequal in speed, so replies land instantly withou
 - **Tail revision** (`TAIL_REVISION`, on by default): typed characters are immutable, the rest is not. If the brain lands mid-reply and moves the stage, the untyped remainder is dropped and regenerated from the new memory, continuing the sentence she was on. The user never sees a rewrite - only the part she hadn't typed yet changes.
 - **What was seen is what is remembered:** the transcript logs the text that actually reached the screen, so a dropped connection cannot leave her remembering a paragraph the user never read.
 - `POST /chat` still returns whole replies for any client that doesn't stream, and the web frontend falls back to it automatically.
+- **Each role picks its own model.** The mouth, the brain and the auditor are configured separately (`MOUTH_*`, `BRAIN_*`, `AUDIT_*`), and any OpenAI-compatible endpoint works: an open-weights voice you serve yourself (vLLM / Ollama / llama.cpp running Mistral or Llama), Mistral La Plateforme, DeepSeek, Together, Groq. A role with no endpoint set stays on Gemini (`GEMINI_API_KEY`), so nothing breaks while you move one role at a time. `GET /health` reports what each role is running on.
 
 ### 5. Admin Console
 Open `https://<your-app>/admin` and enter `ADMIN_SECRET`. From there you can:
@@ -61,7 +62,12 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | `STRIPE_WEBHOOK_SECRET` | Key to verify payment events | Stripe Dashboard |
 | `IMAGE_API_KEY` | Key for autonomous photo generation | Image Provider API |
 | `SHOPIFY_API_KEY` | Integration for merch store | Shopify Admin |
-| `CHAT_CPS` | Her typing speed on `/chat/stream`, characters per second (default `24`) | You choose it |
+| `GEMINI_API_KEY` / `CHAT_MODEL` | Gemini fallback for any role without its own endpoint (default model `gemini-3.1-flash-lite`) | Google AI Studio |
+| `MOUTH_BASE_URL` / `MOUTH_MODEL` / `MOUTH_API_KEY` | The voice that types. e.g. `https://api.mistral.ai/v1` + `mistral-small-latest`, or your own vLLM box | Mistral / your server |
+| `BRAIN_BASE_URL` / `BRAIN_MODEL` / `BRAIN_API_KEY` | The memory digest a turn behind. e.g. `https://api.deepseek.com/v1` + `deepseek-chat` | DeepSeek |
+| `AUDIT_BASE_URL` / `AUDIT_MODEL` / `AUDIT_API_KEY` | Optional endpoint for the paid audit (e.g. `deepseek-reasoner`); otherwise Gemini with a thinking budget | You choose it |
+| `MODEL_TIMEOUT_S` | Per-call timeout for every provider (default `120`) | You choose it |
+| `CHAT_CPS` | Her typing speed on `/chat/stream`, characters per second (default `14`) | You choose it |
 | `CHAT_LEAD_CHARS` | How far generation may run ahead of the screen (default `240`) | You choose it |
 | `TAIL_REVISION` | `true` (default) lets a mid-reply brain rewrite only the untyped tail | You choose it |
 
