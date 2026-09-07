@@ -1338,15 +1338,42 @@ def _sse_json(r):
 
 # ---------------------------------------------------------------------------
 # OPENAI-COMPATIBLE — DeepSeek, Mistral, or your own vLLM/Ollama/llama.cpp box.
-# Every one of them speaks POST {base_url}/chat/completions with the same
-# system/user/assistant message list the prompt builders already produce, so
-# the layered messages go through untouched.
+# Every one of them speaks POST {base_url}/chat/completions; the layered list
+# the prompt builders produce is reshaped for strict chat templates first.
 # ---------------------------------------------------------------------------
+def _openai_messages(messages):
+    """Shape the layered list for strict chat templates (vLLM, llama.cpp, Mistral):
+    one leading system message, then strictly alternating user/assistant. Leading
+    system blocks are joined; a system instruction that arrives mid-conversation
+    (the CONTINUATION note) is delivered as the closing user turn instead."""
+    system_parts, turns = [], []
+    for m in messages:
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
+        role = m.get("role")
+        if role == "system":
+            if turns:
+                role, text = "user", "[Instruction]\n" + text
+            else:
+                system_parts.append(text)
+                continue
+        role = "assistant" if role == "assistant" else "user"
+        if turns and turns[-1]["role"] == role:
+            turns[-1]["content"] += "\n\n" + text
+        else:
+            turns.append({"role": role, "content": text})
+    if not turns or turns[0]["role"] != "user":
+        turns.insert(0, {"role": "user", "content": "Hello?"})
+    out = [{"role": "system", "content": "\n\n".join(system_parts)}] if system_parts else []
+    return out + turns
+
+
 def _openai_request(cfg, messages, stream, max_tokens, temperature):
     headers = {"Content-Type": "application/json"}
     if cfg["api_key"]:
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
-    payload = {"model": cfg["model"], "messages": messages, "stream": stream,
+    payload = {"model": cfg["model"], "messages": _openai_messages(messages), "stream": stream,
                "max_tokens": max_tokens, "temperature": temperature}
     return requests.post(f"{cfg['base_url']}/chat/completions", json=payload,
                          headers=headers, stream=stream, timeout=MODEL_TIMEOUT_S)
