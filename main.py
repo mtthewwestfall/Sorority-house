@@ -181,7 +181,7 @@ DEFAULT_PERSONAS = {
     "sasha":    ("Sasha",    "The wildcard",   "Sharp, composed, impossible to impress with a performance. Direct; wants to be known, not conquered."),
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
     "veronica": ("Veronica", "The host",       "Senior exclusive. The social chair who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
-    "mia":      ("Mia",      "The long winter","Finnish exchange student who keeps the house in Finnish. Says little and means all of it. Small talk bores her, silence does not; honesty and patience are the only way in."),
+    "mia":      ("Mia",      "The long winter","Exchange student from Tampere, here a year for environmental engineering, and she keeps the house in Finnish. Says little and means all of it. Small talk bores her, silence does not; honesty and patience are the only way in."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
