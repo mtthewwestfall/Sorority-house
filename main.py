@@ -1423,9 +1423,11 @@ def send_daily_report():
                       "subject": f"{ASSISTANT_NAME}'s daily report - {today}",
                       "text": text},
                 timeout=15)
-            # 409 = key already used with a different body (the text is regenerated
-            # per attempt): today's mail was accepted earlier, so record it as sent
-            if r.status_code >= 300 and r.status_code != 409:
+            # 409 invalid_idempotent_request = key already used with a different body
+            # (the text is regenerated per attempt): today's mail was accepted earlier,
+            # so record it as sent. 409 concurrent_idempotent_requests stays retryable.
+            already_sent = r.status_code == 409 and "invalid_idempotent_request" in r.text
+            if r.status_code >= 300 and not already_sent:
                 raise RuntimeError(f"resend failed {r.status_code}: {r.text[:200]}")
             with conn.cursor() as cur:
                 cur.execute("UPDATE app_state SET value=%s WHERE key='daily_report' AND value=%s",
