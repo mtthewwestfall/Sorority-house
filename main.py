@@ -2253,10 +2253,10 @@ def chat(body: ChatIn, user=Depends(current_user)):
     try:
         msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
         reply = llm(MOUTH, msgs)   # no thinking budget for chat
+        persist_turn(user["user_id"], girl, rel, body.message, reply)
     except Exception:
         refund_message(user["user_id"])
         raise
-    persist_turn(user["user_id"], girl, rel, body.message, reply)
     kick_brain(user["user_id"], girl, rel)
 
     return {"ok": True, "reply": reply, "remaining": remaining,
