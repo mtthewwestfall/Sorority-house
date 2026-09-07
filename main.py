@@ -610,6 +610,8 @@ def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE INDEX IF NOT EXISTS idx_assistant_notes_status ON assistant_notes (status, created_at);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_assistant_notes_lead
+                    ON assistant_notes (session_id) WHERE kind = 'lead';
                 CREATE TABLE IF NOT EXISTS app_state (
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -1388,17 +1390,22 @@ def assistant_report_text(data):
 def send_daily_report():
     """Email today's report to REPORT_EMAIL_TO once per UTC day (idempotent via app_state)."""
     today = datetime.now(timezone.utc).date().isoformat()
+    now = int(time.time())
+    lease = f"{today}|pending|{now}"
     conn = db()
     try:
-        # atomically claim today's slot so the scheduler (per worker) and the
-        # admin "send now" button can never both email the same day's report
+        # atomically lease today's slot so the scheduler (per worker) and the admin
+        # "send now" button never both email the same day. A pending lease older
+        # than 15 min is treated as a crashed sender and may be taken over.
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO app_state (key, value) VALUES ('daily_report_sent', %s)
+                INSERT INTO app_state (key, value) VALUES ('daily_report', %s)
                 ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value
-                WHERE app_state.value <> EXCLUDED.value
+                WHERE split_part(app_state.value, '|', 1) <> %s
+                   OR (split_part(app_state.value, '|', 2) = 'pending'
+                       AND split_part(app_state.value, '|', 3)::bigint < %s)
                 RETURNING key
-            """, (today,))
+            """, (lease, today, now - 900))
             claimed = cur.fetchone() is not None
         conn.commit()
         if not claimed:
@@ -1415,11 +1422,15 @@ def send_daily_report():
                 timeout=15)
             if r.status_code >= 300:
                 raise RuntimeError(f"resend failed {r.status_code}: {r.text[:200]}")
+            with conn.cursor() as cur:
+                cur.execute("UPDATE app_state SET value=%s WHERE key='daily_report' AND value=%s",
+                            (f"{today}|sent|{int(time.time())}", lease))
+            conn.commit()
             return True
         except Exception as e:
-            # release the slot so the next scheduler tick / manual send retries
+            # release the lease so the next scheduler tick / manual send retries
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM app_state WHERE key='daily_report_sent' AND value=%s", (today,))
+                cur.execute("DELETE FROM app_state WHERE key='daily_report' AND value=%s", (lease,))
             conn.commit()
             print(f"[report] {e}", flush=True)
             if isinstance(e, HTTPException):
@@ -2555,11 +2566,36 @@ def assistant_rate_limit(request: Request):
 
 # Session ids are server-minted and HMAC-signed, so a visitor can only resume a
 # conversation whose id we handed to their browser - never guess or forge one.
-_ASSISTANT_SESSION_KEY = (ADMIN_SECRET or secrets.token_hex(32)).encode()
+# The signing key is its own secret: ASSISTANT_SESSION_SECRET if set, otherwise
+# one generated once and kept in app_state so every worker/restart agrees.
+_asst_key_lock = threading.Lock()
+_asst_key = os.environ.get("ASSISTANT_SESSION_SECRET", "").encode()
+
+
+def _assistant_session_key():
+    global _asst_key
+    if _asst_key:
+        return _asst_key
+    with _asst_key_lock:
+        if _asst_key:
+            return _asst_key
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO app_state (key, value) VALUES ('assistant_session_key', %s)
+                    ON CONFLICT (key) DO NOTHING
+                """, (secrets.token_hex(32),))
+                cur.execute("SELECT value FROM app_state WHERE key='assistant_session_key'")
+                _asst_key = cur.fetchone()["value"].encode()
+            conn.commit()
+        finally:
+            conn.close()
+        return _asst_key
 
 
 def _assistant_session_sign(token):
-    return hmac.new(_ASSISTANT_SESSION_KEY, token.encode(), hashlib.sha256).hexdigest()[:24]
+    return hmac.new(_assistant_session_key(), token.encode(), hashlib.sha256).hexdigest()[:24]
 
 
 def _assistant_session_new():
@@ -2608,18 +2644,15 @@ def assistant_chat(body: AssistantChatIn):
             cur.execute("INSERT INTO assistant_chats (session_id, sender, message) VALUES (%s,'assistant',%s)",
                         (sid, reply))
             for kind, detail in notes:
-                if kind == "lead":  # one lead per conversation; later ones update it
+                if kind == "lead":  # one lead per conversation (uq_assistant_notes_lead); refresh it
                     cur.execute("""
-                        UPDATE assistant_notes SET detail=%s
-                        WHERE id = (SELECT id FROM assistant_notes
-                                    WHERE session_id=%s AND kind='lead'
-                                    ORDER BY id DESC LIMIT 1)
-                        RETURNING id
-                    """, (detail, sid))
-                    if cur.fetchone() is not None:
-                        continue
-                cur.execute("INSERT INTO assistant_notes (session_id, kind, detail) VALUES (%s,%s,%s)",
-                            (sid, kind, detail))
+                        INSERT INTO assistant_notes (session_id, kind, detail) VALUES (%s,'lead',%s)
+                        ON CONFLICT (session_id) WHERE kind = 'lead'
+                        DO UPDATE SET detail=EXCLUDED.detail, status='open', created_at=now()
+                    """, (sid, detail))
+                else:
+                    cur.execute("INSERT INTO assistant_notes (session_id, kind, detail) VALUES (%s,%s,%s)",
+                                (sid, kind, detail))
         conn.commit()
     finally:
         conn.close()

@@ -65,6 +65,7 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | `DEEPSEEK_API_KEY` | Optional — runs Ava (sales assistant) on DeepSeek instead of Gemini | DeepSeek Platform |
 | `REPORT_EMAIL_TO` | Optional — your email for Ava's daily report (needs `RESEND_API_KEY`) | You choose it |
 | `REPORT_HOUR_UTC` | Optional — hour (0-23 UTC) the daily report goes out; default 13 | You choose it |
+| `ASSISTANT_SESSION_SECRET` | Optional — signs Ava's visitor session ids; auto-generated and stored in the database if unset | Any long random string |
 
 ---
 
