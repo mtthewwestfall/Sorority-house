@@ -1010,6 +1010,13 @@ _NEG = {"not", "never", "no", "none", "cannot", "cant", "dont", "doesnt", "didnt
         "isnt", "wasnt", "arent", "wont", "nothing", "nobody", "without"}
 
 
+def _content(s):
+    """Words that carry the fact, with polarity words removed: they are what makes
+    two phrases opposites, so counting them as content would stop a correction from
+    ever matching what it corrects ('cannot drive' against 'can drive')."""
+    return {w.replace("'", "") for w in _words(s)} - _NEG
+
+
 def _negated(s):
     """Whether a phrase asserts the negative. Read from the raw text, because _words
     drops 'not' and 'never' as noise - which they are for matching, and are not for
@@ -1024,7 +1031,7 @@ def _phrase_match(a, b):
     a correction and must replace what it corrects), or None for two facts. Overlap
     is measured against the shorter phrase, so 'loves hiking' absorbs 'loves hiking
     outdoors' while 'loves painting' and 'loves hiking' stay two facts."""
-    aw, bw = _words(a), _words(b)
+    aw, bw = _content(a), _content(b)
     if not aw or not bw:
         return None
     if a.strip().casefold() != b.strip().casefold() and \
