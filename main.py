@@ -1006,6 +1006,20 @@ def _canonical(item, canon):
     return best if score >= 0.5 else None
 
 
+def _same_phrase(a, b):
+    """Two free-text memory phrases describing the same thing. Stricter than
+    _canonical on purpose: there is no canonical list to snap onto, so overlap is
+    measured against BOTH phrases - 'loves painting' and 'loves hiking' share a
+    word but are two facts, while a reworded version of the same fact is one."""
+    a, b = a.strip(), b.strip()
+    if a.casefold() == b.casefold():
+        return True
+    aw, bw = _words(a), _words(b)
+    if not aw or not bw:
+        return False
+    return len(aw & bw) / len(aw | bw) >= 0.7
+
+
 def gate_milestone(girl, rel, proposed, conduct="steady"):
     """Going deeper is earned on THREE axes at once, never by one alone:
       TIME    - enough real days lived at the CURRENT stage (per-girl stage_days);
@@ -1148,8 +1162,12 @@ def _summarize(user_id, girl, rel, recent_msgs):
         # onto whichever one she has already recorded, so her memory still builds.
         out, seen = [], set()
         for it in list(existing) + list(items):
-            it = _canonical(it, canon) if canon else (
-                _canonical(it, out) or (it.strip() if _words(it) else None))
+            if canon:
+                it = _canonical(it, canon)
+            else:
+                it = it.strip()
+                if not _words(it) or any(_same_phrase(it, o) for o in out):
+                    continue
             if it is not None and it.casefold() not in seen and len(out) < cap:
                 out.append(it)
                 seen.add(it.casefold())
