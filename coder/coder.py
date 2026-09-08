@@ -222,6 +222,14 @@ def t_edit_file(path: str, old: str, new: str) -> str:
     return f"edited {path}"
 
 
+def t_delete_file(path: str) -> str:
+    p = _safe(path)
+    if not p.is_file():
+        return f"ERROR: {path} is not a file"
+    p.unlink()
+    return f"deleted {path}"
+
+
 def t_run(command: str, timeout: int = 180) -> str:
     why = command_allowed(command)
     if why:
@@ -259,6 +267,8 @@ TOOLS = {
                   ["path", "old", "new"]),
     "write_file": (t_write_file, "Create a new file or fully overwrite an existing one.",
                    {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
+    "delete_file": (t_delete_file, "Delete a file in the repo (e.g. a scratch script you created).",
+                    {"path": {"type": "string"}}, ["path"]),
     "run": (t_run, "Run a shell command in the repo root (tests, py_compile, curl, git diff...). "
             "Commits/pushes are done for you later; don't run them.",
             {"command": {"type": "string"}, "timeout": {"type": "integer"}}, ["command"]),
@@ -509,7 +519,7 @@ def main() -> None:
             for call in msg["tool_calls"]:
                 name, args = call["function"]["name"], json.loads(call["function"]["arguments"] or "{}")
                 fn = TOOLS.get(name, (None,))[0]
-                if name in ("edit_file", "write_file", "finish") or fn is None:
+                if name in ("edit_file", "write_file", "delete_file", "finish") or fn is None:
                     result = "ERROR: planning only; no edits yet"
                 else:
                     result = fn(**args)

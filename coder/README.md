@@ -73,3 +73,17 @@ from there: it finds that repo's root, reads its `AGENTS.md` if there is one (ot
 without a briefing and falls back to `python -m py_compile` on changed `.py` files as the check),
 and opens PRs against that repo with `gh`. Write a short `AGENTS.md` there with a
 ```` ```checks ```` block and it will be as careful as it is here.
+
+Starter briefings live in `coder/templates/`. For a Telegram bot:
+
+```bash
+mkdir mybot && cd mybot && git init
+cp /path/to/Sorority-house/coder/coder.py .
+cp /path/to/Sorority-house/coder/templates/telegram-bot.AGENTS.md AGENTS.md   # edit "What this bot does"
+git add -A && git commit -m "scaffold"
+export TELEGRAM_BOT_TOKEN=...   # from @BotFather; never goes in the repo
+python coder.py --no-pr "create the bot described in AGENTS.md, plus requirements.txt, .env.example, .gitignore and check_bot.py"
+```
+
+That exact run, unattended (`-y`), produced a working bot (/start, /roll, echo) with the token
+read from the environment and verified via `getMe`, in 28 tool calls / ~176k input tokens.
