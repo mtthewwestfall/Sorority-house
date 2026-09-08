@@ -82,8 +82,18 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 - `main.py`: The entire backend logic, API endpoints, and trust calculators.
 - `requirements.txt`: List of Python dependencies for Railway to install.
 - `README.md`: This documentation.
+- `web/index.html`: The whole front end — doors, chat, membership, merch.
+- `web/manifest.webmanifest`, `web/sw.js`: What makes the site installable (see below).
+- `web/assets/`: Roster art and the app icons.
 
 ---
+
+## 📱 The app
+The site is installable — there is no separate app to build and no store involved. Chrome and Edge offer it, and on iPhone the Share sheet's "Add to Home Screen" does it; either way the house opens full screen from the home screen with its own icon, signed in as the same account. A one-time bar invites the install and "Install the app" in the footer brings it back if it was dismissed; a copy that is already installed is never asked.
+
+`web/sw.js` caches **only the shipped shell** (the page and the icons) so an installed copy still opens with no signal, and never the API — a girl, a message or a roster change is always live, never a stale cached copy. The page itself is fetched from the network first, so a deploy lands on the next open. Change anything in the shell list and bump `SHELL` in `web/sw.js` (`house-shell-v1` → `-v2`) or installed copies keep serving the old files.
+
+Requirements: the front end must be served over **HTTPS** (a service worker will not register otherwise, `localhost` excepted), and `manifest.webmanifest`, `sw.js` and `index.html` must sit on the same origin, which they do when `web/` is deployed as-is.
 
 ## 🚀 Deployment Steps
 1. Push `main.py` and `requirements.txt` to GitHub.
