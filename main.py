@@ -96,6 +96,10 @@ API CONTRACT implemented here (point your chat app at these):
                                                             scales her real-day trust floors
   POST /admin/console/girl/{girl}/active ?active=          -> take her off the doors / put her
                                                             back. Her chats are kept either way
+  GET  /admin/console/doors                               -> {doors_locked,door_set,unlock_stage}
+  POST /admin/console/doors {doors_locked,door_set,unlock_stage} -> how the next set of doors
+                                                            is earned (stage with a girl of the
+                                                            set before); locked=false opens all
   GET  /admin/console/export                              -> the roster as JSON (backup)
   (the /admin/console/* endpoints take ADMIN_SECRET as the X-Admin-Secret header)
   GET  /health
@@ -306,11 +310,13 @@ TIERS = {
 # (see open_doors). Everyone but Veronica is available on every tier.
 TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
 
-# Doors open in pairs, in roster order. The first pair is open from day one; the
-# next pair unlocks once the user reaches this milestone with EITHER girl of the
-# pair directly before it.
+# Doors open in sets, in roster order. The first set is open from day one; the
+# next set unlocks once the user reaches the milestone with ANY girl of the set
+# directly before it. These are the defaults; the admin console (Roster tab) owns
+# the live values in the house_rules table.
 DOOR_PAIR = 2
 UNLOCK_MILESTONE = 4
+DOOR_RULE_DEFAULTS = {"doors_locked": True, "door_set": DOOR_PAIR, "unlock_stage": UNLOCK_MILESTONE}
 
 def tier_rank(tier):
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
@@ -759,6 +765,11 @@ def init_db():
                     resolved_at TIMESTAMPTZ
                 );
                 CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
+                -- house-wide knobs set from the admin console (see door_rules)
+                CREATE TABLE IF NOT EXISTS house_rules (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -1116,31 +1127,70 @@ def milestones_for(user_id):
         conn.close()
 
 
-def door_pairs(house):
-    """The active roster, in door order, chunked into the pairs that unlock together."""
+def door_rules():
+    """How the doors unlock: doors_locked (False = every door is open, tier
+    permitting), door_set (girls per set) and unlock_stage (milestone with a girl
+    of the previous set that opens the next). Admin-set, defaults from the code."""
+    rules = dict(DOOR_RULE_DEFAULTS)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM house_rules WHERE key IN ('doors_locked','door_set','unlock_stage')")
+            for r in cur.fetchall():
+                if r["key"] == "doors_locked":
+                    rules["doors_locked"] = r["value"] == "1"
+                elif r["key"] == "door_set":
+                    rules["door_set"] = max(1, min(12, int(r["value"])))
+                elif r["key"] == "unlock_stage":
+                    rules["unlock_stage"] = max(1, min(8, int(r["value"])))
+    finally:
+        conn.close()
+    return rules
+
+
+def save_door_rules(doors_locked, door_set, unlock_stage):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            for key, value in (("doors_locked", "1" if doors_locked else "0"),
+                               ("door_set", str(door_set)), ("unlock_stage", str(unlock_stage))):
+                cur.execute("""
+                    INSERT INTO house_rules (key, value) VALUES (%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """, (key, value))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def door_pairs(house, size=DOOR_PAIR):
+    """The active roster, in door order, chunked into the sets that unlock together."""
     girls = [r for r in house if r["active"]]
-    return [girls[i:i + DOOR_PAIR] for i in range(0, len(girls), DOOR_PAIR)]
+    return [girls[i:i + size] for i in range(0, len(girls), size)]
 
 
-def open_doors(user_id, tier, house=None, milestones=None):
+def open_doors(user_id, tier, house=None, milestones=None, rules=None):
     """girl -> door state for this user. A door is open when it has been EARNED
-    (first pair free; each later pair once the user hit UNLOCK_MILESTONE with one
-    of the pair before it) AND the user's tier covers her min_tier. A shut door
-    carries the reason so the frontend can say what would open it."""
+    (first set free; each later set once the user hit the unlock stage with one
+    of the set before it - unless the admin turned door locking off) AND the
+    user's tier covers her min_tier. A shut door carries the reason so the
+    frontend can say what would open it."""
     house = house if house is not None else roster()
+    rules = rules if rules is not None else door_rules()
     reached = milestones if milestones is not None else milestones_for(user_id)
     rank = tier_rank(tier)
+    stage = rules["unlock_stage"]
     doors, earned, previous = {}, True, []
-    for pair in door_pairs(house):
-        if previous:
-            earned = any(reached.get(g["girl"], 0) >= UNLOCK_MILESTONE for g in previous)
+    for pair in door_pairs(house, rules["door_set"]):
+        if previous and rules["doors_locked"]:
+            earned = any(reached.get(g["girl"], 0) >= stage for g in previous)
         for r in pair:
             paid = tier_rank(r["min_tier"]) <= rank
             if earned and paid:
                 reason = ""
             elif not earned:
                 reason = "Reach stage %d with %s to open this door" % (
-                    UNLOCK_MILESTONE, " or ".join(g["name"] for g in previous))
+                    stage, " or ".join(g["name"] for g in previous))
             else:
                 reason = TIERS.get(r["min_tier"], {}).get("label", r["min_tier"].title()) + " exclusive"
             doors[r["girl"]] = {"open": not reason, "earned": earned, "paid": paid, "reason": reason}
@@ -2089,6 +2139,12 @@ pre{white-space:pre-wrap;margin:0}
 </section>
 
 <section id="per" class="hid">
+<div class="card"><h4 style="margin-top:0">Doors</h4>
+<div class="row2"><label><input id="dLocked" type="checkbox" onchange="$('#dRule').classList.toggle('hid',!this.checked)"> Lock doors past the first set</label>
+<span id="dRule" class="row2" style="margin:0">&middot; sets of <input id="dSet" type="number" min=1 max=12 style="width:64px"> girls, in roster order; the next set opens at stage
+<select id="dStage"></select> with any one girl of the set before it</span>
+<button class="p" onclick="saveDoors()">Save</button></div>
+<div class="mut">Unlocked: every door is open (paid tier still applies). Locked: the first set is open from day one and each later set has to be earned. Live for every player on their next reload.</div></div>
 <div class="card"><div class="plist" id="plist"></div>
 <div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
 <button class="s" onclick="exportRoster()">Download backup</button></div>
@@ -2107,7 +2163,10 @@ function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=ba
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
 const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer'};
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per')loadPersonas()}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}}
+async function loadDoors(){try{const r=await api('/admin/console/doors');$('#dLocked').checked=r.doors_locked;$('#dRule').classList.toggle('hid',!r.doors_locked);$('#dSet').value=r.door_set;
+ $('#dStage').innerHTML=[1,2,3,4,5,6,7,8].map(s=>`<option value="${s}"${s===r.unlock_stage?' selected':''}>M${s}</option>`).join('')}catch(e){toast(e.message,true)}}
+async function saveDoors(){try{await api('/admin/console/doors',{method:'POST',body:JSON.stringify({doors_locked:$('#dLocked').checked,door_set:+$('#dSet').value,unlock_stage:+$('#dStage').value})});toast('Saved - live on the next reload');loadDoors()}catch(e){toast(e.message,true)}}
 async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
 function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');for(const k in TABS)$('#'+k).classList.add('hid')}
 async function loadOverview(){try{const s=await api('/admin/overview');const st=(l,v,sub)=>`<div class="card"><div class="lbl">${l}</div><div class="stat">${v}</div>${sub?`<div class="mut">${sub}</div>`:''}</div>`;
@@ -2307,6 +2366,12 @@ class AdminPersonaIn(BaseModel):
     name: str
     door_title: str = ""
     persona: str
+
+
+class AdminDoorRulesIn(BaseModel):
+    doors_locked: bool = True
+    door_set: int = DOOR_PAIR
+    unlock_stage: int = UNLOCK_MILESTONE
 
 
 class AdminGirlIn(BaseModel):
@@ -3795,6 +3860,23 @@ def admin_console_girl_active(girl: str, active: bool = True):
     if not found:
         raise HTTPException(status_code=404, detail="Unknown girl slug")
     return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/admin/console/doors", dependencies=[Depends(admin_required)])
+def admin_console_doors():
+    return door_rules()
+
+
+@app.post("/admin/console/doors", dependencies=[Depends(admin_required)])
+def admin_console_doors_set(body: AdminDoorRulesIn):
+    """How the next set of doors is earned. Live for every player on their next
+    /state; nobody loses a chat, a shut door just hides her until it's earned."""
+    if not 1 <= body.door_set <= 12:
+        raise HTTPException(status_code=400, detail="door_set must be 1-12")
+    if not 1 <= body.unlock_stage <= 8:
+        raise HTTPException(status_code=400, detail="unlock_stage must be 1-8")
+    save_door_rules(body.doors_locked, body.door_set, body.unlock_stage)
+    return door_rules()
 
 
 @app.get("/admin/console/export", dependencies=[Depends(admin_required)])
