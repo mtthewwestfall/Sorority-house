@@ -745,12 +745,24 @@
     });
     chatInput.addEventListener('paste', (event) => {
       event.preventDefault();
-      const text = (event.clipboardData || window.clipboardData).getData('text');
-      document.execCommand('insertText', false, text.slice(0, CHAT_MAX - chatInput.value.length));
+      document.execCommand('insertText', false, (event.clipboardData || window.clipboardData).getData('text'));
+    });
+    // Enforce the length cap on the insertion itself (room = cap minus what survives the selection),
+    // trimming to whole code points so an emoji is never split.
+    chatInput.addEventListener('beforeinput', (event) => {
+      const data = event.data ?? (event.dataTransfer ? event.dataTransfer.getData('text') : '');
+      if (!data || event.inputType === 'insertCompositionText') return;
+      const sel = window.getSelection();
+      const selected = sel && sel.rangeCount && chatInput.contains(sel.anchorNode) ? sel.toString().length : 0;
+      const room = CHAT_MAX - (chatInput.value.length - selected);
+      if (data.length <= room) return;
+      event.preventDefault();
+      let kept = '';
+      for (const ch of data) { if (kept.length + ch.length > room) break; kept += ch; }
+      if (kept) document.execCommand('insertText', false, kept);
     });
     chatInput.addEventListener('input', () => {
       if (!chatInput.textContent && chatInput.innerHTML) chatInput.innerHTML = '';
-      if (chatInput.value.length > CHAT_MAX) chatInput.value = chatInput.value.slice(0, CHAT_MAX);
     });
     const chatSend = document.getElementById('chat-send');
     const chatRemaining = document.getElementById('chat-remaining');
