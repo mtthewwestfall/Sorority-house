@@ -52,9 +52,14 @@ merging — it opens PRs, it does not merge them.
 Guardrails: it can only touch files inside the repo; shell commands run only if every part of
 the pipeline is on an allowlist (`python`, `pytest`, `pip`, `uvicorn`, `curl`, `rg`, `ls`, read-only
 `git`, ...) and free of hidden-command syntax (backticks, `$(...)`, `eval`, `sh -c`, `sudo`,
-writes outside the repo) — anything else asks you first, or is refused under `-y`. It never
+writes outside the repo) — anything else asks you first, or is refused under `-y`. Inline code
+(`python -c`, `node -e`), `pip install`/`npm install`, `npx` and `curl` always ask. It never
 commits, pushes or opens PRs itself (the harness does, after you confirm), and it stops to ask
-after 60 tool calls. It still runs on your machine with your permissions, so read its output.
+after 60 tool calls.
+
+This is not a sandbox: `python some_script.py` can do anything your user can, and the model
+writes the scripts. Interactive runs show you every command; for unattended `-y` runs, use a
+container or VM with a throwaway checkout and a scoped `gh` token.
 
 ## Teaching it
 

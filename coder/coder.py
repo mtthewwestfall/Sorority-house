@@ -50,6 +50,10 @@ ALLOWED = {"python", "python3", "pytest", "pip", "uvicorn", "node", "npm", "npx"
            "ls", "cat", "head", "tail", "wc", "find", "diff", "sort", "uniq", "echo", "curl",
            "sleep", "true", "env", "printf", "test", "which"}
 GIT_READ_ONLY = {"diff", "status", "log", "show", "blame", "rev-parse", "ls-files", "grep", "branch"}
+# Interpreters run whatever they're given; inline code and package installs always prompt.
+INLINE_CODE = {"python": {"-c"}, "python3": {"-c"}, "node": {"-e", "-p", "--eval", "--print"}}
+INSTALLERS = {"pip": {"install", "download", "uninstall"}, "npm": {"install", "i", "exec", "x", "run", "ci"}}
+NEVER_AUTO = {"npx", "curl"}
 HIDDEN_SYNTAX = re.compile(r"`|\$\(|\beval\b|\bexec\b|\bsh\s+-c|\bbash\s+-c|\bsudo\b|>\s*/")
 RUN_POLICY = {"yes": False}    # set from --yes at startup
 
@@ -85,6 +89,12 @@ def command_allowed(command: str) -> str | None:
                 return f"`git {words[1] if len(words) > 1 else ''}` writes to the repo; the harness handles commits/pushes"
         elif prog not in ALLOWED:
             return f"`{prog}` is not on the allowlist"
+        elif prog in NEVER_AUTO:
+            return f"`{prog}` fetches or runs arbitrary code"
+        elif prog in INLINE_CODE and INLINE_CODE[prog] & set(words[1:]):
+            return f"inline `{prog}` code runs unrestricted; put it in a file under the repo"
+        elif prog in INSTALLERS and INSTALLERS[prog] & set(words[1:]):
+            return f"`{prog}` would install or execute packages"
     return None
 
 # --------------------------------------------------------------------------- output
