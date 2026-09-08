@@ -1083,13 +1083,11 @@
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
 
-    // Pictures: the + button stays hidden until the backend exposes /image.
-    // Every account starts with a few free pictures; packs add credits.
-    fetch(API_BASE_URL + '/image', { method: 'HEAD' })
-      .then((r) => { if (r.status !== 404) chatPhotoBtn.hidden = false; })
-      .catch(() => {});
+    // Pictures: every account starts with a few free pictures; packs add credits.
+    // The + button is always there; /image is checked each time a chat opens.
+    chatPhotoBtn.hidden = false;
     async function loadPictureStatus() {
-      if (chatPhotoBtn.hidden || !isLoggedIn()) return;
+      if (!isLoggedIn()) return;
       const token = getToken();
       try {
         const r = await fetch(API_BASE_URL + '/image', { headers: authHeaders() });
