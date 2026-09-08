@@ -938,7 +938,7 @@
     function growChatInput(event) {
       chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
       if (!(event && event.isComposing)) {
-        chatMirror.style.width = `${chatInput.clientWidth}px`;
+        chatMirror.style.width = `${chatInput.offsetWidth}px`;
         chatMirror.value = chatInput.value;
         const want = Math.min(chatMirror.scrollHeight, 110);
         if (Math.abs(want - chatInput.offsetHeight) > 1) chatInput.style.height = `${want}px`;
