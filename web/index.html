@@ -753,9 +753,8 @@
       const data = /^insert(LineBreak|Paragraph)$/.test(event.inputType) ? '\n'
         : event.data ?? (event.dataTransfer ? event.dataTransfer.getData('text') : '');
       if (!data || event.inputType === 'insertCompositionText') return;
-      const sel = window.getSelection();
-      const selected = sel && sel.rangeCount && chatInput.contains(sel.anchorNode) ? sel.toString().length : 0;
-      const room = CHAT_MAX - (chatInput.value.length - selected);
+      const [selStart, selEnd] = caretOffset();
+      const room = CHAT_MAX - (chatInput.value.length - (selEnd - selStart));
       if (data.length <= room) return;
       event.preventDefault();
       const kept = clipCodePoints(data, room);
@@ -766,18 +765,51 @@
       for (const ch of text) { if (out.length + ch.length > max) break; out += ch; }
       return out;
     }
+    // Walk the editable DOM the way innerText renders it (text, <br> and block edges as "\n"),
+    // so caret offsets line up with chatInput.value. Stops at (container, offset) when given.
+    function walkText(container, offset, visit) {
+      let out = '';
+      let done = false;
+      let pendingBreak = false;
+      const flush = () => { if (pendingBreak && out) out += '\n'; pendingBreak = false; };
+      (function walk(node) {
+        if (done) return;
+        if (node.nodeType === 3) {
+          flush();
+          if (visit) visit(node, out.length);
+          out += node === container ? node.data.slice(0, offset) : node.data;
+          if (node === container) done = true;
+          return;
+        }
+        if (node.nodeName === 'BR') { flush(); out += '\n'; return; }
+        const block = node !== chatInput && /^(DIV|P)$/.test(node.nodeName);
+        if (block) pendingBreak = true;
+        const kids = node.childNodes;
+        const stop = node === container ? offset : kids.length;
+        for (let i = 0; i < stop && i < kids.length; i++) { walk(kids[i]); if (done) return; }
+        if (node === container) { done = true; return; }
+        if (block) pendingBreak = true;
+      })(chatInput);
+      return out;
+    }
     function caretOffset() {
       const s = window.getSelection();
-      if (!s || !s.rangeCount || !chatInput.contains(s.anchorNode)) return [chatInput.value.length, chatInput.value.length];
+      const len = chatInput.value.length;
+      if (!s || !s.rangeCount || !chatInput.contains(s.anchorNode)) return [len, len];
       const r = s.getRangeAt(0);
-      const pre = r.cloneRange(); pre.selectNodeContents(chatInput); pre.setEnd(r.startContainer, r.startOffset);
-      const start = pre.toString().length;
-      return [start, start + r.toString().length];
+      const start = Math.min(len, walkText(r.startContainer, r.startOffset).length);
+      const end = Math.min(len, walkText(r.endContainer, r.endOffset).length);
+      return [start, Math.max(start, end)];
     }
     function setCaret(offset) {
-      const node = chatInput.firstChild;
-      if (!node) return;
-      const r = document.createRange(); r.setStart(node, Math.min(offset, node.length)); r.collapse(true);
+      let target = null;
+      let at = 0;
+      walkText(null, 0, (node, start) => {
+        if (!target && offset <= start + node.data.length) { target = node; at = Math.max(0, offset - start); }
+      });
+      const r = document.createRange();
+      if (target) r.setStart(target, at); else { r.selectNodeContents(chatInput); r.collapse(false); }
+      r.collapse(true);
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     }
     // IME text bypasses beforeinput sizing: snapshot on start, and on commit keep only the
