@@ -750,20 +750,33 @@
     // Enforce the length cap on the insertion itself (room = cap minus what survives the selection),
     // trimming to whole code points so an emoji is never split.
     chatInput.addEventListener('beforeinput', (event) => {
-      const data = event.data ?? (event.dataTransfer ? event.dataTransfer.getData('text') : '');
+      const data = /^insert(LineBreak|Paragraph)$/.test(event.inputType) ? '\n'
+        : event.data ?? (event.dataTransfer ? event.dataTransfer.getData('text') : '');
       if (!data || event.inputType === 'insertCompositionText') return;
       const sel = window.getSelection();
       const selected = sel && sel.rangeCount && chatInput.contains(sel.anchorNode) ? sel.toString().length : 0;
       const room = CHAT_MAX - (chatInput.value.length - selected);
       if (data.length <= room) return;
       event.preventDefault();
-      let kept = '';
-      for (const ch of data) { if (kept.length + ch.length > room) break; kept += ch; }
+      const kept = clipCodePoints(data, room);
       if (kept) document.execCommand('insertText', false, kept);
     });
-    chatInput.addEventListener('input', () => {
+    function clipCodePoints(text, max) {
+      let out = '';
+      for (const ch of text) { if (out.length + ch.length > max) break; out += ch; }
+      return out;
+    }
+    // Fallback for insertions beforeinput can't size (IME commits, etc.).
+    function clampComposer() {
       if (!chatInput.textContent && chatInput.innerHTML) chatInput.innerHTML = '';
-    });
+      const v = chatInput.value;
+      if (v.length <= CHAT_MAX) return;
+      chatInput.value = clipCodePoints(v, CHAT_MAX);
+      const r = document.createRange(); r.selectNodeContents(chatInput); r.collapse(false);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+    chatInput.addEventListener('input', (event) => { if (!event.isComposing) clampComposer(); });
+    chatInput.addEventListener('compositionend', clampComposer);
     const chatSend = document.getElementById('chat-send');
     const chatRemaining = document.getElementById('chat-remaining');
     const chatPhotoBtn = document.getElementById('chat-photo-btn');
