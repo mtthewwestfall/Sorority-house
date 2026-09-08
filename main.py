@@ -53,9 +53,11 @@ API CONTRACT implemented here (point your chat app at these):
   POST /audit       {"girl"}            (bearer)        -> {"audit","audit_count",
                                                             "free_left","paid_left"}
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
-                                                            (call from your Stripe webhook on
-                                                            subscription created/updated/cancelled;
-                                                            tier 'freshman' = cancelled)
+                                                            by hand (tier 'freshman' = cancelled)
+  POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
+                                                            the account with the customer's email
+                                                            to the tier of the price paid;
+                                                            subscription deleted/unpaid -> freshman
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
                                                             webhook after a $2.99 charge)
@@ -113,6 +115,13 @@ Env vars (Railway -> Variables):
   TAIL_REVISION     true (default): if the brain lands mid-reply and moves the stage, the
                     UNTYPED remainder is regenerated from the new memory. Typed text is
                     never rewritten. Set false to always keep her first take.
+  STRIPE_WEBHOOK_SECRET
+                    signing secret of the Stripe webhook endpoint (whsec_...); the
+                    /webhooks/stripe route refuses with 503 until it is set.
+  STRIPE_API_KEY    optional restricted key (Customers: read) so a cancellation, which
+                    Stripe sends without an email, can still be matched to an account.
+  STRIPE_PRICE_SOPHOMORE / STRIPE_PRICE_JUNIOR / STRIPE_PRICE_SENIOR
+                    price ids behind the three Payment Links (defaults are the live ones).
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
@@ -236,6 +245,16 @@ PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # 
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
 WEBHOOK_MAX_BYTES = 1024 * 1024
+# Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
+# by the customer's email. Price ids are public identifiers, the signing secret is not.
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_PRICE_TIERS = {
+    os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC"): "sophomore",
+    os.environ.get("STRIPE_PRICE_JUNIOR", "price_1UCVb6EnizOE4dLbBHQNFgpk"): "junior",
+    os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2"): "senior",
+}
+STRIPE_SIG_TOLERANCE_S = 300
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -2825,6 +2844,11 @@ def set_tier(body: SetTierIn):
     if tier not in TIERS:
         raise HTTPException(status_code=400, detail=f"tier must be one of {list(TIERS)}")
     user = _user_for_email(body.email)
+    _apply_tier(user, tier)
+    return {"ok": True, "user_id": user["user_id"], "tier": tier}
+
+
+def _apply_tier(user, tier):
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -2847,7 +2871,6 @@ def set_tier(body: SetTierIn):
             conn.commit()
     finally:
         conn.close()
-    return {"ok": True, "user_id": user["user_id"], "tier": tier}
 
 
 @app.post("/admin/grant-audits")
@@ -2946,6 +2969,91 @@ async def shopify_order_webhook(request: Request):
             raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
         user_id = _user_for_email(email)["user_id"]
     return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+
+
+def _stripe_signed(raw: bytes, header: str) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    try:
+        ts = int(parts.get("t", ""))
+    except ValueError:
+        return False
+    if abs(time.time() - ts) > STRIPE_SIG_TOLERANCE_S:
+        return False
+    want = hmac.new(STRIPE_WEBHOOK_SECRET.encode(), f"{ts}.".encode() + raw, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(want, v.strip()) for k, v in
+               (p.split("=", 1) for p in header.split(",") if "=" in p) if k.strip() == "v1")
+
+
+def _stripe_customer_email(customer_id: str) -> str:
+    if not customer_id or not STRIPE_API_KEY:
+        return ""
+    try:
+        r = requests.get(f"https://api.stripe.com/v1/customers/{customer_id}",
+                         auth=(STRIPE_API_KEY, ""), timeout=15)
+        return (r.json().get("email") or "").strip() if r.status_code == 200 else ""
+    except (requests.RequestException, ValueError):
+        return ""
+
+
+def _stripe_tier_for_lines(lines) -> str:
+    """Highest tier among the prices on an invoice / subscription. Line shape differs by
+    API version: {price:{id}} or {pricing:{price_details:{price}}}."""
+    best = ""
+    for li in lines or []:
+        price = (li.get("price") or {}).get("id") or \
+            ((li.get("pricing") or {}).get("price_details") or {}).get("price") or ""
+        tier = STRIPE_PRICE_TIERS.get(price, "")
+        if tier and tier_rank(tier) > tier_rank(best):
+            best = tier
+    return best
+
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Stripe webhook for the subscription Payment Links. invoice.paid (first charge and
+    every renewal) sets the tier of the paid price on the account that matches the
+    customer's email; a deleted or unpaid subscription drops it to freshman. Emails
+    with no account are acknowledged and logged, so Stripe stops retrying."""
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="STRIPE_WEBHOOK_SECRET must be set")
+    if int(request.headers.get("Content-Length") or 0) > WEBHOOK_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > WEBHOOK_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Payload too large")
+    if not _stripe_signed(raw, request.headers.get("Stripe-Signature", "")):
+        raise HTTPException(status_code=401, detail="Bad Stripe signature")
+    try:
+        event = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Bad JSON")
+    kind = event.get("type", "")
+    obj = (event.get("data") or {}).get("object") or {}
+
+    if kind == "invoice.paid":
+        tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
+        email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(obj.get("customer"))
+    elif kind == "customer.subscription.deleted" or \
+            (kind == "customer.subscription.updated" and obj.get("status") in ("canceled", "unpaid")):
+        tier = "freshman"
+        email = _stripe_customer_email(obj.get("customer"))
+    else:
+        return {"ok": True, "ignored": kind}
+
+    if not tier:
+        return {"ok": True, "ignored": "no known price"}
+    if not email:
+        print(f"[stripe] {kind} {event.get('id')}: no customer email (set STRIPE_API_KEY)", flush=True)
+        return {"ok": True, "ignored": "no email"}
+    try:
+        user = _user_for_email(email)
+    except HTTPException:
+        print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
+        return {"ok": True, "ignored": "no account"}
+    _apply_tier(user, tier)
+    return {"ok": True, "user_id": user["user_id"], "tier": tier}
 
 
 # ---------------------------------------------------------------------------

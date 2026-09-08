@@ -62,8 +62,9 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 | :--- | :--- | :--- |
 | `DATABASE_URL` | Connection string for Supabase | Supabase Settings |
 | `ADMIN_SECRET` | Password for `/admin` and all entitlement endpoints (required) | You choose it |
-| `STRIPE_SECRET_KEY` | API key for subscription billing | Stripe Dashboard |
-| `STRIPE_WEBHOOK_SECRET` | Key to verify payment events | Stripe Dashboard |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret of the `/webhooks/stripe` endpoint (`whsec_…`); `invoice.paid` upgrades the account with the customer's email, a deleted/unpaid subscription drops it to freshman | Stripe Dashboard → Webhooks |
+| `STRIPE_API_KEY` | Optional restricted key (Customers: read) so cancellations, which carry no email, can be matched to an account | Stripe Dashboard → API keys |
+| `STRIPE_PRICE_SOPHOMORE` / `STRIPE_PRICE_JUNIOR` / `STRIPE_PRICE_SENIOR` | Price ids behind the three Payment Links (defaults are the live ones) | Stripe Dashboard → Products |
 | `IMAGE_API_KEY` | Key for autonomous photo generation | Image Provider API |
 | `SHOPIFY_API_KEY` | Integration for merch store | Shopify Admin |
 | `GEMINI_API_KEY` / `CHAT_MODEL` | Gemini fallback for any role without its own endpoint (default model `gemini-3.1-flash-lite`) | Google AI Studio |
