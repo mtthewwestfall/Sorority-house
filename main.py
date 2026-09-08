@@ -2170,7 +2170,7 @@ async function saveDoors(){try{await api('/admin/console/doors',{method:'POST',b
 async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
 function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');for(const k in TABS)$('#'+k).classList.add('hid')}
 async function loadOverview(){try{const s=await api('/admin/overview');const st=(l,v,sub)=>`<div class="card"><div class="lbl">${l}</div><div class="stat">${v}</div>${sub?`<div class="mut">${sub}</div>`:''}</div>`;
- $('#stats').innerHTML=st('Accounts',s.accounts,`+${s.accounts_7d} this week`)+st('Paying',s.tiers.sophomore+s.tiers.junior+s.tiers.senior,`${s.tiers.senior} sr · ${s.tiers.junior} jr · ${s.tiers.sophomore} so`)+st('Trial',s.tiers.freshman)+st('Comped',s.comped)
+ $('#stats').innerHTML=st('Accounts',s.accounts,`+${s.accounts_7d} this week · ${s.telegram||0} on Telegram`)+st('Paying',s.tiers.sophomore+s.tiers.junior+s.tiers.senior,`${s.tiers.senior} sr · ${s.tiers.junior} jr · ${s.tiers.sophomore} so`)+st('Trial',s.tiers.freshman)+st('Comped',s.comped)
   +st('Active 24h',s.active_24h,`${s.active_7d} this week`)+st('Messages 24h',s.messages_24h,`${s.messages} all time`)+st('Audits run',s.audits)+st('Open complaints',s.open_complaints);
  const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
@@ -3009,12 +3009,21 @@ def set_persona(body: PersonaIn):
 
 
 def _user_for_email(email):
-    """Admin/webhook helper: the users row behind an account email (404 if none)."""
-    email = _norm_email(email)
+    """Admin/webhook helper: the users row behind an account email (404 if none).
+    Telegram-only accounts have no email; the admin console keys them as
+    "tg:<telegram_id>" (see _ACCOUNT_COLS)."""
+    email = email.strip().lower()
+    if not email.startswith("tg:"):
+        email = _norm_email(email)
     conn = db()
     try:
         with conn.cursor() as cur:
-            acct = _account_by_email(cur, email)
+            if email.startswith("tg:") and email[3:].isdigit():
+                cur.execute("SELECT user_id FROM telegram_accounts WHERE telegram_id=%s",
+                            (int(email[3:]),))
+                acct = cur.fetchone()
+            else:
+                acct = _account_by_email(cur, email)
     finally:
         conn.close()
     if acct is None:
@@ -3530,12 +3539,24 @@ def my_complaints(user=Depends(current_user)):
 # ---------------------------------------------------------------------------
 # ADMIN CONSOLE  (GET /admin serves the page; JSON endpoints take X-Admin-Secret)
 # ---------------------------------------------------------------------------
+# One row per signed-up user: email accounts and Telegram-only accounts alike.
+# Telegram accounts have no email, so they are keyed "tg:<telegram_id>" and
+# count as verified (Telegram already authenticated them).
 _ACCOUNT_COLS = """
-    a.email, a.created_at, a.verified_at, u.user_id, u.display_name, u.tier, u.msg_used,
+    coalesce(a.email, 'tg:' || t.telegram_id) AS email,
+    coalesce(a.created_at, t.created_at) AS created_at,
+    coalesce(a.verified_at, t.created_at) AS verified_at,
+    t.telegram_id, u.user_id, u.display_name, u.tier, u.msg_used,
     u.audit_credits, u.total_audits_used, u.plan_reset_at, u.comp_until,
     u.comp_prev_tier, u.admin_note,
     (SELECT count(*) FROM complaints c WHERE c.user_id=u.user_id AND c.status='open') AS open_complaints
 """
+_ACCOUNT_FROM = """
+    FROM users u
+    LEFT JOIN accounts a ON a.user_id=u.user_id
+    LEFT JOIN telegram_accounts t ON t.user_id=u.user_id
+"""
+_ACCOUNT_ANY = "(a.user_id IS NOT NULL OR t.user_id IS NOT NULL)"
 
 
 def _account_view(row):
@@ -3554,12 +3575,12 @@ def admin_accounts(q: str = "", limit: int = 100):
     try:
         with conn.cursor() as cur:
             cur.execute(f"""
-                SELECT {_ACCOUNT_COLS}
-                FROM accounts a JOIN users u ON u.user_id=a.user_id
-                WHERE %s = '' OR a.email LIKE %s OR lower(u.display_name) LIKE %s
-                      OR lower(u.user_id) LIKE %s
-                ORDER BY a.created_at DESC LIMIT %s
-            """, (q, like, like, like, limit))
+                SELECT {_ACCOUNT_COLS} {_ACCOUNT_FROM}
+                WHERE {_ACCOUNT_ANY}
+                  AND (%s = '' OR a.email LIKE %s OR lower(u.display_name) LIKE %s
+                       OR lower(u.user_id) LIKE %s OR 'tg:' || t.telegram_id LIKE %s)
+                ORDER BY coalesce(a.created_at, t.created_at) DESC LIMIT %s
+            """, (q, like, like, like, like, limit))
             return [_account_view(r) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -3572,8 +3593,7 @@ def admin_account(email: str):
     try:
         with conn.cursor() as cur:
             cur.execute(f"""
-                SELECT {_ACCOUNT_COLS}
-                FROM accounts a JOIN users u ON u.user_id=a.user_id WHERE u.user_id=%s
+                SELECT {_ACCOUNT_COLS} {_ACCOUNT_FROM} WHERE u.user_id=%s
             """, (user["user_id"],))
             acct = _account_view(cur.fetchone())
             cur.execute("""
@@ -3739,8 +3759,8 @@ def admin_overview():
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT u.tier, count(*) AS n FROM accounts a JOIN users u ON u.user_id=a.user_id
+            cur.execute(f"""
+                SELECT u.tier, count(*) AS n {_ACCOUNT_FROM} WHERE {_ACCOUNT_ANY}
                 GROUP BY u.tier
             """)
             tiers = {t: 0 for t in TIERS}
@@ -3748,8 +3768,14 @@ def admin_overview():
                 tiers[r["tier"]] = r["n"]
             cur.execute("""
                 SELECT
-                  (SELECT count(*) FROM accounts) AS accounts,
-                  (SELECT count(*) FROM accounts WHERE created_at > now() - interval '7 days') AS accounts_7d,
+                  (SELECT count(*) FROM accounts)
+                    + (SELECT count(*) FROM telegram_accounts t
+                       WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=t.user_id)) AS accounts,
+                  (SELECT count(*) FROM accounts WHERE created_at > now() - interval '7 days')
+                    + (SELECT count(*) FROM telegram_accounts t
+                       WHERE t.created_at > now() - interval '7 days'
+                         AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=t.user_id)) AS accounts_7d,
+                  (SELECT count(*) FROM telegram_accounts) AS telegram,
                   (SELECT count(*) FROM users WHERE comp_until > now()) AS comped,
                   (SELECT count(*) FROM complaints WHERE status='open') AS open_complaints,
                   (SELECT count(*) FROM chat_logs WHERE sender='user') AS messages,
