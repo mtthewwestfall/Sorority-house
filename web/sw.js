@@ -2,7 +2,7 @@
 // shipped with the site. Conversations, the roster and everything else the API
 // answers are left alone, so an installed copy can never show a stale girl or a
 // stale message. Bump SHELL on every shell change to retire the old copy.
-const SHELL = 'house-shell-v1';
+const SHELL = 'house-shell-v2';
 const SHELL_FILES = [
   './',
   './index.html',

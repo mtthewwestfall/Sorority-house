@@ -108,6 +108,7 @@
     .install-bar .install-copy strong { display: block; font-size: .9rem; }
     .install-bar .install-copy span { color: var(--muted); }
     .install-bar .button { padding: 9px 15px; font-size: .82rem; white-space: nowrap; }
+    .install-bar .button[hidden] { display: none; }
     .install-bar .install-dismiss {
       background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1;
       padding: 0 2px; cursor: pointer; flex: none;
@@ -122,6 +123,13 @@
     .hero h1 { font-size: clamp(3.7rem, 11vw, 9rem); line-height: .84; margin: 0 0 30px; }
     .hero h1 span { display: block; }
     .hero-sub { font-size: clamp(1.25rem, 3vw, 2rem); color: #f6edf7; margin-bottom: 32px; }
+    .hero-install {
+      display: inline-flex; align-items: center; gap: 8px; margin: -12px 0 26px; padding: 9px 16px;
+      border: 1px solid rgba(255,255,255,.22); border-radius: 999px; color: var(--white); text-decoration: none;
+      font-size: .86rem; font-weight: 600; letter-spacing: .04em; background: rgba(255,255,255,.06);
+    }
+    .hero-install:hover { border-color: rgba(255,255,255,.5); background: rgba(255,255,255,.12); }
+    .hero-install[hidden] { display: none; }
     .challenge { color: var(--muted); font-size: clamp(1rem, 2vw, 1.3rem); margin-bottom: 50px; }
     .scroll-cue { color: var(--gold); text-transform: uppercase; letter-spacing: .33em; font-size: .75rem; }
 
@@ -366,17 +374,15 @@
       .hallway { min-height: 330px; }
       .group-image { height: 290px; }
       .footer-inner { flex-direction: column; text-align: center; }
-      /* Pin the panel to the top of the screen at full size; the on-screen keyboard
-         overlays its lower half and the composer floats above the keyboard. */
-      #chat.is-open { place-items: start center; padding: 0; background: #fff; backdrop-filter: none; }
-      #chat .chat-panel { height: 100%; position: relative; width: 100%; border: 0; border-radius: 0; box-shadow: none; }
-      #chat .chat-head { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
-      #chat .chat-log { padding-bottom: calc(var(--foot-h, 96px) + var(--kb-offset, 0px)); scrollbar-width: none; }
+      /* Full-screen panel sized to the *visible* viewport (--vvh, kept in sync from
+         visualViewport by JS), so when the on-screen keyboard opens the panel shrinks
+         and the composer, in normal flow at the bottom, stays above the keyboard. */
+      #chat.is-open { place-items: start center; grid-template-rows: 100%; padding: 0; background: #fff; backdrop-filter: none; }
+      #chat .chat-panel { height: var(--vvh, 100%); position: relative; width: 100%; border: 0; border-radius: 0; box-shadow: none; }
+      #chat .chat-head { padding-top: calc(14px + env(safe-area-inset-top, 0px)); flex: none; }
+      #chat .chat-log { scrollbar-width: none; min-height: 0; overscroll-behavior: contain; }
       #chat .chat-log::-webkit-scrollbar { display: none; }
-      #chat .chat-foot {
-        position: absolute; left: 0; right: 0; bottom: var(--kb-offset, 0px); z-index: 2;
-        background: rgba(255, 255, 255, .7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-      }
+      #chat .chat-foot { flex: none; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); background: rgba(255, 255, 255, .7); }
       #chat .chat-head { padding-left: 64px; gap: 14px; }
       #chat .chat-head img { width: 72px; height: 72px; }
       body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
@@ -403,6 +409,7 @@
       <div class="hero-content wrap">
         <p class="eyebrow">A social experiment</p>
         <h1><span>Welcome to the</span><span class="gradient-text">Sorority House</span></h1>
+        <a class="hero-install" href="#" id="hero-install" hidden>Get the app — free, no app store</a>
         <p class="hero-sub">Can you survive or will you thrive?</p>
         <p class="challenge">Think you're a Casanova? I doubt it.<br />No one's made it past two so far.</p>
         <a class="button" href="#doors">Pick your girl ↓</a>
@@ -870,7 +877,7 @@
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
-      lastKeyboard = -1;
+      lastViewport = '';
       fitChatToViewport();
       chatInput.value = '';
       growChatInput();
@@ -881,7 +888,7 @@
       abortStreamAndResync();
       chat.classList.remove('is-open');
       chat.style.transform = '';
-      chat.style.removeProperty('--kb-offset');
+      chat.style.removeProperty('--vvh');
       if (document.body.classList.contains('chat-locked')) {
         document.body.classList.remove('chat-locked');
         window.scrollTo(0, lockedScrollY);
@@ -890,25 +897,33 @@
     }
 
     let fitFrame = 0;
-    let lastKeyboard = 0;
+    let lastViewport = '';
+    const mobileChat = window.matchMedia('(max-width: 620px)');
     function fitChatToViewport() {
-      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) return;
       if (fitFrame) return;
       fitFrame = requestAnimationFrame(() => {
         fitFrame = 0;
         const vv = window.visualViewport;
+        // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
+        // viewport and may scroll the page. Size the panel to the visible area and pull it
+        // back up by however far the page was pushed, so nothing hides behind the keyboard.
+        const key = `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
+        if (key === lastViewport) return;
+        lastViewport = key;
         const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+        chat.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
         chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
-        // Anchor the composer to the bottom edge of the *visible* area (the top of the
-        // keyboard) rather than the layout viewport, whose height iOS may or may not shrink.
-        const panel = chat.querySelector('.chat-panel').getBoundingClientRect();
-        const keyboard = Math.max(0, Math.round(panel.bottom - (vv.offsetTop + vv.height)));
-        if (keyboard === lastKeyboard) return;
-        lastKeyboard = keyboard;
-        chat.style.setProperty('--kb-offset', `${keyboard}px`);
+        if (window.scrollY) window.scrollTo(0, 0);
         if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
       });
     }
+    // Safari fires the viewport events late (or not at all) around focus; poll briefly.
+    function settleChatViewport() {
+      for (const ms of [50, 150, 300, 600]) setTimeout(fitChatToViewport, ms);
+    }
+    chatInput.addEventListener('focus', settleChatViewport);
+    chatInput.addEventListener('blur', settleChatViewport);
 
     function growChatInput() {
       chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
@@ -1451,6 +1466,7 @@
       const how = document.getElementById('install-how');
       const go = document.getElementById('install-go');
       const footerLink = document.getElementById('footer-install');
+      const heroLink = document.getElementById('hero-install');
       if (window.matchMedia('(display-mode: standalone)').matches
           || window.navigator.standalone === true) return;
 
@@ -1462,6 +1478,7 @@
       const show = () => bar.classList.add('show');
       const offer = () => {
         footerLink.hidden = false;
+        heroLink.hidden = false;
         if (!localStorage.getItem(INSTALL_DISMISSED)) show();
       };
 
@@ -1487,6 +1504,7 @@
         // `beforeinstallprompt` brings the offer back.
         bar.classList.remove('show');
         footerLink.hidden = true;
+        heroLink.hidden = true;
         chosen.prompt();
       });
 
@@ -1495,15 +1513,19 @@
         localStorage.setItem(INSTALL_DISMISSED, '1');
       });
 
-      footerLink.addEventListener('click', (event) => {
-        event.preventDefault();
-        localStorage.removeItem(INSTALL_DISMISSED);
-        show();
-      });
+      for (const link of [footerLink, heroLink]) {
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          localStorage.removeItem(INSTALL_DISMISSED);
+          if (installEvent) go.click();
+          else show();
+        });
+      }
 
       window.addEventListener('appinstalled', () => {
         bar.classList.remove('show');
         footerLink.hidden = true;
+        heroLink.hidden = true;
       });
     })();
   </script>
