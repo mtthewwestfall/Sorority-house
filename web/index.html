@@ -797,21 +797,31 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     }
 
+    // Closing a door pauses a conversation, it never ends one: reopening drops the user
+    // straight back into the tail of what was said, with no reset banner and no
+    // re-introduction. Only a girl who has never been spoken to gets an opener, so the
+    // panel stays empty until the tail lands (or the wait runs out).
     const HISTORY_SHOWN = 8;
+    const HISTORY_WAIT_MS = 4000;
     async function loadHistory(girl) {
+      let recent = [];
+      const cutoff = new AbortController();
+      const timer = setTimeout(() => cutoff.abort(), HISTORY_WAIT_MS);
       try {
-        const response = await fetch(API_BASE_URL + '/history?girl=' + encodeURIComponent(girl), { headers: authHeaders() });
-        if (response.status === 401) { handleUnauthorized(); return; }
-        if (!response.ok) return;
-        const data = await response.json();
+        const response = await fetch(API_BASE_URL + '/history?girl=' + encodeURIComponent(girl),
+                                    { headers: authHeaders(), signal: cutoff.signal });
         if (currentGirl !== girl) return;
-        const recent = (data.messages || []).slice(-HISTORY_SHOWN);
-        if (!recent.length || chatLog.children.length > 1) return;
-        chatLog.innerHTML = '';
-        addMessage('note', 'Where you left off');
-        for (const m of recent) addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
-        if (recent[recent.length - 1].sender === 'user') markRead();
-      } catch (_) { /* history is a nicety; the chat still works without it */ }
+        if (response.status === 401) { handleUnauthorized(); return; }
+        if (response.ok) {
+          const data = await response.json();
+          recent = (data.messages || []).slice(-HISTORY_SHOWN);
+        }
+      } catch (_) { /* offline or too slow: open the door the plain way */
+      } finally { clearTimeout(timer); }
+      if (currentGirl !== girl || chatLog.children.length) return;
+      if (!recent.length) { addMessage('note', 'Her door is open. Say hi.'); return; }
+      for (const m of recent) addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
+      if (recent[recent.length - 1].sender === 'user') markRead();
     }
 
     let lockedScrollY = 0;
@@ -829,7 +839,6 @@
       chatLog.innerHTML = '';
       receipt = null;
       lastStampAt = 0;
-      addMessage('note', 'Her door is open. Say hi.');
       loadHistory(currentGirl);
       loadPictureStatus();
       chat.classList.add('is-open');
