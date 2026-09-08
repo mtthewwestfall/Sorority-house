@@ -37,9 +37,11 @@ PUBLIC_URL           the Sorority House backend base URL, e.g. the Railway app.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
+import time
 
 try:
     import requests
@@ -48,7 +50,7 @@ except Exception:  # pragma: no cover - requirement listed in this folder
     requests = None
     NetError = Exception
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -65,6 +67,14 @@ logger = logging.getLogger("sorority_tg")
 
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
+SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
+# Stripe Payment Links, one per paid tier (public URLs; checkout happens on Stripe).
+PLAN_LINKS = [
+    ("Starter · $7.99/mo", os.environ.get("PAY_LINK_SOPHOMORE", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")),
+    ("Storyline challenge · $14.99/mo", os.environ.get("PAY_LINK_JUNIOR", "https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01")),
+    ("All site access · $19.99/mo", os.environ.get("PAY_LINK_SENIOR", "https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02")),
+]
+
 
 # ---------------------------------------------------------------------------
 # Tiny per-chat store (a local JSON file; tokens live here, never in git).
@@ -217,7 +227,8 @@ def _send_chat(token, girl, message):
             detail = r.json().get("detail", "")
         except Exception:
             detail = ""
-        raise BackendError(str(detail) or f"chat failed (HTTP {r.status_code})")
+        raise BackendError(str(detail) or f"chat failed (HTTP {r.status_code})",
+                           code="out_of_messages" if r.status_code == 402 else None)
     return r.json()
 
 
@@ -285,6 +296,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
              "• /girls — knock on the doors that are open to you\n"
              "• just type a message to talk to whoever you're with\n"
              "• /state — your allowance + where you stand with each sister\n"
+             "• /menu — upgrade, the website, get the app\n"
              "• /help — everything")
         return
     await _txt(update,
@@ -295,7 +307,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
          "• already have a Sorority House account:  /login <email> <password>\n"
          "• new here:                             /signup <email> <password> <name>\n"
          "                                          (then watch the inbox for the "
-         "verification link, like the web)\n\n/help for commands.")
+         "verification link, like the web)\n\n/menu for the website + app, /help for commands.")
 
 
 async def cmd_signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -355,6 +367,91 @@ async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                  "on Sorority House — come back any time with /login.")
 
 
+PORTRAIT_MAX_BYTES = 5 * 1024 * 1024  # Telegram's own sendPhoto ceiling is 10 MB
+PORTRAIT_DEADLINE_S = 8.0  # end-to-end per download, not per socket read
+# Portrait downloads get their own small pool so a slow image host can never occupy the
+# default executor that login / roster / chat calls run on.
+_portrait_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="portrait")
+
+
+def _portrait_url(g) -> str:
+    """Roster avatar_url is site-relative (assets/zoe.jpg) or absolute; only the site
+    itself is fetched, so a roster edit cannot point the bot at internal hosts."""
+    url = (g.get("avatar_url") or "").strip()
+    if not url:
+        return ""
+    if url.startswith("http://") or url.startswith("https://"):
+        return url if url.startswith(SITE_URL + "/") else ""
+    if url.startswith("//") or ".." in url:
+        return ""
+    return SITE_URL + "/" + url.lstrip("/")
+
+
+def _fetch_bytes(url: str):
+    deadline = time.monotonic() + PORTRAIT_DEADLINE_S
+    with requests.get(url, timeout=(4, 4), stream=True, allow_redirects=False) as r:
+        r.raise_for_status()
+        if int(r.headers.get("Content-Length") or 0) > PORTRAIT_MAX_BYTES:
+            raise ValueError("portrait too large")
+        if time.monotonic() > deadline:
+            raise TimeoutError("portrait download too slow")
+        buf = bytearray()
+        for chunk in r.iter_content(65536):
+            buf.extend(chunk)
+            if len(buf) > PORTRAIT_MAX_BYTES:
+                raise ValueError("portrait too large")
+            if time.monotonic() > deadline:
+                raise TimeoutError("portrait download too slow")
+    return bytes(buf)
+
+
+def _fetch_portrait(url: str):
+    return asyncio.get_running_loop().run_in_executor(_portrait_pool, _fetch_bytes, url)
+
+
+async def _send_portrait(update, g, caption: str) -> bool:
+    """Best effort: the portrait is decoration, never a reason to fail the command."""
+    url = _portrait_url(g)
+    if not url or requests is None:
+        return False
+    try:
+        data = await _fetch_portrait(url)
+        await update.effective_message.reply_photo(data, caption=caption[:1024])
+        return True
+    except Exception as exc:  # network, bad image, telegram refusing the format
+        logger.info("portrait for %s skipped: %s", g.get("girl"), exc)
+        return False
+
+
+async def _send_album(update, girls) -> None:
+    girls = [g for g in girls[:10] if _portrait_url(g) and requests is not None]
+    if not girls:
+        return
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(_fetch_portrait(_portrait_url(g)) for g in girls),
+                           return_exceptions=True),
+            timeout=PORTRAIT_DEADLINE_S * 4)
+    except asyncio.TimeoutError:
+        logger.info("album skipped: portraits took too long")
+        return
+    media = []
+    for g, data in zip(girls, results):
+        if isinstance(data, BaseException):
+            logger.info("portrait for %s skipped: %s", g.get("girl"), data)
+            continue
+        media.append(InputMediaPhoto(data, caption=g.get("name", g.get("girl", ""))))
+    if not media:
+        return
+    try:
+        if len(media) == 1:
+            await update.effective_message.reply_photo(media[0].media, caption=media[0].caption)
+        else:
+            await update.effective_message.reply_media_group(media)
+    except Exception as exc:
+        logger.info("album skipped: %s", exc)
+
+
 def _milestone_label(milestone):
     stages = {1: "Stranger", 2: "Noticing", 3: "Opening", 4: "Opening",
               5: "Trusted", 6: "Confided", 7: "Confided", 8: "Different"}
@@ -390,6 +487,8 @@ async def cmd_girls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
             "✅ Open — tap one to talk:",
             reply_markup=InlineKeyboardMarkup(open_btns))
+        await _send_album(update, [g for g in sorted(roster, key=lambda x: x.get("girl", ""))
+                                   if state.get(g["girl"], {}).get("open")])
     else:
         await update.effective_message.reply_text(
             "No doors are open to you yet — trust opens them, and it builds on real "
@@ -427,6 +526,8 @@ async def _open_girl(update, slug) -> None:
         await _txt(update, f"Could not reach the house: {exc}")
         return
     store.set(update.effective_chat.id, active_girl=sl)
+    girl = next(g for g in rosters if g["girl"] == sl)
+    await _send_portrait(update, girl, girl.get("door_title") or girl.get("name", sl))
     if history:
         parts = [_girl_name(rosters, sl) + " — here's where you two left off:"]
         for m in history[-6:]:
@@ -513,12 +614,18 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await q.answer()
     data = q.data or ""
-    if not data.startswith("girl:") or update.effective_chat.type != "private":
+    if update.effective_chat.type != "private":
+        return
+    if data == "menu:upgrade":
+        await cmd_upgrade(update, context)
         return
     if not _rec(update) or not _rec(update).get("token"):
         await _txt(update, "Not signed in — /login <email> <password> first.")
         return
-    await _open_girl(update, data.split(":", 1)[1])
+    if data == "menu:girls":
+        await cmd_girls(update, context)
+    elif data.startswith("girl:"):
+        await _open_girl(update, data.split(":", 1)[1])
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -536,8 +643,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         out = await send_chat(rec["token"], slug, text)
     except BackendError as exc:
         msg = str(exc)
-        if "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
-            msg = "Your message allowance is spent. Renew your tier on the website to keep talking here."
+        if exc.code == "out_of_messages" or msg == "out_of_messages" or \
+                "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
+            await update.effective_message.reply_text(
+                "Your message allowance is spent. Upgrade or renew on the website and "
+                "you can keep talking here right away.",
+                reply_markup=_plans_markup())
+            return
         await _txt(update, msg)
         return
     except (RuntimeError, NetError) as exc:
@@ -557,6 +669,39 @@ async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _txt(update, "I only talk in private — message me directly and /login there.")
 
 
+def _plans_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("💳 " + label, url=url)] for label, url in PLAN_LINKS])
+
+
+def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("💳 Upgrade / renew", callback_data="menu:upgrade")],
+        [InlineKeyboardButton("🌐 Open the website", url=SITE_URL),
+         InlineKeyboardButton("📱 Get the app", url=SITE_URL + "/#hero-install")],
+    ]
+    if signed_in:
+        rows.append([InlineKeyboardButton("💬 Pick a girl", callback_data="menu:girls")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    rec = _rec(update)
+    signed_in = bool(rec and rec.get("token"))
+    await update.effective_message.reply_text(
+        "Sorority House — where to?\n\n"
+        "Payments go through Stripe; pay with the same email you use here and your tier "
+        "shows up in this chat and on the site. The app installs from the site — no app store.",
+        reply_markup=_menu_markup(signed_in))
+
+
+async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        "Pick a plan — checkout opens on Stripe. Use the same email you log in with "
+        "here and the house unlocks on the site, the app and this chat.",
+        reply_markup=_plans_markup())
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
          "Sorority House on Telegram — commands:\n"
@@ -566,6 +711,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
          "/girl <slug> — switch who you're talking to\n"
          "/state — tier, messages left, where you stand\n"
          "/history — the recent thread with her\n"
+         "/menu — upgrade, open the website, get the app\n"
+         "/upgrade — plans and the link to pay\n"
          "/logout — stop this chat session\n"
          "/help — this\n\n"
          "Just type normally to talk. Doors open by trust — showing up across real days "
@@ -592,6 +739,8 @@ def main():
     app.add_handler(CommandHandler("girl", cmd_girl))
     app.add_handler(CommandHandler("state", cmd_state))
     app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CallbackQueryHandler(on_button))  # buttons only exist in private chats
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     logger.info("Sorority House Telegram bot starting (backend: %s)", _base())
