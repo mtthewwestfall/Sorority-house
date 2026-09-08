@@ -600,7 +600,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -1121,7 +1121,7 @@
       ask.type = 'button'; ask.className = 'button'; ask.textContent = 'Request picture';
       ask.addEventListener('click', () => {
         closePicSheet();
-        if (available > 0) { requestPicture(); return; }
+        if (!picStatus || available > 0) { requestPicture(); return; }
         addMessage('note', s.next_in
           ? `She'll send one after ${s.next_in} more message${s.next_in === 1 ? '' : 's'}.`
           : `You're out of pictures. Grab a pack of ${packSize} for more.`);
