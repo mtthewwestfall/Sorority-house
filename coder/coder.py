@@ -43,9 +43,49 @@ MAX_TOOL_OUTPUT = 12_000       # chars of a single tool result the model gets to
 MAX_STEPS = 60                 # tool calls before we stop and ask
 VERIFY_ROUNDS = 3              # how many times failing checks are fed back
 IGNORED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
-BLOCKED = [r"\brm\s+-rf\s+/", r"git\s+push\s+.*--force", r"git\s+reset\s+--hard",
-           r"git\s+checkout\s+--\s", r"git\s+clean\s+-f", r"\bsudo\b", r"\bcurl\b.*\|\s*sh",
-           r"git\s+commit", r"git\s+push", r"gh\s+pr\s+create"]   # the last three are ours to do
+# Commands the model may run without asking. Anything else prompts you first (or is refused
+# under --yes). Shell syntax that hides a command (backticks, $(...), eval, sh -c, redirects
+# outside the repo) is never auto-approved.
+ALLOWED = {"python", "python3", "pytest", "pip", "uvicorn", "node", "npm", "npx", "rg", "grep",
+           "ls", "cat", "head", "tail", "wc", "find", "diff", "sort", "uniq", "echo", "curl",
+           "sleep", "true", "env", "printf", "test", "which"}
+GIT_READ_ONLY = {"diff", "status", "log", "show", "blame", "rev-parse", "ls-files", "grep", "branch"}
+HIDDEN_SYNTAX = re.compile(r"`|\$\(|\beval\b|\bexec\b|\bsh\s+-c|\bbash\s+-c|\bsudo\b|>\s*/")
+RUN_POLICY = {"yes": False}    # set from --yes at startup
+
+
+def command_allowed(command: str) -> str | None:
+    """None if every piece of the pipeline is on the allowlist, else the reason it isn't."""
+    if HIDDEN_SYNTAX.search(command):
+        return "uses shell syntax that can hide another command"
+    try:
+        tokens = list(shlex.shlex(command, posix=True, punctuation_chars=True))
+    except ValueError as e:
+        return f"unparseable: {e}"
+    segments, words, skip = [], [], False
+    for tok in tokens:
+        if skip:                       # the target of a redirect, not a command
+            skip = False
+        elif tok in ("|", "||", "&&", ";", "&", "(", ")"):
+            segments.append(words); words = []
+        elif tok.startswith(">") or tok.startswith("<"):
+            skip = True
+        else:
+            words.append(tok)
+    segments.append(words)
+    for words in segments:
+        # skip leading VAR=value assignments
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            words.pop(0)
+        if not words:
+            continue
+        prog = os.path.basename(words[0])
+        if prog == "git":
+            if len(words) < 2 or words[1] not in GIT_READ_ONLY:
+                return f"`git {words[1] if len(words) > 1 else ''}` writes to the repo; the harness handles commits/pushes"
+        elif prog not in ALLOWED:
+            return f"`{prog}` is not on the allowlist"
+    return None
 
 # --------------------------------------------------------------------------- output
 
@@ -140,10 +180,17 @@ def t_edit_file(path: str, old: str, new: str) -> str:
 
 
 def t_run(command: str, timeout: int = 180) -> str:
-    for pat in BLOCKED:
-        if re.search(pat, command):
-            return (f"BLOCKED: `{command}` matches a forbidden pattern ({pat}). Git commits, "
-                    "pushes and PRs are handled by the harness after you call finish.")
+    why = command_allowed(command)
+    if why:
+        if RUN_POLICY["yes"] or not sys.stdin.isatty():
+            return f"BLOCKED ({why}). Rephrase using allowed tools: {', '.join(sorted(ALLOWED))}, git read-only."
+        say(f"\n  model wants to run: {command}\n  ({why})")
+        if input("  allow? [y/N] ").strip().lower() != "y":
+            return "BLOCKED: the user declined to run this command. Find another way or explain in finish."
+    return shell(command, timeout)
+
+
+def shell(command: str, timeout: int) -> str:
     try:
         r = subprocess.run(command, shell=True, cwd=ROOT, capture_output=True, text=True,
                            timeout=timeout)
@@ -242,6 +289,12 @@ def git(*args: str, check: bool = True) -> str:
 def slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return s[:40] or "task"
+
+
+def stage_all() -> str:
+    """Stage everything (new files included) and return the staged diffstat."""
+    git("add", "-A", "--", ".")
+    return git("diff", "--cached", "--stat")
 
 
 def repo_checks() -> list[str]:
@@ -351,7 +404,7 @@ def verify(model: Model, messages: list[dict], yes: bool) -> bool:
         failures = []
         for c in checks:
             say(f"  $ {c}", dim=True)
-            out = t_run(c, timeout=600)
+            out = shell(c, timeout=600)
             if not out.startswith("exit 0"):
                 failures.append(f"$ {c}\n{out}")
         if not failures:
@@ -376,6 +429,7 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=MAX_STEPS)
     ap.add_argument("--no-review", action="store_true", help="skip the self-review pass")
     a = ap.parse_args()
+    RUN_POLICY["yes"] = a.yes
 
     task = " ".join(a.task).strip() or (sys.stdin.read().strip() if not sys.stdin.isatty() else "")
     if not task:
@@ -431,9 +485,10 @@ def main() -> None:
         say(f"\nchecks still failing; leaving branch {branch} for you to look at.\n{model.cost()}")
         return
 
-    if not a.no_review and git("diff", "--stat"):
+    if not a.no_review and stage_all():
         say("self-review...")
-        messages.append({"role": "user", "content": REVIEW.format(diff=clip(git("diff"), 40_000))})
+        messages.append({"role": "user", "content":
+                         REVIEW.format(diff=clip(git("diff", "--cached"), 40_000))})
         reviewed = run_agent(model, messages, a.max_steps // 2, a.yes)
         if reviewed:
             done = reviewed
@@ -441,7 +496,7 @@ def main() -> None:
             say(f"\nchecks failing after review; leaving branch {branch}.\n{model.cost()}")
             return
 
-    stat = git("diff", "--stat")
+    stat = stage_all()
     if not stat:
         say(f"\nno changes were made.\n{done['summary']}\n{model.cost()}")
         git("checkout", base); git("branch", "-D", branch)
@@ -450,13 +505,12 @@ def main() -> None:
     if not a.yes and sys.stdin.isatty():
         ans = input("\nCommit" + ("" if a.no_pr else " and open a PR") + "? [Y/n/d(iff)] ").strip().lower()
         while ans == "d":
-            print(git("diff"))
+            print(git("diff", "--cached"))
             ans = input("Commit? [Y/n] ").strip().lower()
         if ans not in ("", "y"):
             say(f"left uncommitted on branch {branch}")
             return
 
-    git("add", "-A", "--", ".")
     git("commit", "-q", "-m", done["title"], "-m", done["summary"] + "\n\nMade with coder/coder.py")
     if a.no_pr:
         say(f"committed on {branch} (not pushed)")

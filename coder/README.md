@@ -49,9 +49,12 @@ Watch it on: anything that needs the app running to judge (visual layout, chat f
 touching payments or the trust engine, and big multi-file features. Read every diff before
 merging — it opens PRs, it does not merge them.
 
-Guardrails: it can only touch files inside the repo, it refuses to commit/push/force-push/reset
-on its own (the harness does the commit after you confirm), and it stops to ask after 60 tool
-calls.
+Guardrails: it can only touch files inside the repo; shell commands run only if every part of
+the pipeline is on an allowlist (`python`, `pytest`, `pip`, `uvicorn`, `curl`, `rg`, `ls`, read-only
+`git`, ...) and free of hidden-command syntax (backticks, `$(...)`, `eval`, `sh -c`, `sudo`,
+writes outside the repo) — anything else asks you first, or is refused under `-y`. It never
+commits, pushes or opens PRs itself (the harness does, after you confirm), and it stops to ask
+after 60 tool calls. It still runs on your machine with your permissions, so read its output.
 
 ## Teaching it
 
