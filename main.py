@@ -716,10 +716,10 @@ def init_db():
                     user_id     TEXT NOT NULL REFERENCES users(user_id),
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
-                -- which account started a Stripe checkout as this customer
+                -- which account started the checkout of a subscription
                 -- (client_reference_id); lets invoice.paid find email-less accounts
                 CREATE TABLE IF NOT EXISTS stripe_checkouts (
-                    customer_id TEXT PRIMARY KEY,
+                    subscription_id TEXT PRIMARY KEY,
                     user_id     TEXT NOT NULL REFERENCES users(user_id),
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
@@ -3154,62 +3154,52 @@ def _user_for_stripe_customer(customer_id: str):
     return _ensure_user(row["user_id"]) if row else None
 
 
-def _remember_stripe_checkout(customer_id: str, user_id: str) -> None:
-    """checkout.session.completed said which account started this customer's checkout."""
-    if not customer_id:
+def _remember_stripe_checkout(subscription_id: str, user_id: str) -> None:
+    """checkout.session.completed said which account started this subscription. A
+    subscription has exactly one checkout, so a redelivery changes nothing."""
+    if not subscription_id:
         return
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO stripe_checkouts (customer_id, user_id) VALUES (%s,%s)
-                ON CONFLICT (customer_id) DO UPDATE SET user_id=EXCLUDED.user_id
-            """, (customer_id, user_id))
+                INSERT INTO stripe_checkouts (subscription_id, user_id) VALUES (%s,%s)
+                ON CONFLICT (subscription_id) DO NOTHING
+            """, (subscription_id, user_id))
             conn.commit()
     finally:
         conn.close()
 
 
-def _user_for_stripe_checkout(customer_id: str):
-    """users row that started a checkout as this customer (client_reference_id), or None."""
-    if not customer_id:
+def _user_for_stripe_checkout(subscription_id: str):
+    """users row that started this subscription's checkout (client_reference_id), or None."""
+    if not subscription_id:
         return None
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT u.user_id FROM stripe_checkouts c JOIN users u USING (user_id)
-                WHERE c.customer_id=%s
-            """, (customer_id,))
+                WHERE c.subscription_id=%s
+            """, (subscription_id,))
             row = cur.fetchone()
     finally:
         conn.close()
     return _ensure_user(row["user_id"]) if row else None
 
 
-def _stripe_customer_event_at(customer_id: str) -> int:
-    """Newest Stripe event timestamp any account holds for this customer (0 if none)."""
-    if not customer_id:
-        return 0
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(MAX(stripe_event_at),0) AS t FROM users "
-                        "WHERE stripe_customer_id=%s", (customer_id,))
-            return int(cur.fetchone()["t"])
-    finally:
-        conn.close()
-
-
 def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_id: str,
-                        event_at: int) -> str:
+                        event_at: int, checkout: bool = False) -> str:
     """Tier + Stripe ids + event timestamp in one transaction, guarded by the persisted
     timestamp so an older delivery can never overwrite a newer one, even concurrently.
     Returns the user_id actually updated, or "" (and changes nothing) when the event was stale — older than the target
     account's last event, or than any other account's event for the same customer. A paid tier always starts
     a fresh month (every renewal invoice pays for one). A Stripe customer funds exactly one
     account: when a paid invoice lands on a different account than before, the previous
-    holder loses both the ids and the tier they paid for."""
+    holder loses both the ids and the tier they paid for. checkout=True marks the event
+    as the checkout that started subscription_id: it is authoritative about which account
+    the subscription belongs to, so if its first invoice.paid arrived earlier and landed
+    on another account (matched by email) the move goes through as of that newer event."""
     clear = """comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
                comp_prev_free_audits=NULL, comp_prev_reset_at=NULL"""
     conn = db()
@@ -3219,6 +3209,14 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                 # serialise every event of this customer, then refuse if any account
                 # already holds a newer one (the customer may have moved accounts)
                 cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (customer_id,))
+                if checkout and subscription_id:
+                    cur.execute("""
+                        SELECT stripe_event_at FROM users
+                        WHERE stripe_subscription_id=%s AND user_id<>%s LIMIT 1
+                    """, (subscription_id, user_id))
+                    holder = cur.fetchone()
+                    if holder:
+                        event_at = max(event_at, int(holder["stripe_event_at"]))
                 cur.execute("""
                     SELECT 1 FROM users WHERE stripe_customer_id=%s AND user_id<>%s
                         AND stripe_event_at > %s LIMIT 1
@@ -3342,7 +3340,8 @@ async def stripe_webhook(request: Request):
         tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
         if not tier:
             return {"ok": True, "ignored": "no known price"}
-        user = _user_for_stripe_customer(customer_id) or _user_for_stripe_checkout(customer_id)
+        sub = _stripe_invoice_subscription(obj)
+        user = _user_for_stripe_checkout(sub) or _user_for_stripe_customer(customer_id)
         if user is None:
             email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
             if not email:
@@ -3353,8 +3352,7 @@ async def stripe_webhook(request: Request):
             except HTTPException:
                 print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
                 return {"ok": True, "ignored": "no account"}
-        applied = _apply_stripe_event(user["user_id"], tier, customer_id,
-                                      _stripe_invoice_subscription(obj), event_at)
+        applied = _apply_stripe_event(user["user_id"], tier, customer_id, sub, event_at)
         if not applied:
             return {"ok": True, "ignored": "stale event"}
         return {"ok": True, "user_id": applied, "tier": tier}
@@ -3375,18 +3373,14 @@ async def stripe_webhook(request: Request):
         if row is None:
             print(f"[stripe] {kind} {event.get('id')}: client_reference_id is not a user", flush=True)
             return {"ok": True, "ignored": "unknown user"}
-        _remember_stripe_checkout(customer_id, ref)
+        _remember_stripe_checkout(sub, ref)
         if obj.get("payment_status") != "paid":
             # delayed payment method: invoice.paid grants the tier when the money lands
             return {"ok": True, "user_id": ref, "pending": True}
         tier = _stripe_subscription_tier(sub)
         if not tier:
             return {"ok": True, "ignored": "no known price"}
-        # the checkout is the authoritative binding of this customer to an account: if
-        # its first invoice.paid got here first and landed elsewhere (email match), the
-        # move must not be refused as stale, so apply it as of that newer event
-        applied = _apply_stripe_event(ref, tier, customer_id, sub,
-                                      max(event_at, _stripe_customer_event_at(customer_id)))
+        applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at, checkout=True)
         if not applied:
             return {"ok": True, "ignored": "stale event"}
         return {"ok": True, "user_id": applied, "tier": tier}
