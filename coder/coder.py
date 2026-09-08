@@ -437,6 +437,10 @@ def run_agent(model: Model, messages: list[dict], max_steps: int, yes: bool) -> 
             except json.JSONDecodeError:
                 args = {}
             if name == "finish":
+                # every tool_call needs a reply or strict servers reject the next turn
+                for c in calls[calls.index(call):]:
+                    messages.append({"role": "tool", "tool_call_id": c["id"],
+                                     "name": c["function"]["name"], "content": "ok"})
                 return {"title": args.get("title", "Update"), "summary": args.get("summary", "")}
             fn = TOOLS.get(name, (None,))[0]
             preview = args.get("command") or args.get("path") or args.get("pattern") or ""

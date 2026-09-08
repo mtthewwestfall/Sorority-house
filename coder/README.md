@@ -38,6 +38,16 @@ the token usage; press `d` to read the full diff, `n` to leave the changes uncom
 
 A typical small task uses roughly 150k input tokens and 1.5k output tokens. Set the `CODER_PRICE_IN` and `CODER_PRICE_OUT` environment variables (in $ per 1M tokens) to see the estimated cost in dollars at the end of a run.
 
+Cheapest tested setup — DeepSeek (a /help command added to the Telegram bot cost 13k tokens, well under a cent):
+
+```bash
+export DEEPSEEK_API_KEY=...
+export CODER_BASE_URL=https://api.deepseek.com CODER_MODEL=deepseek-chat
+python coder.py "your task"
+```
+
+Gemini 3.1 Pro (the default) is the more careful model; use it for anything touching trust logic or payments.
+
 ## What it does well / where to keep an eye on it
 
 Good at: well-described changes to `main.py` or `web/index.html` — a new route, a copy change,
