@@ -926,15 +926,23 @@
     chatInput.addEventListener('focus', settleChatViewport);
     chatInput.addEventListener('blur', settleChatViewport);
 
-    function growChatInput() {
+    let lastInputLength = 0;
+    function growChatInput(event) {
       chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
-      chatInput.style.height = 'auto';
-      chatInput.style.height = `${Math.min(chatInput.scrollHeight, 110)}px`;
+      // Never resize mid-composition: iOS autocorrect loses its marked text.
+      const shrank = chatInput.value.length < lastInputLength;
+      lastInputLength = chatInput.value.length;
+      if (!(event && event.isComposing)) {
+        if (shrank) chatInput.style.height = 'auto';
+        const want = Math.min(chatInput.scrollHeight, 110);
+        if (Math.abs(want - chatInput.clientHeight) > 1) chatInput.style.height = `${want}px`;
+      }
       const pinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 8;
       chat.style.setProperty('--foot-h', `${chatInput.closest('.chat-foot').offsetHeight}px`);
       if (pinned) chatLog.scrollTop = chatLog.scrollHeight;
     }
     chatInput.addEventListener('input', growChatInput);
+    chatInput.addEventListener('compositionend', growChatInput);
     chatInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
