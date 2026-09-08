@@ -68,7 +68,12 @@ logger = logging.getLogger("sorority_tg")
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
-UPGRADE_URL = os.environ.get("UPGRADE_URL", SITE_URL + "/#plans")
+# Stripe Payment Links, one per paid tier (public URLs; checkout happens on Stripe).
+PLAN_LINKS = [
+    ("Starter · $7.99/mo", os.environ.get("PAY_LINK_SOPHOMORE", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")),
+    ("Storyline challenge · $14.99/mo", os.environ.get("PAY_LINK_JUNIOR", "https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01")),
+    ("All site access · $19.99/mo", os.environ.get("PAY_LINK_SENIOR", "https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02")),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +616,9 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     data = q.data or ""
     if update.effective_chat.type != "private":
         return
+    if data == "menu:upgrade":
+        await cmd_upgrade(update, context)
+        return
     if not _rec(update) or not _rec(update).get("token"):
         await _txt(update, "Not signed in — /login <email> <password> first.")
         return
@@ -640,8 +648,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await update.effective_message.reply_text(
                 "Your message allowance is spent. Upgrade or renew on the website and "
                 "you can keep talking here right away.",
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("💳 Upgrade", url=UPGRADE_URL)]]))
+                reply_markup=_plans_markup())
             return
         await _txt(update, msg)
         return
@@ -662,9 +669,14 @@ async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _txt(update, "I only talk in private — message me directly and /login there.")
 
 
+def _plans_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("💳 " + label, url=url)] for label, url in PLAN_LINKS])
+
+
 def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("💳 Upgrade / renew", url=UPGRADE_URL)],
+        [InlineKeyboardButton("💳 Upgrade / renew", callback_data="menu:upgrade")],
         [InlineKeyboardButton("🌐 Open the website", url=SITE_URL),
          InlineKeyboardButton("📱 Get the app", url=SITE_URL + "/#hero-install")],
     ]
@@ -678,17 +690,16 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     signed_in = bool(rec and rec.get("token"))
     await update.effective_message.reply_text(
         "Sorority House — where to?\n\n"
-        "Payments happen on the website (Stripe); your tier shows up here right away, "
-        "same account. The app installs from the site — no app store.",
+        "Payments go through Stripe; pay with the same email you use here and your tier "
+        "shows up in this chat and on the site. The app installs from the site — no app store.",
         reply_markup=_menu_markup(signed_in))
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "Starter $7.99 · Storyline $14.99 · All access $19.99 a month — pick a plan on "
-        "the website with the same email you use here and this chat unlocks instantly.",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("💳 Choose a plan", url=UPGRADE_URL)]]))
+        "Pick a plan — checkout opens on Stripe. Use the same email you log in with "
+        "here and the house unlocks on the site, the app and this chat.",
+        reply_markup=_plans_markup())
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
