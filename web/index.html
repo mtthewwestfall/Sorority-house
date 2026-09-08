@@ -770,8 +770,9 @@
     function walkText(container, offset, visit) {
       let out = '';
       let done = false;
-      let pendingBreak = false;
-      const flush = () => { if (pendingBreak && out) out += '\n'; pendingBreak = false; };
+      let pendingBreak = 0;
+      const flush = () => { if (pendingBreak && out) out += '\n'.repeat(pendingBreak); pendingBreak = 0; };
+      const breakFor = (node) => (node === chatInput ? 0 : node.nodeName === 'P' ? 2 : node.nodeName === 'DIV' ? 1 : 0);
       (function walk(node) {
         if (done) return;
         if (node.nodeType === 3) {
@@ -782,13 +783,13 @@
           return;
         }
         if (node.nodeName === 'BR') { flush(); out += '\n'; return; }
-        const block = node !== chatInput && /^(DIV|P)$/.test(node.nodeName);
-        if (block) pendingBreak = true;
+        const brk = breakFor(node);
+        pendingBreak = Math.max(pendingBreak, brk);
         const kids = node.childNodes;
         const stop = node === container ? offset : kids.length;
         for (let i = 0; i < stop && i < kids.length; i++) { walk(kids[i]); if (done) return; }
         if (node === container) { done = true; return; }
-        if (block) pendingBreak = true;
+        pendingBreak = Math.max(pendingBreak, brk);
       })(chatInput);
       return out;
     }
