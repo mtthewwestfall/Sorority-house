@@ -9,24 +9,25 @@ there. This bot is a thin chat client over the backend's public API, so whatever
 a player did on the web or on Telegram is one shared account and one shared
 conversation history.
 
-This is deliberately the same account model as the web: you `/login` with the
-email + password of your Sorority House account (the one you signed up and
-verified on the website). Nothing here weakens the backend — there are no admin
-back-doors, no client-side claims of purchases. If you do not have an account
-yet, sign up on the website once (it emails a verification link) and come back.
+Your Telegram id is your account: the first message opens a fresh one on the
+backend (`/auth/telegram`, unlocked by the TELEGRAM_BOT_SECRET the bot shares with
+`main.py`) — nobody types an email into a bot. `/login <email> <password>` is
+optional and points this Telegram at an existing website account instead. Nothing
+here weakens the backend — there are no admin back-doors, no client-side claims of
+purchases; upgrades bought from the bot carry the user id to Stripe as
+`client_reference_id` and land through the backend's Stripe webhook.
 
 Commands
 --------
-/start   — welcome + how to sign in
-/login   — /login <email> <password>, binds this Telegram chat to your account
-/signup  — /signup <email> <password> <display_name>, creates a NEW account
-           (email verification still happens, exactly like the web — a token is
-           only issued after you click the link we tell you to watch for)
+/start   — welcome (opens the account on first use)
+/login   — /login <email> <password>, joins this Telegram to your website account
+/signup  — /signup <email> <password> <display_name>, creates an email account
+           (email verification still happens, exactly like the web; then /login)
 /girls   — the doors: which sisters are open to you right now; tap one to talk
 /girl    — /girl <slug> (e.g. /girl dakota) to switch who you are talking to
 /state   — your tier, messages left, and every girl's trust stage
 /history — the last messages with the girl you are talking to
-/logout  — drop this chat's session (your account + history stay on Sorority House)
+/logout  — forget this chat's session (the next message reopens the same account)
 /help    — this text
 
 Env vars
@@ -34,6 +35,8 @@ Env vars
 TELEGRAM_BOT_TOKEN   from @BotFather. Never put the value in any file.
 PUBLIC_URL           the Sorority House backend base URL, e.g. the Railway app.
                      Required (no default), same across web and this bot.
+TELEGRAM_BOT_SECRET  the same random string as on the backend; it unlocks
+                     /auth/telegram. Required.
 """
 
 import asyncio
@@ -42,6 +45,7 @@ import json
 import logging
 import os
 import time
+import urllib.parse
 
 try:
     import requests
@@ -67,6 +71,7 @@ logger = logging.getLogger("sorority_tg")
 
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
+SECRET_ENV = "TELEGRAM_BOT_SECRET"   # shared with the backend; unlocks /auth/telegram
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 # Stripe Payment Links, one per paid tier (public URLs; checkout happens on Stripe).
 PLAN_LINKS = [
@@ -152,7 +157,7 @@ def _post(path, payload, token=None, timeout=40):
     r = requests.post(_base() + path, json=payload,
                       headers=_headers(token), timeout=timeout)
     if r.status_code == 401 and token:
-        raise BackendError("Your session has expired — /login <email> <password> again.")
+        raise BackendError("session expired", code="expired")
     return r
 
 
@@ -161,25 +166,47 @@ def _get(path, token=None, timeout=40):
         raise RuntimeError("Missing dependency 'requests'.")
     r = requests.get(_base() + path, headers=_headers(token), timeout=timeout)
     if r.status_code == 401 and token:
-        raise BackendError("Your session has expired — /login <email> <password> again.")
+        raise BackendError("session expired", code="expired")
     return r
 
 
-def _login(email, password):
-    r = _post("/auth/login", {"email": email, "password": password})
+def _auth_payload(r):
     if r.status_code == 403:
         raise BackendError(
-            "Your email is not verified yet. Open the verification link we sent "
-            "you (on the web sign-up) before logging in.", code="email_unverified")
+            "That email is not verified yet. Open the verification link the site sent "
+            "you, then try again.", code="email_unverified")
+    if r.status_code == 503:
+        raise BackendError("The bot is not connected to the house yet "
+                           f"({SECRET_ENV} is not set on the backend).")
     if r.status_code != 200:
         try:
             detail = r.json().get("detail", "")
         except Exception:
             detail = ""
-        raise BackendError(detail or f"Login failed (HTTP {r.status_code})")
+        raise BackendError(detail or f"Sign-in failed (HTTP {r.status_code})")
     data = r.json()
-    return {"token": data["token"], "user_id": data["user_id"],
-            "tier": data["tier"], "email": email}
+    return {"token": data["token"], "user_id": data["user_id"], "tier": data["tier"],
+            "email": data.get("email") or "", "created": bool(data.get("created"))}
+
+
+def _bot_secret() -> str:
+    secret = os.environ.get(SECRET_ENV, "").strip()
+    if not secret:
+        raise RuntimeError(f"{SECRET_ENV} is not set (same value as on the backend).")
+    return secret
+
+
+def _telegram_auth(telegram_id, display_name):
+    """The Telegram id is the account: first call creates it, later ones re-open it."""
+    return _auth_payload(_post("/auth/telegram", {
+        "telegram_id": telegram_id, "display_name": display_name, "secret": _bot_secret()}))
+
+
+def _login(telegram_id, email, password):
+    """Point this Telegram id at an existing website account instead."""
+    return _auth_payload(_post("/auth/telegram/link", {
+        "telegram_id": telegram_id, "email": email, "password": password,
+        "secret": _bot_secret()}))
 
 
 def _signup(email, password, display_name):
@@ -235,6 +262,9 @@ def _send_chat(token, girl, message):
 async def login(*args):
     return await asyncio.to_thread(_login, *args)
 
+async def telegram_auth(*args):
+    return await asyncio.to_thread(_telegram_auth, *args)
+
 async def signup(*args):
     return await asyncio.to_thread(_signup, *args)
 
@@ -276,38 +306,67 @@ async def _txt(update, text) -> None:
     await update.effective_message.reply_text(text)
 
 
-async def _require_login(update) -> bool:
+async def _ensure_session(update, force: bool = False):
+    """The session for this chat, opening one from the Telegram id when there is none
+    (first time: a fresh account, no email asked). Returns the record or None after
+    telling the user why."""
     rec = _rec(update)
-    if not rec or not rec.get("token"):
+    if rec and rec.get("token") and not force:
+        return rec
+    user = update.effective_user
+    try:
+        sess = await telegram_auth(user.id, (user.first_name or "Player")[:40])
+    except (BackendError, RuntimeError, NetError) as exc:
+        await _txt(update, f"Could not reach the house right now: {exc}")
+        return None
+    created = sess.pop("created", False)
+    store.set(update.effective_chat.id, **sess,
+              active_girl=(rec or {}).get("active_girl"))
+    if created:
         await _txt(update,
-             "You're not signed in yet.\n\n"
-             "• new here?  /signup <email> <password> <name>  (accounts are verified by "
-             "email, exactly like the web)\n"
-             "• already have a Sorority House account?  /login <email> <password>")
-        return False
-    return True
+             "🏛️ Welcome to Sorority House — your account is open, no sign-up needed. "
+             "Your Telegram is your key here.\n\n"
+             "Already have an account on the website? /login <email> <password> once "
+             "and this chat joins it (same history, same allowance).")
+    return _rec(update)
+
+
+async def _require_login(update) -> bool:
+    return await _ensure_session(update) is not None
+
+
+async def _call(update, fn, *args):
+    """Backend call with the chat's token; a dead session (the bot was redeployed, or
+    the site logged everyone out) is reopened from the Telegram id and retried once."""
+    rec = await _ensure_session(update)
+    if rec is None:
+        raise BackendError("could not reopen your session — try again in a moment")
+    try:
+        return await fn(rec["token"], *args)
+    except BackendError as exc:
+        if exc.code != "expired":
+            raise
+    rec = await _ensure_session(update, force=True)
+    if rec is None:
+        raise BackendError("could not reopen your session — try again in a moment")
+    return await fn(rec["token"], *args)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    rec = _rec(update)
-    if rec and rec.get("token"):
-        await _txt(update,
-             "Welcome back to the house. 💛\n\n"
-             "• /girls — knock on the doors that are open to you\n"
-             "• just type a message to talk to whoever you're with\n"
-             "• /state — your allowance + where you stand with each sister\n"
-             "• /menu — upgrade, the website, get the app\n"
-             "• /help — everything")
+    had = bool(_rec(update) and _rec(update).get("token"))
+    rec = await _ensure_session(update)
+    if rec is None:
         return
     await _txt(update,
-         "🏛️ Welcome to Sorority House.\n\n"
-         "This is the Telegram way to talk to the same sisters as the website — one "
-         "account, one history, one shared allowance. The girls are real the same way "
-         "they are there: doors open by trust, not by asking.\n\n"
-         "• already have a Sorority House account:  /login <email> <password>\n"
-         "• new here:                             /signup <email> <password> <name>\n"
-         "                                          (then watch the inbox for the "
-         "verification link, like the web)\n\n/menu for the website + app, /help for commands.")
+         ("Welcome back to the house. 💛\n\n" if had else
+          "This is the Telegram way to talk to the same sisters as the website — one "
+          "account, one history, one shared allowance. Doors open by trust, not by "
+          "asking.\n\n")
+         + "• /girls — knock on the doors that are open to you\n"
+         "• just type a message to talk to whoever you're with\n"
+         "• /state — your allowance + where you stand with each sister\n"
+         "• /menu — upgrade, the website, get the app\n"
+         "• /help — everything")
 
 
 async def cmd_signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -351,20 +410,21 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     email, password = args[0], " ".join(args[1:])
     try:
-        sess = await login(email, password)
+        sess = await login(update.effective_user.id, email, password)
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not sign in: {exc}")
         return
+    sess.pop("created", None)
     store.set(update.effective_chat.id, **sess, active_girl=None)
     await _txt(update,
-         f"Signed in as {sess['email']} — welcome back, and the house remembers you.\n\n"
-         "/girls to knock on a door, /state for your allowance.")
+         f"This Telegram is now {sess['email']}'s account — same history, same allowance "
+         "here and on the site.\n\n/girls to knock on a door, /state for your allowance.")
 
 
 async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     store.forget(update.effective_chat.id)
-    await _txt(update, "Signed out of this chat. Your account and every conversation stay "
-                 "on Sorority House — come back any time with /login.")
+    await _txt(update, "Forgot this chat's session. Your account stays where it is — the "
+                 "next message reopens it from your Telegram.")
 
 
 PORTRAIT_MAX_BYTES = 5 * 1024 * 1024  # Telegram's own sendPhoto ceiling is 10 MB
@@ -463,8 +523,8 @@ async def cmd_girls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     rec = _rec(update)
     try:
-        roster = (await fetch_roster(rec["token"]))["girls"]
-        state = (await fetch_state(rec["token"]))["girls"]
+        roster = (await _call(update, fetch_roster))["girls"]
+        state = (await _call(update, fetch_state))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not reach the house: {exc}")
         return
@@ -508,7 +568,7 @@ async def _open_girl(update, slug) -> None:
     sl = slug.strip().lower()
     rec = _rec(update)
     try:
-        rosters = (await fetch_roster(rec["token"]))["girls"]
+        rosters = (await _call(update, fetch_roster))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not reach the house: {exc}")
         return
@@ -517,11 +577,11 @@ async def _open_girl(update, slug) -> None:
                      + ", ".join(g["girl"] for g in rosters))
         return
     try:
-        state = (await fetch_state(rec["token"]))["girls"].get(sl, {})
+        state = (await _call(update, fetch_state))["girls"].get(sl, {})
         if not state.get("open"):
             await _txt(update, f"That door is currently shut — {state.get('locked_reason', 'keep talking on the web and it may open.')}")
             return
-        history = await fetch_history(rec["token"], sl)
+        history = await _call(update, fetch_history, sl)
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not reach the house: {exc}")
         return
@@ -556,8 +616,8 @@ async def cmd_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     rec = _rec(update)
     try:
-        st = await fetch_state(rec["token"])
-        roster = (await fetch_roster(rec["token"]))["girls"]
+        st = await _call(update, fetch_state)
+        roster = (await _call(update, fetch_roster))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not reach the house: {exc}")
         return
@@ -590,8 +650,8 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _txt(update, "Pick someone first:  /girls  or  /girl <slug>")
         return
     try:
-        history = await fetch_history(rec["token"], slug)
-        rosters = (await fetch_roster(rec["token"]))["girls"]
+        history = await _call(update, fetch_history, slug)
+        rosters = (await _call(update, fetch_roster))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not reach the house: {exc}")
         return
@@ -619,8 +679,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "menu:upgrade":
         await cmd_upgrade(update, context)
         return
-    if not _rec(update) or not _rec(update).get("token"):
-        await _txt(update, "Not signed in — /login <email> <password> first.")
+    if not await _require_login(update):
         return
     if data == "menu:girls":
         await cmd_girls(update, context)
@@ -640,15 +699,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not text.strip():
         return
     try:
-        out = await send_chat(rec["token"], slug, text)
+        out = await _call(update, send_chat, slug, text)
     except BackendError as exc:
         msg = str(exc)
         if exc.code == "out_of_messages" or msg == "out_of_messages" or \
                 "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
             await update.effective_message.reply_text(
-                "Your message allowance is spent. Upgrade or renew on the website and "
-                "you can keep talking here right away.",
-                reply_markup=_plans_markup())
+                "Your message allowance is spent. Upgrade or renew and you can keep "
+                "talking here right away.",
+                reply_markup=_plans_markup(_rec(update)))
             return
         await _txt(update, msg)
         return
@@ -666,12 +725,24 @@ async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     member would share (and could log out) whoever signed in."""
     if update.effective_message and update.effective_message.text and \
             update.effective_message.text.startswith("/"):
-        await _txt(update, "I only talk in private — message me directly and /login there.")
+        await _txt(update, "I only talk in private — message me directly.")
 
 
-def _plans_markup() -> InlineKeyboardMarkup:
+def _pay_url(url: str, rec) -> str:
+    """Payment Link for this account: client_reference_id tells the backend's Stripe
+    webhook which user paid (Telegram accounts have no email to match on), and a known
+    email is prefilled so checkout is one screen."""
+    if not rec or not rec.get("user_id"):
+        return url
+    q = {"client_reference_id": rec["user_id"]}
+    if rec.get("email"):
+        q["prefilled_email"] = rec["email"]
+    return url + ("&" if "?" in url else "?") + urllib.parse.urlencode(q)
+
+
+def _plans_markup(rec=None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 " + label, url=url)] for label, url in PLAN_LINKS])
+        [[InlineKeyboardButton("💳 " + label, url=_pay_url(url, rec))] for label, url in PLAN_LINKS])
 
 
 def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
@@ -686,27 +757,29 @@ def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    rec = _rec(update)
-    signed_in = bool(rec and rec.get("token"))
+    rec = await _ensure_session(update)
     await update.effective_message.reply_text(
         "Sorority House — where to?\n\n"
-        "Payments go through Stripe; pay with the same email you use here and your tier "
-        "shows up in this chat and on the site. The app installs from the site — no app store.",
-        reply_markup=_menu_markup(signed_in))
+        "Payments go through Stripe and your tier shows up in this chat and on the site. "
+        "The app installs from the site — no app store.",
+        reply_markup=_menu_markup(rec is not None))
 
 
 async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    rec = await _ensure_session(update)
+    if rec is None:
+        return
     await update.effective_message.reply_text(
-        "Pick a plan — checkout opens on Stripe. Use the same email you log in with "
-        "here and the house unlocks on the site, the app and this chat.",
-        reply_markup=_plans_markup())
+        "Pick a plan — checkout opens on Stripe (any email works there; the payment is "
+        "tied to this Telegram). The house unlocks here, on the site and in the app.",
+        reply_markup=_plans_markup(rec))
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
          "Sorority House on Telegram — commands:\n"
-         "/signup <email> <password> <name> — new account (email-verified like the web)\n"
-         "/login <email> <password> — sign into a Sorority House account\n"
+         "/login <email> <password> — join this Telegram to your website account\n"
+         "/signup <email> <password> <name> — make an email account (to use the site too)\n"
          "/girls — knock on the doors that are open\n"
          "/girl <slug> — switch who you're talking to\n"
          "/state — tier, messages left, where you stand\n"
@@ -725,6 +798,7 @@ def main():
         raise SystemExit(f"{TOKEN_ENV} is not set (from @BotFather).")
     try:
         _base()
+        _bot_secret()
     except RuntimeError as exc:
         raise SystemExit(f"{exc}")
 
