@@ -303,7 +303,10 @@ def repo_checks() -> list[str]:
         m = re.search(r"```checks\n(.*?)```", GUIDE.read_text(), re.S)
         if m:
             return [l.strip() for l in m.group(1).splitlines() if l.strip() and not l.startswith("#")]
-    return ["python -m py_compile main.py"]
+    changed = [f for f in git("diff", "--name-only", "HEAD").splitlines() if f.endswith(".py")]
+    changed += [f for f in git("ls-files", "--others", "--exclude-standard").splitlines()
+                if f.endswith(".py")]
+    return [f"python -m py_compile {shlex.quote(f)}" for f in changed if (ROOT / f).exists()]
 
 
 # --------------------------------------------------------------------------- agent

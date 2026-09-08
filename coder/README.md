@@ -60,3 +60,11 @@ after 60 tool calls. It still runs on your machine with your permissions, so rea
 
 `AGENTS.md` is its briefing. When it gets something wrong twice, add the rule there. The
 ```` ```checks ```` block in that file is the list of commands it must pass before finishing.
+
+## Using it on another project
+
+Nothing here is specific to this repo. Copy `coder/coder.py` into any git repository and run it
+from there: it finds that repo's root, reads its `AGENTS.md` if there is one (otherwise it works
+without a briefing and falls back to `python -m py_compile` on changed `.py` files as the check),
+and opens PRs against that repo with `gh`. Write a short `AGENTS.md` there with a
+```` ```checks ```` block and it will be as careful as it is here.
