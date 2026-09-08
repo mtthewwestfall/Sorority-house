@@ -3024,36 +3024,37 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                         event_at: int) -> bool:
     """Tier + Stripe ids + event timestamp in one transaction, guarded by the persisted
     timestamp so an older delivery can never overwrite a newer one, even concurrently.
-    Returns False when the event was stale. A paid tier always starts a fresh month
-    (every renewal invoice pays for one)."""
+    Returns False (and changes nothing) when the event was stale. A paid tier always starts
+    a fresh month (every renewal invoice pays for one). A Stripe customer funds exactly one
+    account: when a paid invoice lands on a different account than before, the previous
+    holder loses both the ids and the tier they paid for."""
+    clear = """comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
+               comp_prev_free_audits=NULL, comp_prev_reset_at=NULL"""
     conn = db()
     try:
         with conn.cursor() as cur:
-            if customer_id:
-                cur.execute("""
-                    UPDATE users SET stripe_customer_id=NULL, stripe_subscription_id=NULL
-                    WHERE stripe_customer_id=%s AND user_id<>%s
-                """, (customer_id, user_id))
             if tier == "freshman":
-                cur.execute("""
-                    UPDATE users SET tier='freshman', msg_used=%s,
-                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
-                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL,
+                cur.execute(f"""
+                    UPDATE users SET tier='freshman', msg_used=%s, {clear},
                         stripe_customer_id=%s, stripe_subscription_id=NULL, stripe_event_at=%s
                     WHERE user_id=%s AND stripe_event_at <= %s
                 """, (TIERS["freshman"]["limit"], customer_id or None, event_at,
                       user_id, event_at))
             else:
-                cur.execute("""
+                cur.execute(f"""
                     UPDATE users SET tier=%s, msg_used=0, free_audits_used=0,
-                        plan_reset_at = now() + interval '1 month',
-                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
-                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL,
+                        plan_reset_at = now() + interval '1 month', {clear},
                         stripe_customer_id=%s, stripe_subscription_id=%s, stripe_event_at=%s
                     WHERE user_id=%s AND stripe_event_at <= %s
                 """, (tier, customer_id or None, subscription_id or None, event_at,
                       user_id, event_at))
             applied = cur.rowcount == 1
+            if applied and customer_id and tier != "freshman":
+                cur.execute(f"""
+                    UPDATE users SET tier='freshman', msg_used=%s, {clear},
+                        stripe_customer_id=NULL, stripe_subscription_id=NULL, stripe_event_at=%s
+                    WHERE stripe_customer_id=%s AND user_id<>%s
+                """, (TIERS["freshman"]["limit"], event_at, customer_id, user_id))
             conn.commit()
     finally:
         conn.close()
