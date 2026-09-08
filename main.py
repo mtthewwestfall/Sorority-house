@@ -3020,19 +3020,44 @@ def _user_for_stripe_customer(customer_id: str):
     return _ensure_user(row["user_id"]) if row else None
 
 
-def _remember_stripe_ids(user_id: str, customer_id: str, subscription_id: str,
-                         event_at: int) -> None:
+def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_id: str,
+                        event_at: int) -> bool:
+    """Tier + Stripe ids + event timestamp in one transaction, guarded by the persisted
+    timestamp so an older delivery can never overwrite a newer one, even concurrently.
+    Returns False when the event was stale. A paid tier always starts a fresh month
+    (every renewal invoice pays for one)."""
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE users SET stripe_customer_id=%s, stripe_subscription_id=%s,
-                    stripe_event_at=%s
-                WHERE user_id=%s
-            """, (customer_id or None, subscription_id or None, event_at, user_id))
+            if customer_id:
+                cur.execute("""
+                    UPDATE users SET stripe_customer_id=NULL, stripe_subscription_id=NULL
+                    WHERE stripe_customer_id=%s AND user_id<>%s
+                """, (customer_id, user_id))
+            if tier == "freshman":
+                cur.execute("""
+                    UPDATE users SET tier='freshman', msg_used=%s,
+                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
+                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL,
+                        stripe_customer_id=%s, stripe_subscription_id=NULL, stripe_event_at=%s
+                    WHERE user_id=%s AND stripe_event_at <= %s
+                """, (TIERS["freshman"]["limit"], customer_id or None, event_at,
+                      user_id, event_at))
+            else:
+                cur.execute("""
+                    UPDATE users SET tier=%s, msg_used=0, free_audits_used=0,
+                        plan_reset_at = now() + interval '1 month',
+                        comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
+                        comp_prev_free_audits=NULL, comp_prev_reset_at=NULL,
+                        stripe_customer_id=%s, stripe_subscription_id=%s, stripe_event_at=%s
+                    WHERE user_id=%s AND stripe_event_at <= %s
+                """, (tier, customer_id or None, subscription_id or None, event_at,
+                      user_id, event_at))
+            applied = cur.rowcount == 1
             conn.commit()
     finally:
         conn.close()
+    return applied
 
 
 def _stripe_invoice_subscription(inv) -> str:
@@ -3097,11 +3122,9 @@ async def stripe_webhook(request: Request):
         except HTTPException:
             print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
             return {"ok": True, "ignored": "no account"}
-        # Stripe retries out of order: a paid event older than what we last applied is stale
-        if event_at < int(user.get("stripe_event_at") or 0):
+        if not _apply_stripe_event(user["user_id"], tier, customer_id,
+                                   _stripe_invoice_subscription(obj), event_at):
             return {"ok": True, "ignored": "stale event"}
-        _apply_tier(user, tier)
-        _remember_stripe_ids(user["user_id"], customer_id, _stripe_invoice_subscription(obj), event_at)
         return {"ok": True, "user_id": user["user_id"], "tier": tier}
 
     if kind == "customer.subscription.deleted" or \
@@ -3121,10 +3144,8 @@ async def stripe_webhook(request: Request):
         current = user.get("stripe_subscription_id")
         if current and obj.get("id") and obj.get("id") != current:
             return {"ok": True, "ignored": "not the current subscription"}
-        if event_at < int(user.get("stripe_event_at") or 0):
+        if not _apply_stripe_event(user["user_id"], "freshman", customer_id, "", event_at):
             return {"ok": True, "ignored": "stale event"}
-        _apply_tier(user, "freshman")
-        _remember_stripe_ids(user["user_id"], customer_id, "", event_at)
         return {"ok": True, "user_id": user["user_id"], "tier": "freshman"}
 
     return {"ok": True, "ignored": kind}
