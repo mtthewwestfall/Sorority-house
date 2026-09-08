@@ -517,7 +517,7 @@
         <form class="chat-form" id="chat-form">
           <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
           <div class="field">
-            <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
+            <textarea id="chat-input" name="ai-message" rows="1" autocomplete="nope" autocorrect="on" data-form-type="other" data-lpignore="true" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
             <button class="button" id="chat-send" type="submit" aria-label="Send">&uarr;</button>
           </div>
         </form>
