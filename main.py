@@ -3586,7 +3586,9 @@ def admin_accounts(q: str = "", limit: int = 100):
                 SELECT {_ACCOUNT_COLS} {_ACCOUNT_FROM}
                 WHERE {_ACCOUNT_ANY}
                   AND (%s = '' OR a.email LIKE %s OR lower(u.display_name) LIKE %s
-                       OR lower(u.user_id) LIKE %s OR 'tg:' || t.telegram_id LIKE %s)
+                       OR lower(u.user_id) LIKE %s
+                       OR EXISTS (SELECT 1 FROM telegram_accounts ta
+                                  WHERE ta.user_id=u.user_id AND 'tg:' || ta.telegram_id LIKE %s))
                 ORDER BY coalesce(a.created_at, t.created_at) DESC LIMIT %s
             """, (q, like, like, like, like, limit))
             return [_account_view(r) for r in cur.fetchall()]
