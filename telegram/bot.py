@@ -220,7 +220,8 @@ def _send_chat(token, girl, message):
             detail = r.json().get("detail", "")
         except Exception:
             detail = ""
-        raise BackendError(str(detail) or f"chat failed (HTTP {r.status_code})")
+        raise BackendError(str(detail) or f"chat failed (HTTP {r.status_code})",
+                           code="out_of_messages" if r.status_code == 402 else None)
     return r.json()
 
 
@@ -359,20 +360,33 @@ async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                  "on Sorority House — come back any time with /login.")
 
 
+PORTRAIT_MAX_BYTES = 5 * 1024 * 1024  # Telegram's own sendPhoto ceiling is 10 MB
+
+
 def _portrait_url(g) -> str:
-    """Roster avatar_url is site-relative (assets/zoe.jpg) or absolute."""
+    """Roster avatar_url is site-relative (assets/zoe.jpg) or absolute; only the site
+    itself is fetched, so a roster edit cannot point the bot at internal hosts."""
     url = (g.get("avatar_url") or "").strip()
     if not url:
         return ""
     if url.startswith("http://") or url.startswith("https://"):
-        return url
+        return url if url.startswith(SITE_URL + "/") else ""
+    if url.startswith("//") or ".." in url:
+        return ""
     return SITE_URL + "/" + url.lstrip("/")
 
 
 def _fetch_bytes(url: str):
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    return r.content
+    with requests.get(url, timeout=8, stream=True) as r:
+        r.raise_for_status()
+        if int(r.headers.get("Content-Length") or 0) > PORTRAIT_MAX_BYTES:
+            raise ValueError("portrait too large")
+        buf = bytearray()
+        for chunk in r.iter_content(65536):
+            buf.extend(chunk)
+            if len(buf) > PORTRAIT_MAX_BYTES:
+                raise ValueError("portrait too large")
+    return bytes(buf)
 
 
 async def _send_portrait(update, g, caption: str) -> bool:
@@ -390,15 +404,21 @@ async def _send_portrait(update, g, caption: str) -> bool:
 
 
 async def _send_album(update, girls) -> None:
+    girls = [g for g in girls[:10] if _portrait_url(g) and requests is not None]
+    if not girls:
+        return
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(asyncio.to_thread(_fetch_bytes, _portrait_url(g)) for g in girls),
+                           return_exceptions=True),
+            timeout=10)
+    except asyncio.TimeoutError:
+        logger.info("album skipped: portraits took too long")
+        return
     media = []
-    for g in girls[:10]:
-        url = _portrait_url(g)
-        if not url or requests is None:
-            continue
-        try:
-            data = await asyncio.to_thread(_fetch_bytes, url)
-        except Exception as exc:
-            logger.info("portrait for %s skipped: %s", g.get("girl"), exc)
+    for g, data in zip(girls, results):
+        if isinstance(data, BaseException):
+            logger.info("portrait for %s skipped: %s", g.get("girl"), data)
             continue
         media.append(InputMediaPhoto(data, caption=g.get("name", g.get("girl", ""))))
     if not media:
@@ -442,13 +462,13 @@ async def cmd_girls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     intro = "The doors of the house:\n" if (open_btns or closed) else "The house is empty right now."
     await update.effective_message.reply_text(intro)
-    await _send_album(update, [g for g in sorted(roster, key=lambda x: x.get("girl", ""))
-                               if state.get(g["girl"], {}).get("open")])
 
     if open_btns:
         await update.effective_message.reply_text(
             "✅ Open — tap one to talk:",
             reply_markup=InlineKeyboardMarkup(open_btns))
+        await _send_album(update, [g for g in sorted(roster, key=lambda x: x.get("girl", ""))
+                                   if state.get(g["girl"], {}).get("open")])
     else:
         await update.effective_message.reply_text(
             "No doors are open to you yet — trust opens them, and it builds on real "
@@ -600,7 +620,8 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         out = await send_chat(rec["token"], slug, text)
     except BackendError as exc:
         msg = str(exc)
-        if "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
+        if exc.code == "out_of_messages" or msg == "out_of_messages" or \
+                "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
             await update.effective_message.reply_text(
                 "Your message allowance is spent. Upgrade or renew on the website and "
                 "you can keep talking here right away.",
