@@ -25,6 +25,7 @@ Commands
            (email verification still happens, exactly like the web; then /login)
 /girls   — the doors: which sisters are open to you right now; tap one to talk
 /girl    — /girl <slug> (e.g. /girl dakota) to switch who you are talking to
+/house   — leave her room and go back to the doors (also the keyboard button)
 /state   — your tier, messages left, and every girl's trust stage
 /history — the last messages with the girl you are talking to
 /logout  — forget this chat's session (the next message reopens the same account)
@@ -54,7 +55,8 @@ except Exception:  # pragma: no cover - requirement listed in this folder
     requests = None
     NetError = Exception
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto,
+                      KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -306,6 +308,13 @@ async def _txt(update, text) -> None:
     await update.effective_message.reply_text(text)
 
 
+# While the user is in a girl's room a one-key reply keyboard stays under the
+# composer, so leaving is a tap instead of remembering a command.
+BACK_TO_HOUSE = "\U0001F3E0 Back to the house"
+ROOM_KEYBOARD = ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_HOUSE)]],
+                                    resize_keyboard=True, is_persistent=True)
+
+
 async def _ensure_session(update, force: bool = False):
     """The session for this chat, opening one from the Telegram id when there is none
     (first time: a fresh account, no email asked). Returns the record or None after
@@ -416,15 +425,17 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     sess.pop("created", None)
     store.set(update.effective_chat.id, **sess, active_girl=None)
-    await _txt(update,
+    await update.effective_message.reply_text(
          f"This Telegram is now {sess['email']}'s account — same history, same allowance "
-         "here and on the site.\n\n/girls to knock on a door, /state for your allowance.")
+         "here and on the site.\n\n/girls to knock on a door, /state for your allowance.",
+         reply_markup=ReplyKeyboardRemove())
 
 
 async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     store.forget(update.effective_chat.id)
-    await _txt(update, "Forgot this chat's session. Your account stays where it is — the "
-                 "next message reopens it from your Telegram.")
+    await update.effective_message.reply_text(
+        "Forgot this chat's session. Your account stays where it is — the "
+        "next message reopens it from your Telegram.", reply_markup=ReplyKeyboardRemove())
 
 
 PORTRAIT_MAX_BYTES = 5 * 1024 * 1024  # Telegram's own sendPhoto ceiling is 10 MB
@@ -598,7 +609,17 @@ async def _open_girl(update, slug) -> None:
     else:
         msg = _girl_name(rosters, sl) + " — nothing between you yet."
     msg += "\n\nSay something. She'll answer 💬"
-    await _txt(update, msg[:4000])
+    await update.effective_message.reply_text(msg[:4000], reply_markup=ROOM_KEYBOARD)
+
+
+async def cmd_house(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Leave her room: forget the active girl, drop the room keyboard, show the doors."""
+    if not await _require_login(update):
+        return
+    store.set(update.effective_chat.id, active_girl=None)
+    await update.effective_message.reply_text("Back in the hallway.",
+                                              reply_markup=ReplyKeyboardRemove())
+    await cmd_girls(update, context)
 
 
 async def cmd_girl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -691,11 +712,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not await _require_login(update):
         return
     rec = _rec(update)
+    text = update.message.text or ""
+    if text.strip() == BACK_TO_HOUSE:
+        await cmd_house(update, context)
+        return
     slug = rec.get("active_girl")
     if not slug:
         await _txt(update, "Who do you want to talk to?  Tap one on /girls, or  /girl <slug>.")
         return
-    text = update.message.text or ""
     if not text.strip():
         return
     try:
@@ -782,6 +806,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
          "/signup <email> <password> <name> — make an email account (to use the site too)\n"
          "/girls — knock on the doors that are open\n"
          "/girl <slug> — switch who you're talking to\n"
+         "/house — leave her room and go back to the doors\n"
          "/state — tier, messages left, where you stand\n"
          "/history — the recent thread with her\n"
          "/menu — upgrade, open the website, get the app\n"
@@ -811,6 +836,7 @@ def main():
     app.add_handler(CommandHandler("logout", cmd_logout))
     app.add_handler(CommandHandler("girls", cmd_girls))
     app.add_handler(CommandHandler("girl", cmd_girl))
+    app.add_handler(CommandHandler("house", cmd_house))
     app.add_handler(CommandHandler("state", cmd_state))
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CommandHandler("menu", cmd_menu))
