@@ -687,6 +687,7 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_credits INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_event_at BIGINT NOT NULL DEFAULT 0;
                 CREATE TABLE IF NOT EXISTS picture_payments (
                     payment_id TEXT PRIMARY KEY,
                     user_id    TEXT NOT NULL,
@@ -3019,14 +3020,16 @@ def _user_for_stripe_customer(customer_id: str):
     return _ensure_user(row["user_id"]) if row else None
 
 
-def _remember_stripe_ids(user_id: str, customer_id: str, subscription_id: str) -> None:
+def _remember_stripe_ids(user_id: str, customer_id: str, subscription_id: str,
+                         event_at: int) -> None:
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                UPDATE users SET stripe_customer_id=%s, stripe_subscription_id=%s
+                UPDATE users SET stripe_customer_id=%s, stripe_subscription_id=%s,
+                    stripe_event_at=%s
                 WHERE user_id=%s
-            """, (customer_id or None, subscription_id or None, user_id))
+            """, (customer_id or None, subscription_id or None, event_at, user_id))
             conn.commit()
     finally:
         conn.close()
@@ -3079,6 +3082,7 @@ async def stripe_webhook(request: Request):
 
     customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else \
         (obj.get("customer") or {}).get("id", "")
+    event_at = int(event.get("created") or 0)
 
     if kind == "invoice.paid":
         tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
@@ -3093,8 +3097,11 @@ async def stripe_webhook(request: Request):
         except HTTPException:
             print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
             return {"ok": True, "ignored": "no account"}
+        # Stripe retries out of order: a paid event older than what we last applied is stale
+        if event_at < int(user.get("stripe_event_at") or 0):
+            return {"ok": True, "ignored": "stale event"}
         _apply_tier(user, tier)
-        _remember_stripe_ids(user["user_id"], customer_id, _stripe_invoice_subscription(obj))
+        _remember_stripe_ids(user["user_id"], customer_id, _stripe_invoice_subscription(obj), event_at)
         return {"ok": True, "user_id": user["user_id"], "tier": tier}
 
     if kind == "customer.subscription.deleted" or \
@@ -3114,8 +3121,10 @@ async def stripe_webhook(request: Request):
         current = user.get("stripe_subscription_id")
         if current and obj.get("id") and obj.get("id") != current:
             return {"ok": True, "ignored": "not the current subscription"}
+        if event_at < int(user.get("stripe_event_at") or 0):
+            return {"ok": True, "ignored": "stale event"}
         _apply_tier(user, "freshman")
-        _remember_stripe_ids(user["user_id"], customer_id, "")
+        _remember_stripe_ids(user["user_id"], customer_id, "", event_at)
         return {"ok": True, "user_id": user["user_id"], "tier": "freshman"}
 
     return {"ok": True, "ignored": kind}
