@@ -1110,7 +1110,8 @@
       if (s.next_in) outOf = `You get ${s.free_per} more free every ${s.every} messages — ${s.next_in} to go. Or grab a pack of ${packSize} for ${price}.`;
       else if (s.free_start) outOf = `You've used your ${s.free_start} free pictures. Grab a pack of ${packSize} for ${price} to keep them coming.`;
       else outOf = `You're out of pictures. Grab a pack of ${packSize} for ${price}.`;
-      p.textContent = available > 0
+      // No status yet (offline, or /image not loaded): don't claim she's out.
+      p.textContent = (!picStatus || available > 0)
         ? 'She picks the moment. Same girl, same style as her door.'
         : outOf;
       const row = document.createElement('div');
