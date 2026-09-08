@@ -58,6 +58,18 @@ HIDDEN_SYNTAX = re.compile(r"`|\$\(|\beval\b|\bexec\b|\bsh\s+-c|\bbash\s+-c|\bsu
 RUN_POLICY = {"yes": False}    # set from --yes at startup
 
 
+def interpreter_opts(words: list[str]) -> list[str]:
+    """Options given to the interpreter itself, i.e. before the script path (or `-m module`)."""
+    opts = []
+    for w in words[1:]:
+        if not w.startswith("-") or w == "-":
+            break
+        opts.append(w)
+        if w in ("-m", "--"):
+            break
+    return opts
+
+
 def command_allowed(command: str) -> str | None:
     """None if every piece of the pipeline is on the allowlist, else the reason it isn't."""
     if HIDDEN_SYNTAX.search(command):
@@ -91,7 +103,8 @@ def command_allowed(command: str) -> str | None:
             return f"`{prog}` is not on the allowlist"
         elif prog in NEVER_AUTO:
             return f"`{prog}` fetches or runs arbitrary code"
-        elif prog in INLINE_CODE and INLINE_CODE[prog] & set(words[1:]):
+        elif prog in INLINE_CODE and any(o.startswith(f) if len(f) == 2 else o.split("=")[0] == f
+                                         for o in interpreter_opts(words) for f in INLINE_CODE[prog]):
             return f"inline `{prog}` code runs unrestricted; put it in a file under the repo"
         elif prog in INSTALLERS and INSTALLERS[prog] & set(words[1:]):
             return f"`{prog}` would install or execute packages"
