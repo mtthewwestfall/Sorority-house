@@ -42,6 +42,13 @@ API CONTRACT implemented here (point your chat app at these):
   POST /auth/login  {"email","password"}                -> {"token","user_id","tier"}
                     (403 email_unverified until the link is clicked)
   POST /auth/logout  (bearer)                            -> {"ok"}
+  POST /auth/telegram {"telegram_id","display_name","secret"}
+                                                         -> {"token","user_id","tier","created",
+                                                             "email"}  (the Telegram bot's login:
+                    the Telegram id IS the account; first call creates it. secret = TELEGRAM_BOT_SECRET)
+  POST /auth/telegram/link {"telegram_id","email","password","secret"}
+                                                         -> same; points that Telegram id at an
+                    existing (verified) email account instead
   POST /chat        {"girl","message"}  (bearer)        -> {"reply","remaining","milestone","ok"}
   POST /chat/stream {"girl","message"}  (bearer)        -> text/event-stream, she TYPES:
                     event: open {"girl"} / delta {"t"} ... / done {"remaining","milestone"}
@@ -55,8 +62,13 @@ API CONTRACT implemented here (point your chat app at these):
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
                                                             by hand (tier 'freshman' = cancelled)
   POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
-                                                            the account with the customer's email
+                                                            the account remembered for the customer,
+                                                            else the one with the customer's email,
                                                             to the tier of the price paid;
+                                                            checkout.session.completed with a
+                                                            client_reference_id (= user_id, the
+                                                            Telegram bot adds it to the Payment Link)
+                                                            upgrades that account (needs STRIPE_API_KEY);
                                                             subscription deleted/unpaid -> freshman
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
@@ -118,9 +130,15 @@ Env vars (Railway -> Variables):
   STRIPE_WEBHOOK_SECRET
                     signing secret of the Stripe webhook endpoint (whsec_...); the
                     /webhooks/stripe route refuses with 503 until it is set.
-  STRIPE_API_KEY    optional restricted key (Customers: read). Cancellations are matched
-                    by the customer id remembered from invoice.paid; the key only covers
-                    customers that never paid through this webhook.
+  STRIPE_API_KEY    optional restricted key (Customers: read, Subscriptions: read).
+                    Cancellations are matched by the customer id remembered from
+                    invoice.paid; the key covers customers that never paid through this
+                    webhook, and REQUIRED for Telegram-started checkouts (the tier is read
+                    from the subscription behind checkout.session.completed).
+  TELEGRAM_BOT_SECRET
+                    shared secret between this backend and telegram/bot.py; /auth/telegram*
+                    refuse with 503 until it is set. Any long random string, same value
+                    on both services.
   STRIPE_PRICE_SOPHOMORE / STRIPE_PRICE_JUNIOR / STRIPE_PRICE_SENIOR
                     price ids behind the three Payment Links (defaults are the live ones).
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
@@ -256,6 +274,7 @@ STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2"): "senior",
 }
 STRIPE_SIG_TOLERANCE_S = 300
+TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -688,6 +707,13 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_event_at BIGINT NOT NULL DEFAULT 0;
+                -- Telegram users: the Telegram id is the login; /auth/telegram/link can
+                -- later point it at an email account instead.
+                CREATE TABLE IF NOT EXISTS telegram_accounts (
+                    telegram_id BIGINT PRIMARY KEY,
+                    user_id     TEXT NOT NULL REFERENCES users(user_id),
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
                 CREATE TABLE IF NOT EXISTS picture_payments (
                     payment_id TEXT PRIMARY KEY,
                     user_id    TEXT NOT NULL,
@@ -910,24 +936,29 @@ def _client_ip(request: Request):
     return request.client.host if request.client else "?"
 
 
-def auth_rate_limit(request: Request):
-    """Sliding-window per-IP limiter for signup/login/resend. In-process only
-    (good enough for a single Railway instance; swap for Redis if we scale out)."""
+def _rate_check(key):
+    """Sliding-window limiter keyed by caller (an IP, or a Telegram id behind the bot).
+    In-process only (good enough for a single Railway instance; swap for Redis if we
+    scale out)."""
     if AUTH_RATE_LIMIT <= 0:
         return
-    ip = _client_ip(request)
     now = time.monotonic()
     with _rate_lock:
-        q = _rate_hits[ip]
+        q = _rate_hits[key]
         while q and q[0] <= now - AUTH_RATE_WINDOW_S:
             q.popleft()
         if len(q) >= AUTH_RATE_LIMIT:
             raise HTTPException(status_code=429,
                                 detail="Too many attempts. Try again in a minute.")
         q.append(now)
-        if len(_rate_hits) > 10000:   # bound memory: drop idle IPs
+        if len(_rate_hits) > 10000:   # bound memory: drop idle callers
             for k in [k for k, v in _rate_hits.items() if not v or v[-1] <= now - AUTH_RATE_WINDOW_S]:
                 del _rate_hits[k]
+
+
+def auth_rate_limit(request: Request):
+    """Per-IP limiter for signup/login/resend."""
+    _rate_check(_client_ip(request))
 
 
 def current_user(authorization: str = Header(default="")):
@@ -2161,6 +2192,19 @@ class ResendVerifyIn(BaseModel):
     email: str
 
 
+class TelegramAuthIn(BaseModel):
+    telegram_id: int
+    display_name: str = "Player"
+    secret: str
+
+
+class TelegramLinkIn(BaseModel):
+    telegram_id: int
+    email: str
+    password: str
+    secret: str
+
+
 class ChatIn(BaseModel):
     girl: str
     message: str = Field(max_length=CHAT_MAX_CHARS)
@@ -2387,6 +2431,85 @@ def logout(authorization: str = Header(default=""), user=Depends(current_user)):
     finally:
         conn.close()
     return {"ok": True}
+
+
+def _telegram_guard(secret: str, telegram_id: int):
+    if not TELEGRAM_BOT_SECRET:
+        raise HTTPException(status_code=503, detail="TELEGRAM_BOT_SECRET must be set")
+    if not hmac.compare_digest(secret.encode(), TELEGRAM_BOT_SECRET.encode()):
+        raise HTTPException(status_code=401, detail="Bad bot secret")
+    if telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id")
+    _rate_check(f"tg:{telegram_id}")
+
+
+def _telegram_session(cur, telegram_id, user_id):
+    """Point a Telegram id at an account and open a session on it."""
+    cur.execute("""
+        INSERT INTO telegram_accounts (telegram_id, user_id) VALUES (%s,%s)
+        ON CONFLICT (telegram_id) DO UPDATE SET user_id=EXCLUDED.user_id
+    """, (telegram_id, user_id))
+    token = _new_session(cur, user_id)
+    cur.execute("SELECT email FROM accounts WHERE user_id=%s", (user_id,))
+    acct = cur.fetchone()
+    return token, (acct["email"] if acct else "")
+
+
+@app.post("/auth/telegram")
+def telegram_auth(body: TelegramAuthIn):
+    """The bot's login. A Telegram id maps to exactly one account; the first call
+    creates a fresh freshman account for it (no email, no password), later calls
+    just open a new session. Only the bot knows TELEGRAM_BOT_SECRET, and Telegram
+    has already authenticated the user to the bot."""
+    _telegram_guard(body.secret, body.telegram_id)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM telegram_accounts WHERE telegram_id=%s",
+                        (body.telegram_id,))
+            row = cur.fetchone()
+            created = row is None
+            if created:
+                user_id = "u_" + secrets.token_hex(12)
+                cur.execute("""
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                    VALUES (%s,%s,'freshman', now() + interval '1 month')
+                """, (user_id, body.display_name.strip()[:40] or "Player"))
+            else:
+                user_id = row["user_id"]
+            token, email = _telegram_session(cur, body.telegram_id, user_id)
+            conn.commit()
+    finally:
+        conn.close()
+    user = _ensure_user(user_id)
+    return {"ok": True, "token": token, "user_id": user["user_id"], "tier": user["tier"],
+            "created": created, "email": email}
+
+
+@app.post("/auth/telegram/link")
+def telegram_link(body: TelegramLinkIn):
+    """Point a Telegram id at an existing website account (email + password, verified),
+    so the site and the bot share one history and one allowance. The account the id
+    was auto-created with, if any, is simply left behind."""
+    _telegram_guard(body.secret, body.telegram_id)
+    email = _norm_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            acct = _account_by_email(cur, email)
+            if acct is None or not _verify_pw(body.password, acct["password_hash"]):
+                raise HTTPException(status_code=401, detail="Wrong email or password")
+            if acct["verified_at"] is None:
+                raise HTTPException(status_code=403,
+                                    detail="email_unverified|Check your inbox and confirm "
+                                           "your email before linking it")
+            token, _ = _telegram_session(cur, body.telegram_id, acct["user_id"])
+            conn.commit()
+    finally:
+        conn.close()
+    user = _ensure_user(acct["user_id"])
+    return {"ok": True, "token": token, "user_id": user["user_id"], "tier": user["tier"],
+            "created": False, "email": email}
 
 
 @app.post("/chat")
@@ -3087,6 +3210,24 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
     return user_id if applied else ""
 
 
+def _stripe_subscription_tier(subscription_id: str) -> str:
+    """Tier of the price on a subscription, via STRIPE_API_KEY. Raises 503 when the key is
+    missing or Stripe is unreachable so Stripe keeps retrying the event."""
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=503,
+                            detail="STRIPE_API_KEY is required to read the subscription")
+    try:
+        r = requests.get(f"https://api.stripe.com/v1/subscriptions/{subscription_id}",
+                         auth=(STRIPE_API_KEY, ""), timeout=15)
+        if r.status_code == 404:
+            return ""
+        if r.status_code != 200:
+            raise HTTPException(status_code=503, detail="Stripe subscription lookup failed")
+        return _stripe_tier_for_lines((r.json().get("items") or {}).get("data"))
+    except (requests.RequestException, ValueError):
+        raise HTTPException(status_code=503, detail="Stripe subscription lookup failed")
+
+
 def _stripe_invoice_subscription(inv) -> str:
     """Subscription id of an invoice; shape differs by API version."""
     sub = inv.get("subscription")
@@ -3111,8 +3252,11 @@ def _stripe_tier_for_lines(lines) -> str:
 @app.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
     """Stripe webhook for the subscription Payment Links. invoice.paid (first charge and
-    every renewal) sets the tier of the paid price on the account that matches the
-    customer's email; a deleted or unpaid subscription drops it to freshman. Emails
+    every renewal) sets the tier of the paid price on the account already holding the
+    customer, else on the one that matches the customer's email; a deleted or unpaid
+    subscription drops it to freshman. checkout.session.completed carries the
+    client_reference_id the Telegram bot appends to the Payment Link (the user_id), which
+    is how an account with no email gets its first upgrade and its customer id. Emails
     with no account are acknowledged and logged, so Stripe stops retrying."""
     if not STRIPE_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="STRIPE_WEBHOOK_SECRET must be set")
@@ -3140,17 +3284,43 @@ async def stripe_webhook(request: Request):
         tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
         if not tier:
             return {"ok": True, "ignored": "no known price"}
-        email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
-        if not email:
-            print(f"[stripe] {kind} {event.get('id')}: no customer email", flush=True)
-            return {"ok": True, "ignored": "no email"}
-        try:
-            user = _user_for_email(email)
-        except HTTPException:
-            print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
-            return {"ok": True, "ignored": "no account"}
+        user = _user_for_stripe_customer(customer_id)
+        if user is None:
+            email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
+            if not email:
+                print(f"[stripe] {kind} {event.get('id')}: no customer email", flush=True)
+                return {"ok": True, "ignored": "no email"}
+            try:
+                user = _user_for_email(email)
+            except HTTPException:
+                print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
+                return {"ok": True, "ignored": "no account"}
         applied = _apply_stripe_event(user["user_id"], tier, customer_id,
                                       _stripe_invoice_subscription(obj), event_at)
+        if not applied:
+            return {"ok": True, "ignored": "stale event"}
+        return {"ok": True, "user_id": applied, "tier": tier}
+
+    if kind == "checkout.session.completed":
+        ref = (obj.get("client_reference_id") or "").strip()
+        sub = obj.get("subscription")
+        sub = sub if isinstance(sub, str) else (sub or {}).get("id", "") or ""
+        if not ref or not sub or obj.get("mode") != "subscription":
+            return {"ok": True, "ignored": "no client_reference_id"}
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users WHERE user_id=%s", (ref,))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            print(f"[stripe] {kind} {event.get('id')}: client_reference_id is not a user", flush=True)
+            return {"ok": True, "ignored": "unknown user"}
+        tier = _stripe_subscription_tier(sub)
+        if not tier:
+            return {"ok": True, "ignored": "no known price"}
+        applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at)
         if not applied:
             return {"ok": True, "ignored": "stale event"}
         return {"ok": True, "user_id": applied, "tier": tier}
