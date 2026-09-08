@@ -37,9 +37,11 @@ PUBLIC_URL           the Sorority House backend base URL, e.g. the Railway app.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
+import time
 
 try:
     import requests
@@ -361,6 +363,10 @@ async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 PORTRAIT_MAX_BYTES = 5 * 1024 * 1024  # Telegram's own sendPhoto ceiling is 10 MB
+PORTRAIT_DEADLINE_S = 8.0  # end-to-end per download, not per socket read
+# Portrait downloads get their own small pool so a slow image host can never occupy the
+# default executor that login / roster / chat calls run on.
+_portrait_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="portrait")
 
 
 def _portrait_url(g) -> str:
@@ -377,7 +383,8 @@ def _portrait_url(g) -> str:
 
 
 def _fetch_bytes(url: str):
-    with requests.get(url, timeout=8, stream=True) as r:
+    deadline = time.monotonic() + PORTRAIT_DEADLINE_S
+    with requests.get(url, timeout=(4, 4), stream=True) as r:
         r.raise_for_status()
         if int(r.headers.get("Content-Length") or 0) > PORTRAIT_MAX_BYTES:
             raise ValueError("portrait too large")
@@ -386,7 +393,13 @@ def _fetch_bytes(url: str):
             buf.extend(chunk)
             if len(buf) > PORTRAIT_MAX_BYTES:
                 raise ValueError("portrait too large")
+            if time.monotonic() > deadline:
+                raise TimeoutError("portrait download too slow")
     return bytes(buf)
+
+
+def _fetch_portrait(url: str):
+    return asyncio.get_running_loop().run_in_executor(_portrait_pool, _fetch_bytes, url)
 
 
 async def _send_portrait(update, g, caption: str) -> bool:
@@ -395,7 +408,7 @@ async def _send_portrait(update, g, caption: str) -> bool:
     if not url or requests is None:
         return False
     try:
-        data = await asyncio.to_thread(_fetch_bytes, url)
+        data = await _fetch_portrait(url)
         await update.effective_message.reply_photo(data, caption=caption[:1024])
         return True
     except Exception as exc:  # network, bad image, telegram refusing the format
@@ -409,9 +422,9 @@ async def _send_album(update, girls) -> None:
         return
     try:
         results = await asyncio.wait_for(
-            asyncio.gather(*(asyncio.to_thread(_fetch_bytes, _portrait_url(g)) for g in girls),
+            asyncio.gather(*(_fetch_portrait(_portrait_url(g)) for g in girls),
                            return_exceptions=True),
-            timeout=10)
+            timeout=PORTRAIT_DEADLINE_S * 4)
     except asyncio.TimeoutError:
         logger.info("album skipped: portraits took too long")
         return
