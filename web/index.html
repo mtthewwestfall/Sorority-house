@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Welcome to the Sorority House</title>
   <meta name="description" content="A social experiment. 28 doors. Can you survive or will you thrive?" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0d0918" />
+  <link rel="icon" href="assets/favicon-32.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="The House" />
   <style>
     :root {
       --ink: #0d0918;
@@ -86,6 +94,24 @@
     nav a { text-decoration: none; color: var(--muted); font-size: .86rem; }
     nav a:hover { color: var(--white); }
     .nav-cta { border: 1px solid rgba(255,181,44,.5); border-radius: 999px; padding: 8px 14px; color: var(--gold); }
+
+    /* Install invitation: only ever shown to a browser that can actually install. */
+    .install-bar {
+      display: none; position: fixed; z-index: 25; left: 50%; transform: translateX(-50%);
+      bottom: 18px; width: calc(100% - 32px); max-width: 460px; gap: 14px; align-items: center;
+      padding: 12px 14px; border: 1px solid var(--line); border-radius: 18px;
+      background: var(--panel); backdrop-filter: blur(12px); box-shadow: var(--shadow);
+    }
+    .install-bar.show { display: flex; }
+    .install-bar img { width: 42px; height: 42px; border-radius: 12px; flex: none; }
+    .install-bar .install-copy { flex: 1; min-width: 0; font-size: .84rem; line-height: 1.35; }
+    .install-bar .install-copy strong { display: block; font-size: .9rem; }
+    .install-bar .install-copy span { color: var(--muted); }
+    .install-bar .button { padding: 9px 15px; font-size: .82rem; white-space: nowrap; }
+    .install-bar .install-dismiss {
+      background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1;
+      padding: 0 2px; cursor: pointer; flex: none;
+    }
 
     .hero {
       min-height: 820px; display: grid; place-items: center; text-align: center; position: relative; overflow: hidden;
@@ -493,9 +519,18 @@
   <footer>
     <div class="wrap footer-inner">
       <div>© 2026 The Sorority House · Exclusive through referrals<br /><span class="ai-note">The girls are AI characters. Conversations are fiction.</span></div>
-      <div class="footer-links"><a href="#merch">Merch</a><a href="#" id="footer-auth">Sign in</a><a href="#top">Back to top ↑</a></div>
+      <div class="footer-links"><a href="#merch">Merch</a><a href="#" id="footer-auth">Sign in</a><a href="#" id="footer-install" hidden>Install the app</a><a href="#top">Back to top ↑</a></div>
     </div>
   </footer>
+  <div class="install-bar" id="install-bar">
+    <img src="assets/icon-192.png" alt="" />
+    <div class="install-copy">
+      <strong>Keep the house on your phone</strong>
+      <span id="install-how">Install it and the doors open straight from your home screen.</span>
+    </div>
+    <button class="button" type="button" id="install-go">Install</button>
+    <button class="install-dismiss" type="button" id="install-no" aria-label="Not now">&times;</button>
+  </div>
   <div class="chat-backdrop" id="auth" role="dialog" aria-modal="true" aria-labelledby="auth-heading">
     <div class="chat-panel auth-panel">
       <button class="chat-close auth-close" id="auth-close" type="button" aria-label="Close">&times;</button>
@@ -1396,6 +1431,77 @@
         document.getElementById('doors').scrollIntoView({ behavior: 'smooth' });
       });
     });
+
+    /* The house as an installed app.
+       The service worker only caches the shipped shell, so an installed copy is the
+       same site in a standalone window: same API, same account, same conversations.
+       The invitation to install is shown once and only where installing is possible
+       — Chromium hands us a prompt, iOS Safari only has the Share sheet, and a copy
+       that is already installed is asked nothing. */
+    const INSTALL_DISMISSED = 'sorority_install_dismissed';
+
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+
+    (function installInvite() {
+      const bar = document.getElementById('install-bar');
+      const how = document.getElementById('install-how');
+      const go = document.getElementById('install-go');
+      const footerLink = document.getElementById('footer-install');
+      if (window.matchMedia('(display-mode: standalone)').matches
+          || window.navigator.standalone === true) return;
+
+      const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const shareSheet = 'Tap the Share button, then "Add to Home Screen".';
+      let installEvent = null;
+
+      const show = () => bar.classList.add('show');
+      const offer = () => {
+        footerLink.hidden = false;
+        if (!localStorage.getItem(INSTALL_DISMISSED)) show();
+      };
+
+      window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        installEvent = event;
+        offer();
+      });
+
+      if (ios) {
+        how.textContent = shareSheet;
+        go.hidden = true;
+        offer();
+      }
+
+      go.addEventListener('click', async () => {
+        if (!installEvent) { how.textContent = shareSheet; return; }
+        const chosen = installEvent;
+        installEvent = null;
+        chosen.prompt();
+        const { outcome } = await chosen.userChoice;
+        if (outcome === 'accepted') bar.classList.remove('show');
+      });
+
+      document.getElementById('install-no').addEventListener('click', () => {
+        bar.classList.remove('show');
+        localStorage.setItem(INSTALL_DISMISSED, '1');
+      });
+
+      footerLink.addEventListener('click', (event) => {
+        event.preventDefault();
+        localStorage.removeItem(INSTALL_DISMISSED);
+        show();
+      });
+
+      window.addEventListener('appinstalled', () => {
+        bar.classList.remove('show');
+        footerLink.hidden = true;
+      });
+    })();
   </script>
 </body>
 </html>
