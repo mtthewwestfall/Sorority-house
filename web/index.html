@@ -919,7 +919,13 @@
       clearTimeout(fitTimer);
       fitTimer = setTimeout(() => {
         fitTimer = 0;
-        if (!chat.classList.contains('is-open') || !mobileChat.matches) return;
+        if (!chat.classList.contains('is-open')) return;
+        if (!mobileChat.matches) {
+          chat.style.transform = '';
+          chat.style.removeProperty('--vvh');
+          lastViewport = '';
+          return;
+        }
         const now = viewportKey();
         if (now !== pendingViewport) { fitChatToViewport(); return; }
         if (now === lastViewport) return;
