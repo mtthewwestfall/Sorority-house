@@ -341,7 +341,10 @@ class Model:
         self.prices = load_prices()
         pin, pout = os.environ.get("CODER_PRICE_IN"), os.environ.get("CODER_PRICE_OUT")
         if pin and pout:
-            self.prices.setdefault(self.model, (float(pin), float(pout)))
+            try:
+                self.prices.setdefault(self.model, (float(pin), float(pout)))
+            except ValueError:
+                raise SystemExit("CODER_PRICE_IN / CODER_PRICE_OUT must be numbers ($ per 1M tokens)")
         self.usage: dict[str, list[int]] = {}      # model -> [calls, prompt_tokens, completion_tokens]
 
     def chat(self, messages: list[dict], tools: list[dict]) -> dict:
@@ -374,12 +377,14 @@ class Model:
                         msg = data["choices"][0]["message"]
                         if not isinstance(msg, dict):
                             raise TypeError("message is not an object")
+                        tokens_in = int(usage.get("prompt_tokens") or 0)
+                        tokens_out = int(usage.get("completion_tokens") or 0)
                     except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
                         raise ModelError(f"model call failed: unusable 200 reply from {self.model}: {e}")
                     u = self.usage.setdefault(self.model, [0, 0, 0])
                     u[0] += 1
-                    u[1] += usage.get("prompt_tokens", 0)
-                    u[2] += usage.get("completion_tokens", 0)
+                    u[1] += tokens_in
+                    u[2] += tokens_out
                     if "googleapis" not in self.base_url:
                         # Gemini's thought signatures ride in extra_content; other providers reject it
                         for c in msg.get("tool_calls") or []:
@@ -591,10 +596,10 @@ def main() -> None:
     if git("status", "--porcelain"):
         raise SystemExit("working tree is dirty; commit or stash first so the PR only has my changes")
 
+    model = Model(endpoints)      # validates prices etc. before we touch branches
     base = git("rev-parse", "--abbrev-ref", "HEAD")
     branch = f"coder/{int(time.time())}-{slug(task)}"
     git("checkout", "-b", branch)
-    model = Model(endpoints)
     say(f"branch {branch} (from {base}); model {model.model}"
         + (f" (fallback: {', '.join(m for _, m, _ in model.endpoints[1:])})" if len(model.endpoints) > 1 else ""))
 
