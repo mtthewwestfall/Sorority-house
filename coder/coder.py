@@ -52,22 +52,28 @@ ALLOWED = {"python", "python3", "pytest", "pip", "uvicorn", "node", "npm", "npx"
 GIT_READ_ONLY = {"diff", "status", "log", "show", "blame", "rev-parse", "ls-files", "grep", "branch"}
 # Interpreters run whatever they're given; inline code and package installs always prompt.
 INLINE_CODE = {"python": {"-c"}, "python3": {"-c"}, "node": {"-e", "-p", "--eval", "--print"}}
+SCRIPT_EXT = (".py", ".js", ".mjs", ".cjs", ".ts")
 INSTALLERS = {"pip": {"install", "download", "uninstall"}, "npm": {"install", "i", "exec", "x", "run", "ci"}}
 NEVER_AUTO = {"npx", "curl"}
 HIDDEN_SYNTAX = re.compile(r"`|\$\(|\beval\b|\bexec\b|\bsh\s+-c|\bbash\s+-c|\bsudo\b|>\s*/")
 RUN_POLICY = {"yes": False}    # set from --yes at startup
 
 
-def interpreter_opts(words: list[str]) -> list[str]:
-    """Options given to the interpreter itself, i.e. before the script path (or `-m module`)."""
-    opts = []
+def runs_inline_code(words: list[str], flags: set[str]) -> bool:
+    """True if an inline-code flag appears before the script path (or `-m module` / `--`).
+    Everything up to that point is scanned, so option values (`-W ignore`) and combined
+    short flags (`-qc`) can't hide it; anything after the script belongs to the script."""
+    short = {f[1] for f in flags if len(f) == 2}
+    long = {f for f in flags if len(f) > 2}
     for w in words[1:]:
-        if not w.startswith("-") or w == "-":
-            break
-        opts.append(w)
-        if w in ("-m", "--"):
-            break
-    return opts
+        if w in ("-m", "--") or w.lower().endswith(SCRIPT_EXT):
+            return False
+        if w.startswith("--"):
+            if w.split("=")[0] in long:
+                return True
+        elif w.startswith("-") and len(w) > 1 and short & set(w[1:]):
+            return True
+    return False
 
 
 def command_allowed(command: str) -> str | None:
@@ -103,8 +109,7 @@ def command_allowed(command: str) -> str | None:
             return f"`{prog}` is not on the allowlist"
         elif prog in NEVER_AUTO:
             return f"`{prog}` fetches or runs arbitrary code"
-        elif prog in INLINE_CODE and any(o.startswith(f) if len(f) == 2 else o.split("=")[0] == f
-                                         for o in interpreter_opts(words) for f in INLINE_CODE[prog]):
+        elif prog in INLINE_CODE and runs_inline_code(words, INLINE_CODE[prog]):
             return f"inline `{prog}` code runs unrestricted; put it in a file under the repo"
         elif prog in INSTALLERS and INSTALLERS[prog] & set(words[1:]):
             return f"`{prog}` would install or execute packages"
