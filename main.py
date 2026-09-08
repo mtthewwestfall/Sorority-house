@@ -3045,6 +3045,20 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                 if cur.fetchone():
                     conn.rollback()
                     return False
+                if tier == "freshman":
+                    # a cancellation belongs to whoever holds the customer *now* (a
+                    # concurrent invoice.paid may have moved it since the caller looked)
+                    cur.execute("""
+                        SELECT user_id, stripe_subscription_id FROM users
+                        WHERE stripe_customer_id=%s LIMIT 1
+                    """, (customer_id,))
+                    holder = cur.fetchone()
+                    if holder:
+                        if (subscription_id and holder["stripe_subscription_id"]
+                                and subscription_id != holder["stripe_subscription_id"]):
+                            conn.rollback()
+                            return False
+                        user_id = holder["user_id"]
             if tier == "freshman":
                 cur.execute(f"""
                     UPDATE users SET tier='freshman', msg_used=%s, {clear},
@@ -3157,7 +3171,8 @@ async def stripe_webhook(request: Request):
         current = user.get("stripe_subscription_id")
         if current and obj.get("id") and obj.get("id") != current:
             return {"ok": True, "ignored": "not the current subscription"}
-        if not _apply_stripe_event(user["user_id"], "freshman", customer_id, "", event_at):
+        if not _apply_stripe_event(user["user_id"], "freshman", customer_id, obj.get("id") or "",
+                                   event_at):
             return {"ok": True, "ignored": "stale event"}
         return {"ok": True, "user_id": user["user_id"], "tier": "freshman"}
 
