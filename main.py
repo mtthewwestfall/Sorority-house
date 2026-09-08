@@ -3021,10 +3021,10 @@ def _user_for_stripe_customer(customer_id: str):
 
 
 def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_id: str,
-                        event_at: int) -> bool:
+                        event_at: int) -> str:
     """Tier + Stripe ids + event timestamp in one transaction, guarded by the persisted
     timestamp so an older delivery can never overwrite a newer one, even concurrently.
-    Returns False (and changes nothing) when the event was stale — older than the target
+    Returns the user_id actually updated, or "" (and changes nothing) when the event was stale — older than the target
     account's last event, or than any other account's event for the same customer. A paid tier always starts
     a fresh month (every renewal invoice pays for one). A Stripe customer funds exactly one
     account: when a paid invoice lands on a different account than before, the previous
@@ -3044,7 +3044,7 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                 """, (customer_id, user_id, event_at))
                 if cur.fetchone():
                     conn.rollback()
-                    return False
+                    return ""
                 if tier == "freshman":
                     # a cancellation belongs to whoever holds the customer *now* (a
                     # concurrent invoice.paid may have moved it since the caller looked)
@@ -3057,7 +3057,7 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                         if (subscription_id and holder["stripe_subscription_id"]
                                 and subscription_id != holder["stripe_subscription_id"]):
                             conn.rollback()
-                            return False
+                            return ""
                         user_id = holder["user_id"]
             if tier == "freshman":
                 cur.execute(f"""
@@ -3084,7 +3084,7 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
             conn.commit()
     finally:
         conn.close()
-    return applied
+    return user_id if applied else ""
 
 
 def _stripe_invoice_subscription(inv) -> str:
@@ -3149,10 +3149,11 @@ async def stripe_webhook(request: Request):
         except HTTPException:
             print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
             return {"ok": True, "ignored": "no account"}
-        if not _apply_stripe_event(user["user_id"], tier, customer_id,
-                                   _stripe_invoice_subscription(obj), event_at):
+        applied = _apply_stripe_event(user["user_id"], tier, customer_id,
+                                      _stripe_invoice_subscription(obj), event_at)
+        if not applied:
             return {"ok": True, "ignored": "stale event"}
-        return {"ok": True, "user_id": user["user_id"], "tier": tier}
+        return {"ok": True, "user_id": applied, "tier": tier}
 
     if kind == "customer.subscription.deleted" or \
             (kind == "customer.subscription.updated" and obj.get("status") in ("canceled", "unpaid")):
@@ -3171,10 +3172,11 @@ async def stripe_webhook(request: Request):
         current = user.get("stripe_subscription_id")
         if current and obj.get("id") and obj.get("id") != current:
             return {"ok": True, "ignored": "not the current subscription"}
-        if not _apply_stripe_event(user["user_id"], "freshman", customer_id, obj.get("id") or "",
-                                   event_at):
+        applied = _apply_stripe_event(user["user_id"], "freshman", customer_id,
+                                      obj.get("id") or "", event_at)
+        if not applied:
             return {"ok": True, "ignored": "stale event"}
-        return {"ok": True, "user_id": user["user_id"], "tier": "freshman"}
+        return {"ok": True, "user_id": applied, "tier": "freshman"}
 
     return {"ok": True, "ignored": kind}
 
