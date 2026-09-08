@@ -926,16 +926,22 @@
     chatInput.addEventListener('focus', settleChatViewport);
     chatInput.addEventListener('blur', settleChatViewport);
 
-    let lastInputLength = 0;
+    // Measure the text in an offscreen twin so the live textarea is only touched when
+    // its height really changes (resizing it mid-keystroke breaks iOS autocorrect).
+    const chatMirror = chatInput.cloneNode();
+    chatMirror.removeAttribute('id');
+    chatMirror.tabIndex = -1;
+    chatMirror.setAttribute('aria-hidden', 'true');
+    Object.assign(chatMirror.style, { position: 'absolute', visibility: 'hidden', height: 'auto',
+                                      top: '0', left: '-9999px', pointerEvents: 'none' });
+    chatInput.parentNode.appendChild(chatMirror);
     function growChatInput(event) {
       chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
-      // Never resize mid-composition: iOS autocorrect loses its marked text.
-      const shrank = chatInput.value.length < lastInputLength;
-      lastInputLength = chatInput.value.length;
       if (!(event && event.isComposing)) {
-        if (shrank) chatInput.style.height = 'auto';
-        const want = Math.min(chatInput.scrollHeight, 110);
-        if (Math.abs(want - chatInput.clientHeight) > 1) chatInput.style.height = `${want}px`;
+        chatMirror.style.width = `${chatInput.clientWidth}px`;
+        chatMirror.value = chatInput.value;
+        const want = Math.min(chatMirror.scrollHeight, 110);
+        if (Math.abs(want - chatInput.offsetHeight) > 1) chatInput.style.height = `${want}px`;
       }
       const pinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 8;
       chat.style.setProperty('--foot-h', `${chatInput.closest('.chat-foot').offsetHeight}px`);
