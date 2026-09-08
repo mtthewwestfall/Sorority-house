@@ -878,7 +878,7 @@
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
-      lastViewport = '';
+      lastViewport = 0;
       fitChatToViewport();
       chatInput.value = '';
       growChatInput();
@@ -888,7 +888,6 @@
     function closeChat() {
       abortStreamAndResync();
       chat.classList.remove('is-open');
-      chat.style.transform = '';
       chat.style.removeProperty('--vvh');
       if (document.body.classList.contains('chat-locked')) {
         document.body.classList.remove('chat-locked');
@@ -897,46 +896,31 @@
       currentGirl = null;
     }
 
-    let fitTimer = 0;
-    let lastViewport = '';
-    let pendingViewport = '';
+    let fitFrame = 0;
+    let lastViewport = 0;
     const mobileChat = window.matchMedia('(max-width: 620px)');
-    function viewportKey() {
-      const vv = window.visualViewport;
-      return `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
-    }
     function fitChatToViewport() {
-      if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) return;
-      // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
-      // viewport and may scroll the page. Size the panel to the visible area and pull it
-      // back up by however far the page was pushed, so nothing hides behind the keyboard.
-      // Only apply once the viewport has stopped moving: re-laying out during the
-      // keyboard animation makes Safari re-scroll, and the panel shakes.
-      const key = viewportKey();
-      if (key === lastViewport) { clearTimeout(fitTimer); fitTimer = 0; return; }
-      if (key === pendingViewport && fitTimer) return;
-      pendingViewport = key;
-      clearTimeout(fitTimer);
-      fitTimer = setTimeout(() => {
-        fitTimer = 0;
+      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      if (fitFrame) return;
+      fitFrame = requestAnimationFrame(() => {
+        fitFrame = 0;
         if (!chat.classList.contains('is-open')) return;
-        if (!mobileChat.matches) {
-          chat.style.transform = '';
-          chat.style.removeProperty('--vvh');
-          lastViewport = '';
-          return;
-        }
-        const now = viewportKey();
-        if (now !== pendingViewport) { fitChatToViewport(); return; }
-        if (now === lastViewport) return;
-        lastViewport = now;
+        if (!mobileChat.matches) { chat.style.removeProperty('--vvh'); lastViewport = 0; return; }
+        // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
+        // viewport and pans it to reveal the focused field. Shrinking the panel to the
+        // visible height puts the composer above the keyboard on its own, after which
+        // Safari has nothing left to reveal and pans back to 0. The panel itself is never
+        // translated: chasing the pan offset while it changes is what made the page shake.
         const vv = window.visualViewport;
-        const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
-        chat.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
-        chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
-        if (window.scrollY) window.scrollTo(0, 0);
-        if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
-      }, 90);
+        const height = Math.round(vv.height);
+        if (height !== lastViewport) {
+          lastViewport = height;
+          const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+          chat.style.setProperty('--vvh', `${height}px`);
+          if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
+        }
+        if (vv.offsetTop > 0.5 || window.scrollY) window.scrollTo(0, 0);
+      });
     }
     // Safari fires the viewport events late (or not at all) around focus; poll briefly.
     function settleChatViewport() {
