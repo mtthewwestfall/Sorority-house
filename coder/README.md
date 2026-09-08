@@ -39,12 +39,17 @@ failing mid-task (outage, rate limit, bad key) the run carries on with the next:
 
 To force a specific model (any OpenAI-compatible endpoint with tool calling, incl. local
 vLLM/Ollama), set `CODER_BASE_URL` + `CODER_MODEL` (+ `CODER_API_KEY` if it isn't one of the
-above); it goes first, the chain stays as backup. `CODER_PRICE_IN` / `CODER_PRICE_OUT` ($ per 1M
-tokens) make each run print an estimated cost.
+above); it goes first, the chain stays as backup (an override identical to a built-in entry is
+not repeated).
 
 ## Cost
 
-A typical small task uses roughly 150k input tokens and 1.5k output tokens. Set the `CODER_PRICE_IN` and `CODER_PRICE_OUT` environment variables (in $ per 1M tokens) to see the estimated cost in dollars at the end of a run.
+A typical small task uses roughly 150k input tokens and 1.5k output tokens. Every run ends with
+token counts per model. For a dollar figure give prices ($ per 1M input/output tokens) for the
+models you use, e.g. `CODER_PRICES="deepseek-chat=0.28/0.42,gemini-3.1-pro-preview=2/12"`
+(check your providers' current price lists); the estimate is only shown when every model that
+took part in the run has a price. `CODER_PRICE_IN` / `CODER_PRICE_OUT` still work for the
+primary model alone.
 
 DeepSeek (the default when its key is set) did a /help command for the Telegram bot in 13k tokens,
 well under a cent. For anything touching trust logic or payments, force Gemini:

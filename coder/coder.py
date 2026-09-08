@@ -15,7 +15,8 @@ Providers are tried in order DeepSeek -> Gemini -> OpenAI, using whichever keys 
 mid-task, the run continues on the next. Any OpenAI-compatible endpoint with tool calling
 works as an explicit override:
   CODER_BASE_URL + CODER_MODEL + CODER_API_KEY
-  CODER_PRICE_IN / CODER_PRICE_OUT   optional $ per 1M tokens, to print a cost estimate
+  CODER_PRICES                       optional "model=in/out,..." $ per 1M tokens, to print a cost estimate
+  CODER_PRICE_IN / CODER_PRICE_OUT   same, for the primary model only
 
 Only dependency: requests.
 """
@@ -300,21 +301,56 @@ def tool_schemas() -> list[dict]:
 
 # --------------------------------------------------------------------------- model
 
+class ModelError(Exception):
+    """A provider call that will not succeed on this endpoint (auth, bad request, repeated
+    outage, unparseable reply); `Model.chat` answers it by moving to the next endpoint."""
+
+
+def dedupe_endpoints(endpoints: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """Drop exact repeats (same URL, model and key) so an outage isn't retried twice;
+    different models or keys on one host are kept."""
+    seen, out = set(), []
+    for u, m, k in endpoints:
+        e = (u.rstrip("/"), m, k)
+        if e not in seen:
+            seen.add(e)
+            out.append(e)
+    return out
+
+
+def load_prices() -> dict[str, tuple[float, float]]:
+    """$ per 1M (input, output) tokens by model. `CODER_PRICES="deepseek-chat=0.28/0.42,gpt-4.1=2/8"`;
+    the older `CODER_PRICE_IN`/`CODER_PRICE_OUT` pair applies to whatever model is primary."""
+    prices = {}
+    for item in filter(None, os.environ.get("CODER_PRICES", "").split(",")):
+        try:
+            name, pair = item.split("=", 1)
+            pin, pout = pair.split("/", 1)
+            prices[name.strip()] = (float(pin), float(pout))
+        except ValueError:
+            raise SystemExit(f"CODER_PRICES: can't read {item!r}; want model=in/out")
+    return prices
+
+
 class Model:
     """`endpoints` is a list of (base_url, model, api_key); the first is used until it fails
     repeatedly, then the run continues on the next one."""
     def __init__(self, endpoints: list[tuple[str, str, str]]):
-        self.endpoints = [(u.rstrip("/"), m, k) for u, m, k in endpoints]
+        self.endpoints = dedupe_endpoints(endpoints)
         self.base_url, self.model, self.api_key = self.endpoints[0]
-        self.prompt_tokens = self.completion_tokens = self.calls = 0
+        self.prices = load_prices()
+        pin, pout = os.environ.get("CODER_PRICE_IN"), os.environ.get("CODER_PRICE_OUT")
+        if pin and pout:
+            self.prices.setdefault(self.model, (float(pin), float(pout)))
+        self.usage: dict[str, list[int]] = {}      # model -> [calls, prompt_tokens, completion_tokens]
 
     def chat(self, messages: list[dict], tools: list[dict]) -> dict:
         while True:
             try:
                 return self._chat(messages, tools)
-            except SystemExit as e:
+            except ModelError as e:
                 if len(self.endpoints) < 2:
-                    raise
+                    raise SystemExit(str(e))
                 self.endpoints.pop(0)
                 self.base_url, self.model, self.api_key = self.endpoints[0]
                 say(f"  {e}\n  falling back to {self.model}", dim=True)
@@ -332,12 +368,18 @@ class Model:
                 err = str(e)
             else:
                 if r.status_code == 200:
-                    data = r.json()
-                    usage = data.get("usage") or {}
-                    self.prompt_tokens += usage.get("prompt_tokens", 0)
-                    self.completion_tokens += usage.get("completion_tokens", 0)
-                    self.calls += 1
-                    msg = data["choices"][0]["message"]
+                    try:
+                        data = r.json()
+                        usage = data.get("usage") or {}
+                        msg = data["choices"][0]["message"]
+                        if not isinstance(msg, dict):
+                            raise TypeError("message is not an object")
+                    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
+                        raise ModelError(f"model call failed: unusable 200 reply from {self.model}: {e}")
+                    u = self.usage.setdefault(self.model, [0, 0, 0])
+                    u[0] += 1
+                    u[1] += usage.get("prompt_tokens", 0)
+                    u[2] += usage.get("completion_tokens", 0)
                     if "googleapis" not in self.base_url:
                         # Gemini's thought signatures ride in extra_content; other providers reject it
                         for c in msg.get("tool_calls") or []:
@@ -345,18 +387,25 @@ class Model:
                     return msg
                 err = f"HTTP {r.status_code}: {r.text[:500]}"
                 if r.status_code in (400, 401, 403, 404):
-                    raise SystemExit(f"model call failed: {err}")
+                    raise ModelError(f"model call failed: {err}")
             wait = 2 ** attempt * 3
             say(f"  model error ({err[:120]}), retrying in {wait}s", dim=True)
             time.sleep(wait)
-        raise SystemExit("model call failed repeatedly; giving up")
+        raise ModelError(f"model call failed repeatedly on {self.model}; giving up on it")
 
     def cost(self) -> str:
-        pin, pout = os.environ.get("CODER_PRICE_IN"), os.environ.get("CODER_PRICE_OUT")
-        s = f"{self.calls} calls, {self.prompt_tokens:,} in / {self.completion_tokens:,} out tokens"
-        if pin and pout:
-            usd = self.prompt_tokens / 1e6 * float(pin) + self.completion_tokens / 1e6 * float(pout)
+        parts, usd, unpriced = [], 0.0, []
+        for name, (calls, pin_t, pout_t) in self.usage.items():
+            parts.append(f"{name}: {calls} calls, {pin_t:,} in / {pout_t:,} out tokens")
+            if name in self.prices:
+                usd += pin_t / 1e6 * self.prices[name][0] + pout_t / 1e6 * self.prices[name][1]
+            else:
+                unpriced.append(name)
+        s = "; ".join(parts) or "no model calls"
+        if self.usage and not unpriced:
             s += f", ~${usd:.3f}"
+        elif self.prices and unpriced:
+            s += f" (no price set for {', '.join(unpriced)}; see CODER_PRICES)"
         return s
 
 
@@ -547,7 +596,7 @@ def main() -> None:
     git("checkout", "-b", branch)
     model = Model(endpoints)
     say(f"branch {branch} (from {base}); model {model.model}"
-        + (f" (fallback: {', '.join(m for _, m, _ in endpoints[1:])})" if len(endpoints) > 1 else ""))
+        + (f" (fallback: {', '.join(m for _, m, _ in model.endpoints[1:])})" if len(model.endpoints) > 1 else ""))
 
     guide = GUIDE.read_text() if GUIDE.exists() else "(no AGENTS.md in this repo)"
     messages = [{"role": "system", "content": SYSTEM.format(root=ROOT, guide=guide)},
