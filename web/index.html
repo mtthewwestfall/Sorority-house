@@ -766,17 +766,43 @@
       for (const ch of text) { if (out.length + ch.length > max) break; out += ch; }
       return out;
     }
-    // Fallback for insertions beforeinput can't size (IME commits, etc.).
-    function clampComposer() {
-      if (!chatInput.textContent && chatInput.innerHTML) chatInput.innerHTML = '';
-      const v = chatInput.value;
-      if (v.length <= CHAT_MAX) return;
-      chatInput.value = clipCodePoints(v, CHAT_MAX);
-      const r = document.createRange(); r.selectNodeContents(chatInput); r.collapse(false);
+    function caretOffset() {
+      const s = window.getSelection();
+      if (!s || !s.rangeCount || !chatInput.contains(s.anchorNode)) return [chatInput.value.length, chatInput.value.length];
+      const r = s.getRangeAt(0);
+      const pre = r.cloneRange(); pre.selectNodeContents(chatInput); pre.setEnd(r.startContainer, r.startOffset);
+      const start = pre.toString().length;
+      return [start, start + r.toString().length];
+    }
+    function setCaret(offset) {
+      const node = chatInput.firstChild;
+      if (!node) return;
+      const r = document.createRange(); r.setStart(node, Math.min(offset, node.length)); r.collapse(true);
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     }
-    chatInput.addEventListener('input', (event) => { if (!event.isComposing) clampComposer(); });
-    chatInput.addEventListener('compositionend', clampComposer);
+    // IME text bypasses beforeinput sizing: snapshot on start, and on commit keep only the
+    // part of the composition that fits, leaving the surrounding text untouched.
+    let imeSnap = null;
+    chatInput.addEventListener('compositionstart', () => { imeSnap = { value: chatInput.value, sel: caretOffset() }; });
+    chatInput.addEventListener('compositionend', (event) => {
+      const snap = imeSnap; imeSnap = null;
+      if (!snap || chatInput.value.length <= CHAT_MAX) return;
+      const before = snap.value.slice(0, snap.sel[0]);
+      const after = snap.value.slice(snap.sel[1]);
+      const kept = clipCodePoints(event.data || '', Math.max(0, CHAT_MAX - before.length - after.length));
+      chatInput.value = before + kept + after;
+      setCaret(before.length + kept.length);
+    });
+    chatInput.addEventListener('input', (event) => {
+      if (!chatInput.textContent && chatInput.innerHTML) chatInput.innerHTML = '';
+      if (event.isComposing || chatInput.value.length <= CHAT_MAX) return;
+      const [start] = caretOffset();
+      const v = chatInput.value;
+      let cut = Math.max(0, start - (v.length - CHAT_MAX));
+      if (cut > 0 && /[\uDC00-\uDFFF]/.test(v[cut])) cut--;
+      chatInput.value = v.slice(0, cut) + v.slice(start);
+      setCaret(cut);
+    });
     const chatSend = document.getElementById('chat-send');
     const chatRemaining = document.getElementById('chat-remaining');
     const chatPhotoBtn = document.getElementById('chat-photo-btn');
