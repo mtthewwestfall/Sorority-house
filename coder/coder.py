@@ -379,7 +379,7 @@ class Model:
                             raise TypeError("message is not an object")
                         tokens_in = int(usage.get("prompt_tokens") or 0)
                         tokens_out = int(usage.get("completion_tokens") or 0)
-                    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
+                    except (ValueError, KeyError, IndexError, TypeError, AttributeError, OverflowError) as e:
                         raise ModelError(f"model call failed: unusable 200 reply from {self.model}: {e}")
                     u = self.usage.setdefault(self.model, [0, 0, 0])
                     u[0] += 1
