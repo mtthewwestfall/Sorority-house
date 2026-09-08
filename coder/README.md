@@ -34,6 +34,10 @@ the token usage; press `d` to read the full diff, `n` to leave the changes uncom
 | `CODER_API_KEY` | falls back to `GEMINI_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` | |
 | `CODER_PRICE_IN` / `CODER_PRICE_OUT` | unset | $ per 1M tokens; when set, each run prints an estimated cost |
 
+## Cost
+
+A typical small task uses roughly 150k input tokens and 1.5k output tokens. Set the `CODER_PRICE_IN` and `CODER_PRICE_OUT` environment variables (in $ per 1M tokens) to see the estimated cost in dollars at the end of a run.
+
 ## What it does well / where to keep an eye on it
 
 Good at: well-described changes to `main.py` or `web/index.html` — a new route, a copy change,
