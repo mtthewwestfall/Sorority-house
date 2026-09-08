@@ -1477,17 +1477,17 @@
         offer();
       }
 
-      go.addEventListener('click', async () => {
+      go.addEventListener('click', () => {
         if (!installEvent) { how.textContent = shareSheet; return; }
         const chosen = installEvent;
         installEvent = null;
-        chosen.prompt();
-        await chosen.userChoice;
-        // The browser's own prompt is the last word, taken or refused: an event is
-        // spent once shown, so the invitation goes away until the browser offers a
-        // fresh one rather than sitting there with nothing behind the button.
+        // Handing over to the browser's own dialog is the end of our invitation: the
+        // event is spent whether it is taken or refused, and `userChoice` cannot be
+        // relied on to settle, so the bar closes now and only a fresh
+        // `beforeinstallprompt` brings the offer back.
         bar.classList.remove('show');
         footerLink.hidden = true;
+        chosen.prompt();
       });
 
       document.getElementById('install-no').addEventListener('click', () => {
