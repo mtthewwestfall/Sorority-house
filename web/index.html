@@ -1469,7 +1469,6 @@
       const heroLink = document.getElementById('hero-install');
       if (window.matchMedia('(display-mode: standalone)').matches
           || window.navigator.standalone === true) return;
-      heroLink.hidden = false;
 
       const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1479,6 +1478,7 @@
       const show = () => bar.classList.add('show');
       const offer = () => {
         footerLink.hidden = false;
+        heroLink.hidden = false;
         if (!localStorage.getItem(INSTALL_DISMISSED)) show();
       };
 
@@ -1504,6 +1504,7 @@
         // `beforeinstallprompt` brings the offer back.
         bar.classList.remove('show');
         footerLink.hidden = true;
+        heroLink.hidden = true;
         chosen.prompt();
       });
 
@@ -1516,15 +1517,15 @@
         link.addEventListener('click', (event) => {
           event.preventDefault();
           localStorage.removeItem(INSTALL_DISMISSED);
-          if (installEvent) { go.click(); return; }
-          how.textContent = shareSheet;
-          show();
+          if (installEvent) go.click();
+          else show();
         });
       }
 
       window.addEventListener('appinstalled', () => {
         bar.classList.remove('show');
         footerLink.hidden = true;
+        heroLink.hidden = true;
       });
     })();
   </script>
