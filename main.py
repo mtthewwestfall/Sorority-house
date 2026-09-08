@@ -253,13 +253,15 @@ PIECE_CHARS = 24            # granularity the mouth thread hands to the emitter
 SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Pictures (POST /image): she sends a new photo of herself in the style of her door
-# portrait. PICTURE_FREE are earned per PICTURE_EVERY user messages (all girls
-# combined); a pack of PICTURE_PACK_SIZE is sold as a Shopify product (checkout via the
+# portrait. Every account starts with PICTURE_FREE_START free pictures; PICTURE_FREE more
+# are earned per PICTURE_EVERY user messages (all girls combined; 0 = none). After that a
+# pack of PICTURE_PACK_SIZE is sold as a Shopify product (checkout via the
 # storefront cart, credited by the /webhooks/shopify/orders webhook). Portraits are
 # fetched from the site serving web/assets.
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")
 PICTURE_EVERY = int(os.environ.get("PICTURE_EVERY", "100"))
-PICTURE_FREE = int(os.environ.get("PICTURE_FREE", "3"))
+PICTURE_FREE = int(os.environ.get("PICTURE_FREE", "0"))
+PICTURE_FREE_START = int(os.environ.get("PICTURE_FREE_START", "10"))
 PICTURE_PACK_SIZE = int(os.environ.get("PICTURE_PACK_SIZE", "5"))
 PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
 PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
@@ -758,6 +760,14 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
             """)
+            # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
+            # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
+            cur.execute("""
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = current_schema() AND tableowner = current_user AND NOT rowsecurity
+            """)
+            for row in cur.fetchall():
+                cur.execute(f'ALTER TABLE "{row["tablename"]}" ENABLE ROW LEVEL SECURITY')
             # The roster lives with the persona doc: which tier opens her door, what
             # the door shows, and whether she is in the house at all. Rows written
             # before these columns existed get their door filled in once, here - after
@@ -2570,7 +2580,7 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
 
 
 # ---------------------------------------------------------------------------
-# PICTURES — earned every PICTURE_EVERY messages, or bought in packs
+# PICTURES — PICTURE_FREE_START to begin with, then bought in packs
 # ---------------------------------------------------------------------------
 class ImageIn(BaseModel):
     girl: str
@@ -2581,17 +2591,18 @@ def picture_status(cur, user_id):
     total = int(cur.fetchone()["n"])
     cur.execute("SELECT pics_free_used, pic_credits FROM users WHERE user_id=%s", (user_id,))
     row = cur.fetchone() or {"pics_free_used": 0, "pic_credits": 0}
-    earned = (total // PICTURE_EVERY) * PICTURE_FREE
+    earned = PICTURE_FREE_START + (total // PICTURE_EVERY) * PICTURE_FREE
     free_left = max(0, earned - int(row["pics_free_used"]))
     return {
         "every": PICTURE_EVERY,
         "free_per": PICTURE_FREE,
+        "free_start": PICTURE_FREE_START,
         "messages": total,
         "earned": earned,
         "free_left": free_left,
         "credits": int(row["pic_credits"]),
         "available": free_left + int(row["pic_credits"]),
-        "next_in": PICTURE_EVERY - (total % PICTURE_EVERY),
+        "next_in": (PICTURE_EVERY - (total % PICTURE_EVERY)) if PICTURE_FREE > 0 else 0,
         "pack_size": PICTURE_PACK_SIZE,
         "pack_price": PICTURE_PACK_PRICE or None,
         "pack_handle": PICTURE_PACK_HANDLE,
@@ -2714,7 +2725,9 @@ def image(body: ImageIn, user=Depends(current_user)):
             if spent is None:
                 conn.rollback()
                 return {"ok": False, "locked": True, "status": status,
-                        "error": f"She'll send one after {status['next_in']} more messages."}
+                        "error": (f"She'll send one after {status['next_in']} more messages."
+                                  if status["next_in"] else
+                                  f"You're out of pictures. Grab a pack of {PICTURE_PACK_SIZE} for more.")}
             conn.commit()
             cur.execute("SELECT name, avatar_url FROM personas WHERE girl=%s", (girl,))
             row = cur.fetchone()

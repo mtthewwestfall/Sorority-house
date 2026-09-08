@@ -331,6 +331,7 @@
     .pic-sheet p { margin: 0 0 10px; color: var(--muted); font-size: .84rem; }
     .pic-sheet .row { display: flex; gap: 8px; flex-wrap: wrap; }
     .pic-sheet .button { padding: 9px 16px; font-size: .86rem; }
+    .pic-sheet .button[disabled] { opacity: .5; cursor: not-allowed; }
     .pic-sheet .ghost { background: none; border: 1px solid var(--line); color: var(--muted); }
 
     /* Light chat theme (iMessage look): white panel, grey bubbles for her, pink for you. */
@@ -1083,7 +1084,7 @@
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
 
     // Pictures: the + button stays hidden until the backend exposes /image.
-    // One picture is earned per PICTURE_EVERY messages; packs add credits.
+    // Every account starts with a few free pictures; packs add credits.
     fetch(API_BASE_URL + '/image', { method: 'HEAD' })
       .then((r) => { if (r.status !== 404) chatPhotoBtn.hidden = false; })
       .catch(() => {});
@@ -1106,19 +1107,29 @@
       const h = document.createElement('h4');
       h.textContent = available > 0 ? `Ask her for a picture (${available} ready)` : 'Ask her for a picture';
       const p = document.createElement('p');
-      const free = s.free_per || 3, every = s.every || 100, packSize = s.pack_size || 5;
+      const packSize = s.pack_size || 5, price = s.pack_price || '$0.99';
+      let outOf;
+      if (s.next_in) outOf = `You get ${s.free_per} more free every ${s.every} messages — ${s.next_in} to go. Or grab a pack of ${packSize} for ${price}.`;
+      else if (s.free_start) outOf = `You've used your ${s.free_start} free pictures. Grab a pack of ${packSize} for ${price} to keep them coming.`;
+      else outOf = `You're out of pictures. Grab a pack of ${packSize} for ${price}.`;
       p.textContent = available > 0
         ? 'She picks the moment. Same girl, same style as her door.'
-        : `You get ${free} free pictures every ${every} messages${s.next_in ? ` — ${s.next_in} to go` : ''}. Want more? Grab a pack of ${packSize}.`;
+        : outOf;
       const row = document.createElement('div');
       row.className = 'row';
       const ask = document.createElement('button');
       ask.type = 'button'; ask.className = 'button'; ask.textContent = 'Request picture';
-      ask.disabled = available <= 0;
-      ask.addEventListener('click', () => { closePicSheet(); requestPicture(); });
+      ask.addEventListener('click', () => {
+        closePicSheet();
+        if (!picStatus || available > 0) { requestPicture(); return; }
+        addMessage('note', s.next_in
+          ? `She'll send one after ${s.next_in} more message${s.next_in === 1 ? '' : 's'}.`
+          : `You're out of pictures. Grab a pack of ${packSize} for more.`);
+        loadPictureStatus();
+      });
       const pack = document.createElement('button');
       pack.type = 'button'; pack.className = 'button ghost';
-      pack.textContent = `${packSize} more · ${s.pack_price || '$0.99'}`;
+      pack.textContent = `${packSize} more · ${price}`;
       pack.disabled = !(s.pack_ready && s.pack_ref);
       if (pack.disabled) pack.title = 'Checkout coming soon';
       pack.addEventListener('click', () => buyPicturePack(s, pack));
