@@ -48,7 +48,7 @@ except Exception:  # pragma: no cover - requirement listed in this folder
     requests = None
     NetError = Exception
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -65,6 +65,9 @@ logger = logging.getLogger("sorority_tg")
 
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
+SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
+UPGRADE_URL = os.environ.get("UPGRADE_URL", SITE_URL + "/#plans")
+
 
 # ---------------------------------------------------------------------------
 # Tiny per-chat store (a local JSON file; tokens live here, never in git).
@@ -285,6 +288,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
              "• /girls — knock on the doors that are open to you\n"
              "• just type a message to talk to whoever you're with\n"
              "• /state — your allowance + where you stand with each sister\n"
+             "• /menu — upgrade, the website, get the app\n"
              "• /help — everything")
         return
     await _txt(update,
@@ -295,7 +299,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
          "• already have a Sorority House account:  /login <email> <password>\n"
          "• new here:                             /signup <email> <password> <name>\n"
          "                                          (then watch the inbox for the "
-         "verification link, like the web)\n\n/help for commands.")
+         "verification link, like the web)\n\n/menu for the website + app, /help for commands.")
 
 
 async def cmd_signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -355,6 +359,59 @@ async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                  "on Sorority House — come back any time with /login.")
 
 
+def _portrait_url(g) -> str:
+    """Roster avatar_url is site-relative (assets/zoe.jpg) or absolute."""
+    url = (g.get("avatar_url") or "").strip()
+    if not url:
+        return ""
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return SITE_URL + "/" + url.lstrip("/")
+
+
+def _fetch_bytes(url: str):
+    r = requests.get(url, timeout=20)
+    r.raise_for_status()
+    return r.content
+
+
+async def _send_portrait(update, g, caption: str) -> bool:
+    """Best effort: the portrait is decoration, never a reason to fail the command."""
+    url = _portrait_url(g)
+    if not url or requests is None:
+        return False
+    try:
+        data = await asyncio.to_thread(_fetch_bytes, url)
+        await update.effective_message.reply_photo(data, caption=caption[:1024])
+        return True
+    except Exception as exc:  # network, bad image, telegram refusing the format
+        logger.info("portrait for %s skipped: %s", g.get("girl"), exc)
+        return False
+
+
+async def _send_album(update, girls) -> None:
+    media = []
+    for g in girls[:10]:
+        url = _portrait_url(g)
+        if not url or requests is None:
+            continue
+        try:
+            data = await asyncio.to_thread(_fetch_bytes, url)
+        except Exception as exc:
+            logger.info("portrait for %s skipped: %s", g.get("girl"), exc)
+            continue
+        media.append(InputMediaPhoto(data, caption=g.get("name", g.get("girl", ""))))
+    if not media:
+        return
+    try:
+        if len(media) == 1:
+            await update.effective_message.reply_photo(media[0].media, caption=media[0].caption)
+        else:
+            await update.effective_message.reply_media_group(media)
+    except Exception as exc:
+        logger.info("album skipped: %s", exc)
+
+
 def _milestone_label(milestone):
     stages = {1: "Stranger", 2: "Noticing", 3: "Opening", 4: "Opening",
               5: "Trusted", 6: "Confided", 7: "Confided", 8: "Different"}
@@ -385,6 +442,8 @@ async def cmd_girls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     intro = "The doors of the house:\n" if (open_btns or closed) else "The house is empty right now."
     await update.effective_message.reply_text(intro)
+    await _send_album(update, [g for g in sorted(roster, key=lambda x: x.get("girl", ""))
+                               if state.get(g["girl"], {}).get("open")])
 
     if open_btns:
         await update.effective_message.reply_text(
@@ -427,6 +486,8 @@ async def _open_girl(update, slug) -> None:
         await _txt(update, f"Could not reach the house: {exc}")
         return
     store.set(update.effective_chat.id, active_girl=sl)
+    girl = next(g for g in rosters if g["girl"] == sl)
+    await _send_portrait(update, girl, girl.get("door_title") or girl.get("name", sl))
     if history:
         parts = [_girl_name(rosters, sl) + " — here's where you two left off:"]
         for m in history[-6:]:
@@ -513,12 +574,15 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await q.answer()
     data = q.data or ""
-    if not data.startswith("girl:") or update.effective_chat.type != "private":
+    if update.effective_chat.type != "private":
         return
     if not _rec(update) or not _rec(update).get("token"):
         await _txt(update, "Not signed in — /login <email> <password> first.")
         return
-    await _open_girl(update, data.split(":", 1)[1])
+    if data == "menu:girls":
+        await cmd_girls(update, context)
+    elif data.startswith("girl:"):
+        await _open_girl(update, data.split(":", 1)[1])
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -537,7 +601,12 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except BackendError as exc:
         msg = str(exc)
         if "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
-            msg = "Your message allowance is spent. Renew your tier on the website to keep talking here."
+            await update.effective_message.reply_text(
+                "Your message allowance is spent. Upgrade or renew on the website and "
+                "you can keep talking here right away.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("💳 Upgrade", url=UPGRADE_URL)]]))
+            return
         await _txt(update, msg)
         return
     except (RuntimeError, NetError) as exc:
@@ -557,6 +626,35 @@ async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _txt(update, "I only talk in private — message me directly and /login there.")
 
 
+def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("💳 Upgrade / renew", url=UPGRADE_URL)],
+        [InlineKeyboardButton("🌐 Open the website", url=SITE_URL),
+         InlineKeyboardButton("📱 Get the app", url=SITE_URL + "/#hero-install")],
+    ]
+    if signed_in:
+        rows.append([InlineKeyboardButton("💬 Pick a girl", callback_data="menu:girls")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    rec = _rec(update)
+    signed_in = bool(rec and rec.get("token"))
+    await update.effective_message.reply_text(
+        "Sorority House — where to?\n\n"
+        "Payments happen on the website (Stripe); your tier shows up here right away, "
+        "same account. The app installs from the site — no app store.",
+        reply_markup=_menu_markup(signed_in))
+
+
+async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        "Starter $7.99 · Storyline $14.99 · All access $19.99 a month — pick a plan on "
+        "the website with the same email you use here and this chat unlocks instantly.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("💳 Choose a plan", url=UPGRADE_URL)]]))
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
          "Sorority House on Telegram — commands:\n"
@@ -566,6 +664,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
          "/girl <slug> — switch who you're talking to\n"
          "/state — tier, messages left, where you stand\n"
          "/history — the recent thread with her\n"
+         "/menu — upgrade, open the website, get the app\n"
+         "/upgrade — plans and the link to pay\n"
          "/logout — stop this chat session\n"
          "/help — this\n\n"
          "Just type normally to talk. Doors open by trust — showing up across real days "
@@ -592,6 +692,8 @@ def main():
     app.add_handler(CommandHandler("girl", cmd_girl))
     app.add_handler(CommandHandler("state", cmd_state))
     app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CallbackQueryHandler(on_button))  # buttons only exist in private chats
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     logger.info("Sorority House Telegram bot starting (backend: %s)", _base())
