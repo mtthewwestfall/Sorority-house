@@ -897,27 +897,46 @@
       currentGirl = null;
     }
 
-    let fitFrame = 0;
+    let fitTimer = 0;
     let lastViewport = '';
+    let pendingViewport = '';
     const mobileChat = window.matchMedia('(max-width: 620px)');
+    function viewportKey() {
+      const vv = window.visualViewport;
+      return `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
+    }
     function fitChatToViewport() {
       if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) return;
-      if (fitFrame) return;
-      fitFrame = requestAnimationFrame(() => {
-        fitFrame = 0;
+      // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
+      // viewport and may scroll the page. Size the panel to the visible area and pull it
+      // back up by however far the page was pushed, so nothing hides behind the keyboard.
+      // Only apply once the viewport has stopped moving: re-laying out during the
+      // keyboard animation makes Safari re-scroll, and the panel shakes.
+      const key = viewportKey();
+      if (key === lastViewport) { clearTimeout(fitTimer); fitTimer = 0; return; }
+      if (key === pendingViewport && fitTimer) return;
+      pendingViewport = key;
+      clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => {
+        fitTimer = 0;
+        if (!chat.classList.contains('is-open')) return;
+        if (!mobileChat.matches) {
+          chat.style.transform = '';
+          chat.style.removeProperty('--vvh');
+          lastViewport = '';
+          return;
+        }
+        const now = viewportKey();
+        if (now !== pendingViewport) { fitChatToViewport(); return; }
+        if (now === lastViewport) return;
+        lastViewport = now;
         const vv = window.visualViewport;
-        // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
-        // viewport and may scroll the page. Size the panel to the visible area and pull it
-        // back up by however far the page was pushed, so nothing hides behind the keyboard.
-        const key = `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
-        if (key === lastViewport) return;
-        lastViewport = key;
         const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
         chat.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
         chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
         if (window.scrollY) window.scrollTo(0, 0);
         if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
-      });
+      }, 90);
     }
     // Safari fires the viewport events late (or not at all) around focus; poll briefly.
     function settleChatViewport() {
@@ -926,15 +945,29 @@
     chatInput.addEventListener('focus', settleChatViewport);
     chatInput.addEventListener('blur', settleChatViewport);
 
-    function growChatInput() {
+    // Measure the text in an offscreen twin so the live textarea is only touched when
+    // its height really changes (resizing it mid-keystroke breaks iOS autocorrect).
+    const chatMirror = chatInput.cloneNode();
+    chatMirror.removeAttribute('id');
+    chatMirror.tabIndex = -1;
+    chatMirror.setAttribute('aria-hidden', 'true');
+    Object.assign(chatMirror.style, { position: 'absolute', visibility: 'hidden', height: 'auto',
+                                      top: '0', left: '-9999px', pointerEvents: 'none' });
+    chatInput.parentNode.appendChild(chatMirror);
+    function growChatInput(event) {
       chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
-      chatInput.style.height = 'auto';
-      chatInput.style.height = `${Math.min(chatInput.scrollHeight, 110)}px`;
+      if (!(event && event.isComposing)) {
+        chatMirror.style.width = `${chatInput.offsetWidth}px`;
+        chatMirror.value = chatInput.value;
+        const want = Math.min(chatMirror.scrollHeight, 110);
+        if (Math.abs(want - chatInput.offsetHeight) > 1) chatInput.style.height = `${want}px`;
+      }
       const pinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 8;
       chat.style.setProperty('--foot-h', `${chatInput.closest('.chat-foot').offsetHeight}px`);
       if (pinned) chatLog.scrollTop = chatLog.scrollHeight;
     }
     chatInput.addEventListener('input', growChatInput);
+    chatInput.addEventListener('compositionend', growChatInput);
     chatInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
