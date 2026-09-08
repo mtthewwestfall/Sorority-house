@@ -803,22 +803,26 @@
     // panel stays empty until the tail lands (or the wait runs out).
     const HISTORY_SHOWN = 8;
     const HISTORY_WAIT_MS = 4000;
+    let historySeq = 0;
+    let historyCutoff = null;
     async function loadHistory(girl) {
+      const seq = ++historySeq;
       let recent = [];
-      const cutoff = new AbortController();
+      if (historyCutoff) historyCutoff.abort();
+      const cutoff = historyCutoff = new AbortController();
       const timer = setTimeout(() => cutoff.abort(), HISTORY_WAIT_MS);
       try {
         const response = await fetch(API_BASE_URL + '/history?girl=' + encodeURIComponent(girl),
                                     { headers: authHeaders(), signal: cutoff.signal });
-        if (currentGirl !== girl) return;
         if (response.status === 401) { handleUnauthorized(); return; }
+        if (seq !== historySeq || currentGirl !== girl) return;
         if (response.ok) {
           const data = await response.json();
           recent = (data.messages || []).slice(-HISTORY_SHOWN);
         }
-      } catch (_) { /* offline or too slow: open the door the plain way */
+      } catch (_) { /* offline, superseded, or too slow: open the door the plain way */
       } finally { clearTimeout(timer); }
-      if (currentGirl !== girl || chatLog.children.length) return;
+      if (seq !== historySeq || currentGirl !== girl || chatLog.children.length) return;
       if (!recent.length) { addMessage('note', 'Her door is open. Say hi.'); return; }
       for (const m of recent) addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
       if (recent[recent.length - 1].sender === 'user') markRead();
