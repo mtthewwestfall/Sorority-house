@@ -591,7 +591,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -1482,8 +1482,12 @@
         const chosen = installEvent;
         installEvent = null;
         chosen.prompt();
-        const { outcome } = await chosen.userChoice;
-        if (outcome === 'accepted') bar.classList.remove('show');
+        await chosen.userChoice;
+        // The browser's own prompt is the last word, taken or refused: an event is
+        // spent once shown, so the invitation goes away until the browser offers a
+        // fresh one rather than sitting there with nothing behind the button.
+        bar.classList.remove('show');
+        footerLink.hidden = true;
       });
 
       document.getElementById('install-no').addEventListener('click', () => {

@@ -45,8 +45,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(SHELL).then((cache) => cache.put('./index.html', copy)).catch(() => {});
+          // Only a page that actually loaded is worth keeping; a 404 or a 502 is
+          // passed through but never becomes the copy we open offline.
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(SHELL).then((cache) => cache.put('./index.html', copy)).catch(() => {});
+          }
           return response;
         })
         .catch(() => caches.match('./index.html', { ignoreSearch: true })
