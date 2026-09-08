@@ -52,9 +52,9 @@ ALLOWED = {"python", "python3", "pytest", "pip", "uvicorn", "node", "npm", "npx"
 GIT_READ_ONLY = {"diff", "status", "log", "show", "blame", "rev-parse", "ls-files", "grep", "branch"}
 # Interpreters run whatever they're given; inline code and package installs always prompt.
 INLINE_CODE = {"python": {"-c"}, "python3": {"-c"}, "node": {"-e", "-p", "--eval", "--print"}}
-# Interpreter options that take a separate value. Python's set is fixed; node has too many
-# to list, so for it every option is assumed to take one (None) — which only ever errs
-# toward prompting.
+# Interpreter options that take a separate value. Python's set is fixed and small. Node's is
+# large and version-dependent, so for node (None) the whole command line up to `--` is scanned
+# for inline-code flags — which can only over-prompt, never under-block.
 VALUE_OPTS: dict[str, set[str] | None] = {"python": {"-W", "-X", "--check-hash-based-pycs"},
                                           "python3": {"-W", "-X", "--check-hash-based-pycs"},
                                           "node": None}
@@ -66,9 +66,10 @@ RUN_POLICY = {"yes": False}    # set from --yes at startup
 
 def runs_inline_code(prog: str, words: list[str]) -> bool:
     """True if an inline-code flag appears among the interpreter's own options.
-    Options are scanned until the script path (the first bare word that is not the value of
-    a preceding option), `-m module` or `--`; everything after that belongs to the script.
-    Combined short flags (`-qc`) and option values (`-W ignore.py`) are handled."""
+    When the interpreter's value-taking options are known, scanning stops at the script path
+    (the first bare word that is not an option value), `-m module` or `--`; everything after
+    belongs to the script. Otherwise every word up to `--` is scanned. Combined short flags
+    (`-qc`) and option values (`-W ignore.py`) are handled."""
     flags, value_opts = INLINE_CODE[prog], VALUE_OPTS[prog]
     short = {f[1] for f in flags if len(f) == 2}
     long = {f for f in flags if len(f) > 2}
@@ -77,17 +78,21 @@ def runs_inline_code(prog: str, words: list[str]) -> bool:
         if expect_value:
             expect_value = False
             continue
-        if w in ("-m", "--") or not w.startswith("-") or w == "-":
+        if w == "--":
+            return False
+        if not w.startswith("-") or w == "-" or w == "-m":
+            if value_opts is None:
+                continue
             return False
         if w.startswith("--"):
             name, _, val = w.partition("=")
             if name in long:
                 return True
-            expect_value = not val and (value_opts is None or name in value_opts)
+            expect_value = value_opts is not None and not val and name in value_opts
         else:
             if short & set(w[1:]):
                 return True
-            expect_value = value_opts is None or (w in value_opts and len(w) == 2)
+            expect_value = value_opts is not None and w in value_opts
     return False
 
 
@@ -223,8 +228,11 @@ def t_edit_file(path: str, old: str, new: str) -> str:
 
 
 def t_delete_file(path: str) -> str:
-    p = _safe(path)
-    if not p.is_file():
+    p = ROOT / path
+    if p.name in ("", ".", ".."):
+        raise ValueError(f"{path} is not a file")
+    _safe(str(p.parent))               # directory must be inside the repo; the entry itself
+    if not (p.is_file() or p.is_symlink()):   # is removed lexically, so a symlink's target survives
         return f"ERROR: {path} is not a file"
     p.unlink()
     return f"deleted {path}"
