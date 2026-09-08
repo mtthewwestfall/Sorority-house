@@ -118,8 +118,9 @@ Env vars (Railway -> Variables):
   STRIPE_WEBHOOK_SECRET
                     signing secret of the Stripe webhook endpoint (whsec_...); the
                     /webhooks/stripe route refuses with 503 until it is set.
-  STRIPE_API_KEY    optional restricted key (Customers: read) so a cancellation, which
-                    Stripe sends without an email, can still be matched to an account.
+  STRIPE_API_KEY    optional restricted key (Customers: read). Cancellations are matched
+                    by the customer id remembered from invoice.paid; the key only covers
+                    customers that never paid through this webhook.
   STRIPE_PRICE_SOPHOMORE / STRIPE_PRICE_JUNIOR / STRIPE_PRICE_SENIOR
                     price ids behind the three Payment Links (defaults are the live ones).
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
@@ -684,6 +685,8 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pics_free_used INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_credits INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
                 CREATE TABLE IF NOT EXISTS picture_payments (
                     payment_id TEXT PRIMARY KEY,
                     user_id    TEXT NOT NULL,
@@ -2985,14 +2988,56 @@ def _stripe_signed(raw: bytes, header: str) -> bool:
 
 
 def _stripe_customer_email(customer_id: str) -> str:
+    """Email of a Stripe customer via the optional STRIPE_API_KEY. "" when unset or the
+    customer has none; raises HTTPException(503) on a transient failure so Stripe retries."""
     if not customer_id or not STRIPE_API_KEY:
         return ""
     try:
         r = requests.get(f"https://api.stripe.com/v1/customers/{customer_id}",
                          auth=(STRIPE_API_KEY, ""), timeout=15)
-        return (r.json().get("email") or "").strip() if r.status_code == 200 else ""
+        if r.status_code == 404:
+            return ""
+        if r.status_code != 200:
+            raise HTTPException(status_code=503, detail="Stripe customer lookup failed")
+        return (r.json().get("email") or "").strip()
     except (requests.RequestException, ValueError):
-        return ""
+        raise HTTPException(status_code=503, detail="Stripe customer lookup failed")
+
+
+def _user_for_stripe_customer(customer_id: str):
+    """users row remembered for a Stripe customer by an earlier invoice.paid, or None."""
+    if not customer_id:
+        return None
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users WHERE stripe_customer_id=%s LIMIT 1",
+                        (customer_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return _ensure_user(row["user_id"]) if row else None
+
+
+def _remember_stripe_ids(user_id: str, customer_id: str, subscription_id: str) -> None:
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET stripe_customer_id=%s, stripe_subscription_id=%s
+                WHERE user_id=%s
+            """, (customer_id or None, subscription_id or None, user_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def _stripe_invoice_subscription(inv) -> str:
+    """Subscription id of an invoice; shape differs by API version."""
+    sub = inv.get("subscription")
+    if not sub:
+        sub = ((inv.get("parent") or {}).get("subscription_details") or {}).get("subscription")
+    return sub if isinstance(sub, str) else (sub or {}).get("id", "") or ""
 
 
 def _stripe_tier_for_lines(lines) -> str:
@@ -3032,28 +3077,48 @@ async def stripe_webhook(request: Request):
     kind = event.get("type", "")
     obj = (event.get("data") or {}).get("object") or {}
 
+    customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else \
+        (obj.get("customer") or {}).get("id", "")
+
     if kind == "invoice.paid":
         tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
-        email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(obj.get("customer"))
-    elif kind == "customer.subscription.deleted" or \
-            (kind == "customer.subscription.updated" and obj.get("status") in ("canceled", "unpaid")):
-        tier = "freshman"
-        email = _stripe_customer_email(obj.get("customer"))
-    else:
-        return {"ok": True, "ignored": kind}
+        if not tier:
+            return {"ok": True, "ignored": "no known price"}
+        email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
+        if not email:
+            print(f"[stripe] {kind} {event.get('id')}: no customer email", flush=True)
+            return {"ok": True, "ignored": "no email"}
+        try:
+            user = _user_for_email(email)
+        except HTTPException:
+            print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
+            return {"ok": True, "ignored": "no account"}
+        _apply_tier(user, tier)
+        _remember_stripe_ids(user["user_id"], customer_id, _stripe_invoice_subscription(obj))
+        return {"ok": True, "user_id": user["user_id"], "tier": tier}
 
-    if not tier:
-        return {"ok": True, "ignored": "no known price"}
-    if not email:
-        print(f"[stripe] {kind} {event.get('id')}: no customer email (set STRIPE_API_KEY)", flush=True)
-        return {"ok": True, "ignored": "no email"}
-    try:
-        user = _user_for_email(email)
-    except HTTPException:
-        print(f"[stripe] {kind} {event.get('id')}: no account for the customer email", flush=True)
-        return {"ok": True, "ignored": "no account"}
-    _apply_tier(user, tier)
-    return {"ok": True, "user_id": user["user_id"], "tier": tier}
+    if kind == "customer.subscription.deleted" or \
+            (kind == "customer.subscription.updated" and obj.get("status") in ("canceled", "unpaid")):
+        user = _user_for_stripe_customer(customer_id)
+        if user is None:
+            email = _stripe_customer_email(customer_id)
+            if not email:
+                print(f"[stripe] {kind} {event.get('id')}: customer unknown here "
+                      f"(never paid an invoice, and no STRIPE_API_KEY to look it up)", flush=True)
+                return {"ok": True, "ignored": "unknown customer"}
+            try:
+                user = _user_for_email(email)
+            except HTTPException:
+                return {"ok": True, "ignored": "no account"}
+        # the account follows its latest paid subscription; an older one ending is noise
+        current = user.get("stripe_subscription_id")
+        if current and obj.get("id") and obj.get("id") != current:
+            return {"ok": True, "ignored": "not the current subscription"}
+        _apply_tier(user, "freshman")
+        _remember_stripe_ids(user["user_id"], customer_id, "")
+        return {"ok": True, "user_id": user["user_id"], "tier": "freshman"}
+
+    return {"ok": True, "ignored": kind}
 
 
 # ---------------------------------------------------------------------------
