@@ -760,6 +760,11 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints (status, created_at);
             """)
+            # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
+            # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
+            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND NOT rowsecurity")
+            for row in cur.fetchall():
+                cur.execute(f'ALTER TABLE "{row["tablename"]}" ENABLE ROW LEVEL SECURITY')
             # The roster lives with the persona doc: which tier opens her door, what
             # the door shows, and whether she is in the house at all. Rows written
             # before these columns existed get their door filled in once, here - after
