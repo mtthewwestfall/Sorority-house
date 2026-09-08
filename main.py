@@ -3008,13 +3008,17 @@ def set_persona(body: PersonaIn):
     return {"ok": True, "girl": girl}
 
 
+def _account_key(email):
+    """Normalised account key: an email, or "tg:<telegram_id>" for Telegram-only accounts."""
+    email = email.strip().lower()
+    return email if email.startswith("tg:") else _norm_email(email)
+
+
 def _user_for_email(email):
     """Admin/webhook helper: the users row behind an account email (404 if none).
     Telegram-only accounts have no email; the admin console keys them as
     "tg:<telegram_id>" (see _ACCOUNT_COLS)."""
-    email = email.strip().lower()
-    if not email.startswith("tg:"):
-        email = _norm_email(email)
+    email = _account_key(email)
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -3551,10 +3555,14 @@ _ACCOUNT_COLS = """
     u.comp_prev_tier, u.admin_note,
     (SELECT count(*) FROM complaints c WHERE c.user_id=u.user_id AND c.status='open') AS open_complaints
 """
+# Several Telegram ids may point at one linked email account, so the Telegram side
+# is collapsed to one row per user (the earliest id) before joining.
 _ACCOUNT_FROM = """
     FROM users u
     LEFT JOIN accounts a ON a.user_id=u.user_id
-    LEFT JOIN telegram_accounts t ON t.user_id=u.user_id
+    LEFT JOIN (SELECT DISTINCT ON (user_id) user_id, telegram_id, created_at
+               FROM telegram_accounts ORDER BY user_id, created_at, telegram_id) t
+           ON t.user_id=u.user_id
 """
 _ACCOUNT_ANY = "(a.user_id IS NOT NULL OR t.user_id IS NOT NULL)"
 
@@ -3646,7 +3654,7 @@ def admin_grant_time(body: GrantTimeIn):
             conn.commit()
     finally:
         conn.close()
-    return {"ok": True, "email": _norm_email(body.email), "tier": tier,
+    return {"ok": True, "email": _account_key(body.email), "tier": tier,
             "comp_until": row["comp_until"], "falls_back_to": row["comp_prev_tier"]}
 
 
