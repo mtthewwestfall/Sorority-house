@@ -52,27 +52,42 @@ ALLOWED = {"python", "python3", "pytest", "pip", "uvicorn", "node", "npm", "npx"
 GIT_READ_ONLY = {"diff", "status", "log", "show", "blame", "rev-parse", "ls-files", "grep", "branch"}
 # Interpreters run whatever they're given; inline code and package installs always prompt.
 INLINE_CODE = {"python": {"-c"}, "python3": {"-c"}, "node": {"-e", "-p", "--eval", "--print"}}
-SCRIPT_EXT = (".py", ".js", ".mjs", ".cjs", ".ts")
+# Interpreter options that take a separate value. Python's set is fixed; node has too many
+# to list, so for it every option is assumed to take one (None) — which only ever errs
+# toward prompting.
+VALUE_OPTS: dict[str, set[str] | None] = {"python": {"-W", "-X", "--check-hash-based-pycs"},
+                                          "python3": {"-W", "-X", "--check-hash-based-pycs"},
+                                          "node": None}
 INSTALLERS = {"pip": {"install", "download", "uninstall"}, "npm": {"install", "i", "exec", "x", "run", "ci"}}
 NEVER_AUTO = {"npx", "curl"}
 HIDDEN_SYNTAX = re.compile(r"`|\$\(|\beval\b|\bexec\b|\bsh\s+-c|\bbash\s+-c|\bsudo\b|>\s*/")
 RUN_POLICY = {"yes": False}    # set from --yes at startup
 
 
-def runs_inline_code(words: list[str], flags: set[str]) -> bool:
-    """True if an inline-code flag appears before the script path (or `-m module` / `--`).
-    Everything up to that point is scanned, so option values (`-W ignore`) and combined
-    short flags (`-qc`) can't hide it; anything after the script belongs to the script."""
+def runs_inline_code(prog: str, words: list[str]) -> bool:
+    """True if an inline-code flag appears among the interpreter's own options.
+    Options are scanned until the script path (the first bare word that is not the value of
+    a preceding option), `-m module` or `--`; everything after that belongs to the script.
+    Combined short flags (`-qc`) and option values (`-W ignore.py`) are handled."""
+    flags, value_opts = INLINE_CODE[prog], VALUE_OPTS[prog]
     short = {f[1] for f in flags if len(f) == 2}
     long = {f for f in flags if len(f) > 2}
+    expect_value = False
     for w in words[1:]:
-        if w in ("-m", "--") or w.lower().endswith(SCRIPT_EXT):
+        if expect_value:
+            expect_value = False
+            continue
+        if w in ("-m", "--") or not w.startswith("-") or w == "-":
             return False
         if w.startswith("--"):
-            if w.split("=")[0] in long:
+            name, _, val = w.partition("=")
+            if name in long:
                 return True
-        elif w.startswith("-") and len(w) > 1 and short & set(w[1:]):
-            return True
+            expect_value = not val and (value_opts is None or name in value_opts)
+        else:
+            if short & set(w[1:]):
+                return True
+            expect_value = value_opts is None or (w in value_opts and len(w) == 2)
     return False
 
 
@@ -109,7 +124,7 @@ def command_allowed(command: str) -> str | None:
             return f"`{prog}` is not on the allowlist"
         elif prog in NEVER_AUTO:
             return f"`{prog}` fetches or runs arbitrary code"
-        elif prog in INLINE_CODE and runs_inline_code(words, INLINE_CODE[prog]):
+        elif prog in INLINE_CODE and runs_inline_code(prog, words):
             return f"inline `{prog}` code runs unrestricted; put it in a file under the repo"
         elif prog in INSTALLERS and INSTALLERS[prog] & set(words[1:]):
             return f"`{prog}` would install or execute packages"
