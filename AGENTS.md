@@ -13,6 +13,8 @@ Lockeddoor.ai / Sorority House: an AI companion chat. One FastAPI backend, one s
   `web/assets/` holds portraits and icons; `web/sw.js` + `web/manifest.webmanifest` make it
   installable (bump `SHELL` in `sw.js` whenever the shell file list changes).
 - `README.md` — product/architecture docs. `requirements.txt` — Python deps (Railway installs).
+- `telegram/bot.py` — the house on Telegram: a thin client over the public API, one shared
+  account and history with the web. Never talks to the DB or admin routes.
 - `coder/` — the self-hosted coding agent (`coder/README.md`).
 
 ## Concepts you must not break
