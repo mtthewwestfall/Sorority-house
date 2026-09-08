@@ -90,7 +90,8 @@ class Store:
 
     def _save(self) -> None:
         tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(self._data, fh, indent=2, ensure_ascii=False)
         os.replace(tmp, self.path)
 
@@ -116,6 +117,9 @@ def _base() -> str:
     base = os.environ.get(URL_ENV, "").strip().rstrip("/")
     if not base:
         raise RuntimeError(f"{URL_ENV} is not set (the Sorority House backend).")
+    if not base.startswith("https://") and not base.startswith("http://localhost") \
+            and not base.startswith("http://127.0.0.1"):
+        raise RuntimeError(f"{URL_ENV} must be https:// — passwords and tokens travel over it.")
     return base
 
 
@@ -207,7 +211,7 @@ def _fetch_history(token, girl):
 
 
 def _send_chat(token, girl, message):
-    r = _post("/chat", {"girl": girl, "message": message}, token=token)
+    r = _post("/chat", {"girl": girl, "message": message}, token=token, timeout=150)
     if r.status_code != 200:
         try:
             detail = r.json().get("detail", "")
@@ -413,7 +417,6 @@ async def _open_girl(update, slug) -> None:
         await _txt(update, "I don't recognise that sister. Try one of: "
                      + ", ".join(g["girl"] for g in rosters))
         return
-    store.set(update.effective_chat.id, active_girl=sl)
     try:
         state = (await fetch_state(rec["token"]))["girls"].get(sl, {})
         if not state.get("open"):
@@ -423,6 +426,7 @@ async def _open_girl(update, slug) -> None:
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not reach the house: {exc}")
         return
+    store.set(update.effective_chat.id, active_girl=sl)
     if history:
         parts = [_girl_name(rosters, sl) + " — here's where you two left off:"]
         for m in history[-6:]:
@@ -496,7 +500,10 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     parts = [_girl_name(rosters, slug) + " — recent messages:"]
     for m in history[-8:]:
         who = "You" if m["sender"] == "user" else "Her"
-        parts.append(f"{who}: {m['message']}")
+        body = m["message"]
+        if len(body) > 450:
+            body = body[:450] + " …"
+        parts.append(f"{who}: {body}")
     await _txt(update, "\n\n".join(parts)[:4000])
 
 
@@ -506,7 +513,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await q.answer()
     data = q.data or ""
-    if not data.startswith("girl:"):
+    if not data.startswith("girl:") or update.effective_chat.type != "private":
         return
     if not _rec(update) or not _rec(update).get("token"):
         await _txt(update, "Not signed in — /login <email> <password> first.")
@@ -542,6 +549,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await _txt(update, reply + tail)
 
 
+async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A session is bound to a chat, so the house only talks one-to-one: in a group every
+    member would share (and could log out) whoever signed in."""
+    if update.effective_message and update.effective_message.text and \
+            update.effective_message.text.startswith("/"):
+        await _txt(update, "I only talk in private — message me directly and /login there.")
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
          "Sorority House on Telegram — commands:\n"
@@ -567,6 +582,7 @@ def main():
         raise SystemExit(f"{exc}")
 
     app = Application.builder().token(token).build()
+    app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, on_group))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("signup", cmd_signup))
@@ -576,7 +592,7 @@ def main():
     app.add_handler(CommandHandler("girl", cmd_girl))
     app.add_handler(CommandHandler("state", cmd_state))
     app.add_handler(CommandHandler("history", cmd_history))
-    app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(CallbackQueryHandler(on_button))  # buttons only exist in private chats
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     logger.info("Sorority House Telegram bot starting (backend: %s)", _base())
     app.run_polling()
