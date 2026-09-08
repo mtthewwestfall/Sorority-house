@@ -897,27 +897,39 @@
       currentGirl = null;
     }
 
-    let fitFrame = 0;
+    let fitTimer = 0;
     let lastViewport = '';
+    let pendingViewport = '';
     const mobileChat = window.matchMedia('(max-width: 620px)');
+    function viewportKey() {
+      const vv = window.visualViewport;
+      return `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
+    }
     function fitChatToViewport() {
       if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) return;
-      if (fitFrame) return;
-      fitFrame = requestAnimationFrame(() => {
-        fitFrame = 0;
+      // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
+      // viewport and may scroll the page. Size the panel to the visible area and pull it
+      // back up by however far the page was pushed, so nothing hides behind the keyboard.
+      // Only apply once the viewport has stopped moving: re-laying out during the
+      // keyboard animation makes Safari re-scroll, and the panel shakes.
+      const key = viewportKey();
+      if (key === lastViewport) { clearTimeout(fitTimer); fitTimer = 0; return; }
+      if (key === pendingViewport && fitTimer) return;
+      pendingViewport = key;
+      clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => {
+        fitTimer = 0;
+        const now = viewportKey();
+        if (now !== pendingViewport) { fitChatToViewport(); return; }
+        if (now === lastViewport) return;
+        lastViewport = now;
         const vv = window.visualViewport;
-        // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
-        // viewport and may scroll the page. Size the panel to the visible area and pull it
-        // back up by however far the page was pushed, so nothing hides behind the keyboard.
-        const key = `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
-        if (key === lastViewport) return;
-        lastViewport = key;
         const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
         chat.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
         chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
         if (window.scrollY) window.scrollTo(0, 0);
         if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
-      });
+      }, 90);
     }
     // Safari fires the viewport events late (or not at all) around focus; poll briefly.
     function settleChatViewport() {
