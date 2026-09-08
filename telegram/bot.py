@@ -384,10 +384,12 @@ def _portrait_url(g) -> str:
 
 def _fetch_bytes(url: str):
     deadline = time.monotonic() + PORTRAIT_DEADLINE_S
-    with requests.get(url, timeout=(4, 4), stream=True) as r:
+    with requests.get(url, timeout=(4, 4), stream=True, allow_redirects=False) as r:
         r.raise_for_status()
         if int(r.headers.get("Content-Length") or 0) > PORTRAIT_MAX_BYTES:
             raise ValueError("portrait too large")
+        if time.monotonic() > deadline:
+            raise TimeoutError("portrait download too slow")
         buf = bytearray()
         for chunk in r.iter_content(65536):
             buf.extend(chunk)
