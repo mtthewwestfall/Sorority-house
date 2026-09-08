@@ -9,7 +9,8 @@ checks, reviews its own diff, then commits, pushes and opens the PR.
 ```
 pip install requests
 gh auth login                     # GitHub CLI, so it can open PRs
-export GEMINI_API_KEY=...         # or CODER_API_KEY for any other provider
+export DEEPSEEK_API_KEY=...       # primary (cheapest)
+export GEMINI_API_KEY=...         # backup: used automatically if DeepSeek fails
 ```
 
 ## Use
@@ -27,26 +28,32 @@ the token usage; press `d` to read the full diff, `n` to leave the changes uncom
 
 ## Choosing a model
 
-| Setting | Default | Notes |
+Providers are tried in this order, using whichever keys you have set; if the current one keeps
+failing mid-task (outage, rate limit, bad key) the run carries on with the next:
+
+| Order | Key | Model |
 |---|---|---|
-| `CODER_MODEL` | `gemini-3.1-pro-preview` | strongest default; `gemini-2.5-flash` is far cheaper for small jobs |
-| `CODER_BASE_URL` | Gemini's OpenAI-compatible endpoint | any OpenAI-compatible chat API with tool calling: `https://api.deepseek.com/v1`, `https://api.openai.com/v1`, a local vLLM/Ollama |
-| `CODER_API_KEY` | falls back to `GEMINI_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` | |
-| `CODER_PRICE_IN` / `CODER_PRICE_OUT` | unset | $ per 1M tokens; when set, each run prints an estimated cost |
+| 1 | `DEEPSEEK_API_KEY` | `deepseek-chat` — cents per task |
+| 2 | `GEMINI_API_KEY` | `gemini-3.1-pro-preview` — more careful; ~$0.20-0.40 per small task |
+| 3 | `OPENAI_API_KEY` | `gpt-4.1` |
+
+To force a specific model (any OpenAI-compatible endpoint with tool calling, incl. local
+vLLM/Ollama), set `CODER_BASE_URL` + `CODER_MODEL` (+ `CODER_API_KEY` if it isn't one of the
+above); it goes first, the chain stays as backup (an override identical to a built-in entry is
+not repeated).
 
 ## Cost
 
-A typical small task uses roughly 150k input tokens and 1.5k output tokens. Set the `CODER_PRICE_IN` and `CODER_PRICE_OUT` environment variables (in $ per 1M tokens) to see the estimated cost in dollars at the end of a run.
+A typical small task uses roughly 150k input tokens and 1.5k output tokens. Every run ends with
+token counts per model. For a dollar figure give prices ($ per 1M input/output tokens) for the
+models you use, e.g. `CODER_PRICES="deepseek-chat=0.28/0.42,gemini-3.1-pro-preview=2/12"`
+(check your providers' current price lists); the estimate is only shown when every model that
+took part in the run has a price. `CODER_PRICE_IN` / `CODER_PRICE_OUT` still work for the
+primary model alone.
 
-Cheapest tested setup — DeepSeek (a /help command added to the Telegram bot cost 13k tokens, well under a cent):
-
-```bash
-export DEEPSEEK_API_KEY=...
-export CODER_BASE_URL=https://api.deepseek.com CODER_MODEL=deepseek-chat
-python coder.py "your task"
-```
-
-Gemini 3.1 Pro (the default) is the more careful model; use it for anything touching trust logic or payments.
+DeepSeek (the default when its key is set) did a /help command for the Telegram bot in 13k tokens,
+well under a cent. For anything touching trust logic or payments, force Gemini:
+`CODER_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai CODER_MODEL=gemini-3.1-pro-preview`.
 
 ## What it does well / where to keep an eye on it
 
