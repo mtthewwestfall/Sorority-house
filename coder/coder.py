@@ -10,10 +10,11 @@ It reads AGENTS.md, works on a fresh branch, edits files with real tools
 (read / search / edit / run), runs the repo's checks, reviews its own diff,
 then commits, pushes and opens a PR with `gh`. Your machine, your API key.
 
-Any OpenAI-compatible chat endpoint that supports tool calling works:
-  CODER_API_KEY   falls back to GEMINI_API_KEY, then OPENAI_API_KEY, then DEEPSEEK_API_KEY
-  CODER_BASE_URL  default https://generativelanguage.googleapis.com/v1beta/openai
-  CODER_MODEL     default gemini-3.1-pro-preview
+Providers are tried in order DeepSeek -> Gemini -> OpenAI, using whichever keys are set
+(DEEPSEEK_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY). If the current one keeps failing
+mid-task, the run continues on the next. Any OpenAI-compatible endpoint with tool calling
+works as an explicit override:
+  CODER_BASE_URL + CODER_MODEL + CODER_API_KEY
   CODER_PRICE_IN / CODER_PRICE_OUT   optional $ per 1M tokens, to print a cost estimate
 
 Only dependency: requests.
@@ -37,8 +38,12 @@ ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_outp
                            text=True, check=True).stdout.strip())
 GUIDE = ROOT / "AGENTS.md"
 
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-DEFAULT_MODEL = "gemini-3.1-pro-preview"
+# (base_url, model, key env var) — first with a key is primary, the rest are fallbacks
+PROVIDERS = [
+    ("https://api.deepseek.com", "deepseek-chat", "DEEPSEEK_API_KEY"),
+    ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.1-pro-preview", "GEMINI_API_KEY"),
+    ("https://api.openai.com/v1", "gpt-4.1", "OPENAI_API_KEY"),
+]
 MAX_TOOL_OUTPUT = 12_000       # chars of a single tool result the model gets to see
 MAX_STEPS = 60                 # tool calls before we stop and ask
 VERIFY_ROUNDS = 3              # how many times failing checks are fed back
@@ -296,11 +301,28 @@ def tool_schemas() -> list[dict]:
 # --------------------------------------------------------------------------- model
 
 class Model:
-    def __init__(self, model: str, base_url: str, api_key: str):
-        self.model, self.base_url, self.api_key = model, base_url.rstrip("/"), api_key
+    """`endpoints` is a list of (base_url, model, api_key); the first is used until it fails
+    repeatedly, then the run continues on the next one."""
+    def __init__(self, endpoints: list[tuple[str, str, str]]):
+        self.endpoints = [(u.rstrip("/"), m, k) for u, m, k in endpoints]
+        self.base_url, self.model, self.api_key = self.endpoints[0]
         self.prompt_tokens = self.completion_tokens = self.calls = 0
 
     def chat(self, messages: list[dict], tools: list[dict]) -> dict:
+        while True:
+            try:
+                return self._chat(messages, tools)
+            except SystemExit as e:
+                if len(self.endpoints) < 2:
+                    raise
+                self.endpoints.pop(0)
+                self.base_url, self.model, self.api_key = self.endpoints[0]
+                say(f"  {e}\n  falling back to {self.model}", dim=True)
+                for m in messages:      # provider-specific extras don't travel
+                    for c in m.get("tool_calls") or []:
+                        c.pop("extra_content", None)
+
+    def _chat(self, messages: list[dict], tools: list[dict]) -> dict:
         body = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
         for attempt in range(4):
             try:
@@ -496,8 +518,9 @@ def main() -> None:
     ap.add_argument("--plan", action="store_true", help="show a plan and ask before editing")
     ap.add_argument("--no-pr", action="store_true", help="commit on a branch but don't push/open a PR")
     ap.add_argument("--yes", "-y", action="store_true", help="don't ask for confirmation")
-    ap.add_argument("--model", default=os.environ.get("CODER_MODEL", DEFAULT_MODEL))
-    ap.add_argument("--base-url", default=os.environ.get("CODER_BASE_URL", DEFAULT_BASE_URL))
+    ap.add_argument("--model", default=os.environ.get("CODER_MODEL"),
+                    help="override the provider chain with this model (needs --base-url/CODER_BASE_URL)")
+    ap.add_argument("--base-url", default=os.environ.get("CODER_BASE_URL"))
     ap.add_argument("--max-steps", type=int, default=MAX_STEPS)
     ap.add_argument("--no-review", action="store_true", help="skip the self-review pass")
     a = ap.parse_args()
@@ -506,19 +529,26 @@ def main() -> None:
     task = " ".join(a.task).strip() or (sys.stdin.read().strip() if not sys.stdin.isatty() else "")
     if not task:
         ap.error("give me a task")
-    api_key = (os.environ.get("CODER_API_KEY") or os.environ.get("GEMINI_API_KEY")
-               or os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"))
-    if not api_key:
-        raise SystemExit("set CODER_API_KEY (or GEMINI_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY)")
+    endpoints = [(u, m, os.environ[k]) for u, m, k in PROVIDERS if os.environ.get(k)]
+    if a.model or a.base_url:
+        if not (a.model and a.base_url):
+            ap.error("--model and --base-url go together")
+        key = os.environ.get("CODER_API_KEY") or next((e[2] for e in endpoints if e[0] == a.base_url.rstrip("/")), None)
+        if not key:
+            raise SystemExit("set CODER_API_KEY for that endpoint")
+        endpoints.insert(0, (a.base_url, a.model, key))
+    if not endpoints:
+        raise SystemExit("set DEEPSEEK_API_KEY (cheapest), GEMINI_API_KEY or OPENAI_API_KEY")
     if git("status", "--porcelain"):
         raise SystemExit("working tree is dirty; commit or stash first so the PR only has my changes")
 
     base = git("rev-parse", "--abbrev-ref", "HEAD")
     branch = f"coder/{int(time.time())}-{slug(task)}"
     git("checkout", "-b", branch)
-    say(f"branch {branch} (from {base}); model {a.model}")
+    model = Model(endpoints)
+    say(f"branch {branch} (from {base}); model {model.model}"
+        + (f" (fallback: {', '.join(m for _, m, _ in endpoints[1:])})" if len(endpoints) > 1 else ""))
 
-    model = Model(a.model, a.base_url, api_key)
     guide = GUIDE.read_text() if GUIDE.exists() else "(no AGENTS.md in this repo)"
     messages = [{"role": "system", "content": SYSTEM.format(root=ROOT, guide=guide)},
                 {"role": "user", "content": f"Task:\n{task}"}]
@@ -590,7 +620,7 @@ def main() -> None:
     git("push", "-q", "-u", "origin", branch)
     r = subprocess.run(["gh", "pr", "create", "--base", base, "--head", branch, "--title", done["title"],
                         "--body", done["summary"] + "\n\n---\nOpened by `coder/coder.py` "
-                        f"({a.model}). Task:\n\n> {task}"], cwd=ROOT, capture_output=True, text=True)
+                        f"({model.model}). Task:\n\n> {task}"], cwd=ROOT, capture_output=True, text=True)
     if r.returncode:
         say(f"pushed {branch}, but `gh pr create` failed:\n{r.stderr}\nOpen the PR by hand:\n"
             f"  gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)}")
