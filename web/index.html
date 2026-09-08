@@ -514,13 +514,13 @@
       <div class="chat-service">AI Message<small>Private &middot; AI companion</small></div>
       <div class="chat-log" id="chat-log" aria-live="polite"></div>
       <div class="chat-foot">
-        <form class="chat-form" id="chat-form">
+        <div class="chat-form" id="chat-form">
           <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
           <div class="field">
-            <textarea id="chat-input" name="ai-message" rows="1" autocomplete="nope" autocorrect="on" data-form-type="other" data-lpignore="true" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
-            <button class="button" id="chat-send" type="submit" aria-label="Send">&uarr;</button>
+            <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
+            <button class="button" id="chat-send" type="button" aria-label="Send">&uarr;</button>
           </div>
-        </form>
+        </div>
         <div class="chat-meta">
           <span class="ai-note"></span>
           <span class="ai-note" id="chat-remaining"></span>
@@ -810,6 +810,7 @@
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
+      lastKeyboard = -1;
       fitChatToViewport();
       chatInput.value = '';
       growChatInput();
@@ -819,6 +820,8 @@
     function closeChat() {
       abortStreamAndResync();
       chat.classList.remove('is-open');
+      chat.style.transform = '';
+      chat.style.removeProperty('--kb-offset');
       if (document.body.classList.contains('chat-locked')) {
         document.body.classList.remove('chat-locked');
         window.scrollTo(0, lockedScrollY);
@@ -826,18 +829,25 @@
       currentGirl = null;
     }
 
+    let fitFrame = 0;
+    let lastKeyboard = 0;
     function fitChatToViewport() {
-      if (!chat.classList.contains('is-open')) return;
-      const vv = window.visualViewport;
-      if (!vv) return;
-      chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
-      if (window.scrollY) window.scrollTo(0, 0);
-      // Anchor the composer to the bottom edge of the *visible* area (the top of the
-      // keyboard) rather than the layout viewport, whose height iOS may or may not shrink.
-      const panel = chat.querySelector('.chat-panel').getBoundingClientRect();
-      const keyboard = Math.max(0, Math.round(panel.bottom - (vv.offsetTop + vv.height)));
-      chat.style.setProperty('--kb-offset', `${keyboard}px`);
-      chatLog.scrollTop = chatLog.scrollHeight;
+      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      if (fitFrame) return;
+      fitFrame = requestAnimationFrame(() => {
+        fitFrame = 0;
+        const vv = window.visualViewport;
+        const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+        chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
+        // Anchor the composer to the bottom edge of the *visible* area (the top of the
+        // keyboard) rather than the layout viewport, whose height iOS may or may not shrink.
+        const panel = chat.querySelector('.chat-panel').getBoundingClientRect();
+        const keyboard = Math.max(0, Math.round(panel.bottom - (vv.offsetTop + vv.height)));
+        if (keyboard === lastKeyboard) return;
+        lastKeyboard = keyboard;
+        chat.style.setProperty('--kb-offset', `${keyboard}px`);
+        if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
+      });
     }
 
     function growChatInput() {
@@ -852,7 +862,7 @@
     chatInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
-        chatForm.requestSubmit();
+        sendChatMessage();
       }
     });
     if (window.visualViewport) {
@@ -1180,8 +1190,8 @@
       }
     }
 
-    chatForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
+    document.getElementById('chat-send').addEventListener('click', sendChatMessage);
+    async function sendChatMessage() {
       const message = chatInput.value.trim();
       if (!message || sending || !currentGirl) return;
 
@@ -1207,7 +1217,7 @@
         chatSend.disabled = false;
         chatInput.focus();
       }
-    });
+    }
 
     // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
     // Leaderboard: the API only returns a shortened display name + progress.
