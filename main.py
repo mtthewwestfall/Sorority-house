@@ -68,7 +68,9 @@ API CONTRACT implemented here (point your chat app at these):
                                                             checkout.session.completed with a
                                                             client_reference_id (= user_id, the
                                                             Telegram bot adds it to the Payment Link)
-                                                            upgrades that account (needs STRIPE_API_KEY);
+                                                            binds the customer to that account and,
+                                                            once payment_status is paid, upgrades
+                                                            it (needs STRIPE_API_KEY);
                                                             subscription deleted/unpaid -> freshman
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
@@ -711,6 +713,13 @@ def init_db():
                 -- later point it at an email account instead.
                 CREATE TABLE IF NOT EXISTS telegram_accounts (
                     telegram_id BIGINT PRIMARY KEY,
+                    user_id     TEXT NOT NULL REFERENCES users(user_id),
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                -- which account started a Stripe checkout as this customer
+                -- (client_reference_id); lets invoice.paid find email-less accounts
+                CREATE TABLE IF NOT EXISTS stripe_checkouts (
+                    customer_id TEXT PRIMARY KEY,
                     user_id     TEXT NOT NULL REFERENCES users(user_id),
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
@@ -2465,6 +2474,8 @@ def telegram_auth(body: TelegramAuthIn):
     conn = db()
     try:
         with conn.cursor() as cur:
+            # one account per Telegram id even when the first two messages race
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"tg:{body.telegram_id}",))
             cur.execute("SELECT user_id FROM telegram_accounts WHERE telegram_id=%s",
                         (body.telegram_id,))
             row = cur.fetchone()
@@ -3143,6 +3154,53 @@ def _user_for_stripe_customer(customer_id: str):
     return _ensure_user(row["user_id"]) if row else None
 
 
+def _remember_stripe_checkout(customer_id: str, user_id: str) -> None:
+    """checkout.session.completed said which account started this customer's checkout."""
+    if not customer_id:
+        return
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO stripe_checkouts (customer_id, user_id) VALUES (%s,%s)
+                ON CONFLICT (customer_id) DO UPDATE SET user_id=EXCLUDED.user_id
+            """, (customer_id, user_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def _user_for_stripe_checkout(customer_id: str):
+    """users row that started a checkout as this customer (client_reference_id), or None."""
+    if not customer_id:
+        return None
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT u.user_id FROM stripe_checkouts c JOIN users u USING (user_id)
+                WHERE c.customer_id=%s
+            """, (customer_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return _ensure_user(row["user_id"]) if row else None
+
+
+def _stripe_customer_event_at(customer_id: str) -> int:
+    """Newest Stripe event timestamp any account holds for this customer (0 if none)."""
+    if not customer_id:
+        return 0
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(MAX(stripe_event_at),0) AS t FROM users "
+                        "WHERE stripe_customer_id=%s", (customer_id,))
+            return int(cur.fetchone()["t"])
+    finally:
+        conn.close()
+
+
 def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_id: str,
                         event_at: int) -> str:
     """Tier + Stripe ids + event timestamp in one transaction, guarded by the persisted
@@ -3284,7 +3342,7 @@ async def stripe_webhook(request: Request):
         tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
         if not tier:
             return {"ok": True, "ignored": "no known price"}
-        user = _user_for_stripe_customer(customer_id)
+        user = _user_for_stripe_customer(customer_id) or _user_for_stripe_checkout(customer_id)
         if user is None:
             email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
             if not email:
@@ -3317,10 +3375,18 @@ async def stripe_webhook(request: Request):
         if row is None:
             print(f"[stripe] {kind} {event.get('id')}: client_reference_id is not a user", flush=True)
             return {"ok": True, "ignored": "unknown user"}
+        _remember_stripe_checkout(customer_id, ref)
+        if obj.get("payment_status") != "paid":
+            # delayed payment method: invoice.paid grants the tier when the money lands
+            return {"ok": True, "user_id": ref, "pending": True}
         tier = _stripe_subscription_tier(sub)
         if not tier:
             return {"ok": True, "ignored": "no known price"}
-        applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at)
+        # the checkout is the authoritative binding of this customer to an account: if
+        # its first invoice.paid got here first and landed elsewhere (email match), the
+        # move must not be refused as stale, so apply it as of that newer event
+        applied = _apply_stripe_event(ref, tier, customer_id, sub,
+                                      max(event_at, _stripe_customer_event_at(customer_id)))
         if not applied:
             return {"ok": True, "ignored": "stale event"}
         return {"ok": True, "user_id": applied, "tier": tier}
