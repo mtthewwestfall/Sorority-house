@@ -252,15 +252,15 @@
     .typing { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; margin: 4px 0 8px; }
     .chat-foot { padding: 10px 12px 14px; }
     .chat-form { display: flex; align-items: flex-end; gap: 10px; }
-    .chat-form textarea {
+    .chat-form .composer {
       flex: 1; min-width: 0; border-radius: 22px; padding: 11px 44px 11px 16px; font: inherit; font-size: 1rem; line-height: 1.3;
-      color: var(--white); background: rgba(255,255,255,.05); border: 1px solid var(--line); resize: none; max-height: 110px;
+      color: var(--white); background: rgba(255,255,255,.05); border: 1px solid var(--line); resize: none; max-height: 110px; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-modify: read-write-plaintext-only;
     }
-    .chat-form textarea::placeholder { color: rgba(199,185,202,.6); }
-    .chat-form textarea:focus { outline: none; border-color: rgba(255,255,255,.28); }
+    .chat-form .composer:empty::before { content: attr(data-placeholder); color: rgba(199,185,202,.6); pointer-events: none; }
+    .chat-form .composer:focus { outline: none; border-color: rgba(255,255,255,.28); }
     .chat-form .field { flex: 1; min-width: 0; position: relative; display: flex; }
-    .chat-form .field textarea { width: 100%; overflow-y: auto; scrollbar-width: none; }
-    .chat-form .field textarea::-webkit-scrollbar { display: none; }
+    .chat-form .field .composer { width: 100%; overflow-y: auto; scrollbar-width: none; }
+    .chat-form .field .composer::-webkit-scrollbar { display: none; }
     .auth-panel { width: min(420px, 100%); height: auto; padding: 26px 26px 22px; gap: 12px; }
     .auth-panel h2 { font-size: 1.4rem; margin: 0 0 4px; }
     .auth-panel .auth-sub { color: var(--muted); font-size: .9rem; margin: 0 0 8px; }
@@ -312,9 +312,9 @@
     .chat-close:hover { background: rgba(0,0,0,.1); }
     .msg.her { color: var(--chat-ink); }
     .msg.error { color: #b3123f; border-color: rgba(255,42,145,.35); background: rgba(255,42,145,.06); }
-    .chat-form textarea { color: var(--chat-ink); background: #fff; border-color: var(--chat-line); }
-    .chat-form textarea::placeholder { color: var(--chat-muted); }
-    .chat-form textarea:focus { border-color: rgba(0,0,0,.3); }
+    .chat-form .composer { color: var(--chat-ink); background: #fff; border-color: var(--chat-line); }
+    .chat-form .composer:empty::before { color: var(--chat-muted); }
+    .chat-form .composer:focus { border-color: rgba(0,0,0,.3); }
     #chat-photo-btn { background: rgba(0,0,0,.06); color: var(--chat-ink); }
     #chat-photo-btn:hover:not([disabled]) { background: rgba(0,0,0,.1); }
     .chat-photo { border-color: var(--chat-line); }
@@ -542,7 +542,7 @@
         <div class="chat-form" id="chat-form">
           <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
           <div class="field">
-            <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
+            <div id="chat-input" class="composer" contenteditable="plaintext-only" role="textbox" aria-multiline="true" autocorrect="on" autocapitalize="sentences" enterkeyhint="send" data-placeholder="AI Message" aria-label="Message"></div>
             <button class="button" id="chat-send" type="button" aria-label="Send">&uarr;</button>
           </div>
         </div>
@@ -737,6 +737,105 @@
     const chatLog = document.getElementById('chat-log');
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
+    const CHAT_MAX = 2000;
+    if (chatInput.contentEditable !== 'plaintext-only') chatInput.contentEditable = 'true';
+    Object.defineProperty(chatInput, 'value', {
+      get() { return chatInput.innerText.replace(/\u00a0/g, ' ').replace(/\n$/, ''); },
+      set(v) { chatInput.textContent = v; },
+    });
+    chatInput.addEventListener('paste', (event) => {
+      event.preventDefault();
+      document.execCommand('insertText', false, (event.clipboardData || window.clipboardData).getData('text'));
+    });
+    // Enforce the length cap on the insertion itself (room = cap minus what survives the selection),
+    // trimming to whole code points so an emoji is never split.
+    chatInput.addEventListener('beforeinput', (event) => {
+      const data = /^insert(LineBreak|Paragraph)$/.test(event.inputType) ? '\n'
+        : event.data ?? (event.dataTransfer ? event.dataTransfer.getData('text') : '');
+      if (!data || event.inputType === 'insertCompositionText') return;
+      const [selStart, selEnd] = caretOffset();
+      const room = CHAT_MAX - (chatInput.value.length - (selEnd - selStart));
+      if (data.length <= room) return;
+      event.preventDefault();
+      const kept = clipCodePoints(data, room);
+      if (kept) document.execCommand('insertText', false, kept);
+    });
+    function clipCodePoints(text, max) {
+      let out = '';
+      for (const ch of text) { if (out.length + ch.length > max) break; out += ch; }
+      return out;
+    }
+    // Walk the editable DOM the way innerText renders it (text, <br> and block edges as "\n"),
+    // so caret offsets line up with chatInput.value. Stops at (container, offset) when given.
+    function walkText(container, offset, visit) {
+      let out = '';
+      let done = false;
+      let pendingBreak = 0;
+      const flush = () => { if (pendingBreak && out) out += '\n'.repeat(pendingBreak); pendingBreak = 0; };
+      const breakFor = (node) => (node === chatInput ? 0 : node.nodeName === 'P' ? 2 : node.nodeName === 'DIV' ? 1 : 0);
+      (function walk(node) {
+        if (done) return;
+        if (node.nodeType === 3) {
+          flush();
+          if (visit) visit(node, out.length);
+          out += node === container ? node.data.slice(0, offset) : node.data;
+          if (node === container) done = true;
+          return;
+        }
+        if (node.nodeName === 'BR') { flush(); out += '\n'; return; }
+        const brk = breakFor(node);
+        pendingBreak = Math.max(pendingBreak, brk);
+        const kids = node.childNodes;
+        const stop = node === container ? offset : kids.length;
+        for (let i = 0; i < stop && i < kids.length; i++) { walk(kids[i]); if (done) return; }
+        if (node === container) { done = true; return; }
+        pendingBreak = Math.max(pendingBreak, brk);
+      })(chatInput);
+      return out;
+    }
+    function caretOffset() {
+      const s = window.getSelection();
+      const len = chatInput.value.length;
+      if (!s || !s.rangeCount || !chatInput.contains(s.anchorNode)) return [len, len];
+      const r = s.getRangeAt(0);
+      const start = Math.min(len, walkText(r.startContainer, r.startOffset).length);
+      const end = Math.min(len, walkText(r.endContainer, r.endOffset).length);
+      return [start, Math.max(start, end)];
+    }
+    function setCaret(offset) {
+      let target = null;
+      let at = 0;
+      walkText(null, 0, (node, start) => {
+        if (!target && offset <= start + node.data.length) { target = node; at = Math.max(0, offset - start); }
+      });
+      const r = document.createRange();
+      if (target) r.setStart(target, at); else { r.selectNodeContents(chatInput); r.collapse(false); }
+      r.collapse(true);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+    // IME text bypasses beforeinput sizing: snapshot on start, and on commit keep only the
+    // part of the composition that fits, leaving the surrounding text untouched.
+    let imeSnap = null;
+    chatInput.addEventListener('compositionstart', () => { imeSnap = { value: chatInput.value, sel: caretOffset() }; });
+    chatInput.addEventListener('compositionend', (event) => {
+      const snap = imeSnap; imeSnap = null;
+      if (!snap || chatInput.value.length <= CHAT_MAX) return;
+      const before = snap.value.slice(0, snap.sel[0]);
+      const after = snap.value.slice(snap.sel[1]);
+      const kept = clipCodePoints(event.data || '', Math.max(0, CHAT_MAX - before.length - after.length));
+      chatInput.value = before + kept + after;
+      setCaret(before.length + kept.length);
+    });
+    chatInput.addEventListener('input', (event) => {
+      if (!chatInput.textContent && chatInput.innerHTML) chatInput.innerHTML = '';
+      if (event.isComposing || chatInput.value.length <= CHAT_MAX) return;
+      const [start] = caretOffset();
+      const v = chatInput.value;
+      let cut = Math.max(0, start - (v.length - CHAT_MAX));
+      if (cut > 0 && /[\uDC00-\uDFFF]/.test(v[cut])) cut--;
+      chatInput.value = v.slice(0, cut) + v.slice(start);
+      setCaret(cut);
+    });
     const chatSend = document.getElementById('chat-send');
     const chatRemaining = document.getElementById('chat-remaining');
     const chatPhotoBtn = document.getElementById('chat-photo-btn');
