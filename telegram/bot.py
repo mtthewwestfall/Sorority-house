@@ -425,9 +425,10 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     sess.pop("created", None)
     store.set(update.effective_chat.id, **sess, active_girl=None)
-    await _txt(update,
+    await update.effective_message.reply_text(
          f"This Telegram is now {sess['email']}'s account — same history, same allowance "
-         "here and on the site.\n\n/girls to knock on a door, /state for your allowance.")
+         "here and on the site.\n\n/girls to knock on a door, /state for your allowance.",
+         reply_markup=ReplyKeyboardRemove())
 
 
 async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
