@@ -814,8 +814,11 @@
       try {
         const response = await fetch(API_BASE_URL + '/history?girl=' + encodeURIComponent(girl),
                                     { headers: authHeaders(), signal: cutoff.signal });
+        // A superseded load says nothing about the session it no longer belongs to;
+        // a current one still reports an expired token even if the door is shut.
+        if (seq !== historySeq) return;
         if (response.status === 401) { handleUnauthorized(); return; }
-        if (seq !== historySeq || currentGirl !== girl) return;
+        if (currentGirl !== girl) return;
         if (response.ok) {
           const data = await response.json();
           recent = (data.messages || []).slice(-HISTORY_SHOWN);
