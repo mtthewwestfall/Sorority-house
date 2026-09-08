@@ -85,6 +85,7 @@ These must be set in the **Railway "Variables" tab** for the app to function:
 - `web/index.html`: The whole front end — doors, chat, membership, merch.
 - `web/manifest.webmanifest`, `web/sw.js`: What makes the site installable (see below).
 - `web/assets/`: Roster art and the app icons.
+- `telegram/bot.py`: The house on Telegram — a thin client over the same API (see below).
 
 ---
 
@@ -94,6 +95,11 @@ The site is installable — there is no separate app to build and no store invol
 `web/sw.js` caches **only the shipped shell** (the page and the icons) so an installed copy still opens with no signal, and never the API — a girl, a message or a roster change is always live, never a stale cached copy. The page itself is fetched from the network first, so a deploy lands on the next open. Change anything in the shell list and bump `SHELL` in `web/sw.js` (`house-shell-v1` → `-v2`) or installed copies keep serving the old files.
 
 Requirements: the front end must be served over **HTTPS** (a service worker will not register otherwise, `localhost` excepted), and `manifest.webmanifest`, `sw.js` and `index.html` must sit on the same origin, which they do when `web/` is deployed as-is.
+
+## 💬 Telegram
+`telegram/bot.py` is the house as a Telegram bot: the same accounts, girls, trust clock and message allowance, because it only talks to the backend's public API (`/auth/login`, `/roster`, `/state`, `/history`, `/chat`). Users `/login` with their website account (or `/signup`, which still goes through email verification), `/girls` shows the doors that are open to them as buttons, and from then on plain messages go to the girl they picked. Per-chat sessions live in `telegram/sessions.json` next to the bot (git-ignored).
+
+Run it as a second Railway service from this repo: start command `python telegram/bot.py`, variables `TELEGRAM_BOT_TOKEN` (a new bot from @BotFather) and `PUBLIC_URL` (the backend URL). It polls Telegram, so no public port. Passwords typed into `/login` stay in that Telegram chat's history — the bot refuses them in groups, and users can delete the message afterwards.
 
 ## 🚀 Deployment Steps
 1. Push `main.py` and `requirements.txt` to GitHub.
