@@ -3024,7 +3024,8 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                         event_at: int) -> bool:
     """Tier + Stripe ids + event timestamp in one transaction, guarded by the persisted
     timestamp so an older delivery can never overwrite a newer one, even concurrently.
-    Returns False (and changes nothing) when the event was stale. A paid tier always starts
+    Returns False (and changes nothing) when the event was stale — older than the target
+    account's last event, or than any other account's event for the same customer. A paid tier always starts
     a fresh month (every renewal invoice pays for one). A Stripe customer funds exactly one
     account: when a paid invoice lands on a different account than before, the previous
     holder loses both the ids and the tier they paid for."""
@@ -3033,6 +3034,17 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
     conn = db()
     try:
         with conn.cursor() as cur:
+            if customer_id:
+                # serialise every event of this customer, then refuse if any account
+                # already holds a newer one (the customer may have moved accounts)
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (customer_id,))
+                cur.execute("""
+                    SELECT 1 FROM users WHERE stripe_customer_id=%s AND user_id<>%s
+                        AND stripe_event_at > %s LIMIT 1
+                """, (customer_id, user_id, event_at))
+                if cur.fetchone():
+                    conn.rollback()
+                    return False
             if tier == "freshman":
                 cur.execute(f"""
                     UPDATE users SET tier='freshman', msg_used=%s, {clear},
