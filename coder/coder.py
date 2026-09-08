@@ -430,6 +430,7 @@ def run_agent(model: Model, messages: list[dict], max_steps: int, yes: bool) -> 
             if steps > max_steps:
                 return None
             continue
+        finished = None
         for call in calls:
             name = call["function"]["name"]
             try:
@@ -437,11 +438,12 @@ def run_agent(model: Model, messages: list[dict], max_steps: int, yes: bool) -> 
             except json.JSONDecodeError:
                 args = {}
             if name == "finish":
-                # every tool_call needs a reply or strict servers reject the next turn
-                for c in calls[calls.index(call):]:
-                    messages.append({"role": "tool", "tool_call_id": c["id"],
-                                     "name": c["function"]["name"], "content": "ok"})
-                return {"title": args.get("title", "Update"), "summary": args.get("summary", "")}
+                # answered (every tool_call needs a reply) but only honoured once the rest of
+                # the batch has actually run
+                messages.append({"role": "tool", "tool_call_id": call["id"], "name": name,
+                                 "content": "ok"})
+                finished = {"title": args.get("title", "Update"), "summary": args.get("summary", "")}
+                continue
             fn = TOOLS.get(name, (None,))[0]
             preview = args.get("command") or args.get("path") or args.get("pattern") or ""
             say(f"  > {name} {preview}", dim=True)
@@ -457,6 +459,8 @@ def run_agent(model: Model, messages: list[dict], max_steps: int, yes: bool) -> 
             messages.append({"role": "tool", "tool_call_id": call["id"], "name": name,
                              "content": clip(str(result))})
             steps += 1
+        if finished is not None:
+            return finished
         if steps >= max_steps:
             if yes or not sys.stdin.isatty():
                 return None
