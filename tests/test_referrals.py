@@ -255,6 +255,44 @@ def test_five_qualifying_referrals_flag_the_shirt():
     assert _row(ref)["shirt_eligible_at"] == at
 
 
+def _race(buyers, tier="junior"):
+    results, errors = [], []
+
+    def go(b):
+        try:
+            results.append(main.referral_purchase(b, tier))
+        except Exception as e:      # pragma: no cover
+            errors.append(e)
+
+    ts = [threading.Thread(target=go, args=(b,)) for b in buyers]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors
+    return results
+
+
+def test_same_referrer_concurrent_first_referrals_make_one_wingman():
+    ref = _user("sophomore")
+    results = _race([_signup_via(ref) for _ in range(6)])
+    assert sorted(o["qualified_total"] for o in results) == [1, 2, 3, 4, 5, 6]
+    assert sum(isinstance(o["wingman"], dict) for o in results) == 1
+    assert _pairs() == 1
+    assert sum(o["shirt"] for o in results) == 1
+    assert _row(ref)["shirt_eligible_at"] is not None
+
+
+def test_same_referrer_concurrent_crossing_five_awards_shirt_once():
+    ref = _user("junior")
+    for _ in range(3):
+        main.referral_purchase(_signup_via(ref), "junior")
+    results = _race([_signup_via(ref) for _ in range(4)])
+    assert sum(o["shirt"] for o in results) == 1
+    assert main.referral_status(ref)["qualified"] == 7
+    assert _row(ref)["shirt_eligible_at"] is not None
+
+
 def test_pair_cap_holds_under_concurrency(monkeypatch):
     monkeypatch.setattr(main, "WINGMAN_PAIR_CAP", 3)
     pairs = [(r, _signup_via(r)) for r in (_user("sophomore") for _ in range(8))]

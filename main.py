@@ -151,7 +151,15 @@ Env vars (Railway -> Variables):
                     Cancellations are matched by the customer id remembered from
                     invoice.paid; the key covers customers that never paid through this
                     webhook, and REQUIRED for Telegram-started checkouts (the tier is read
-                    from the subscription behind checkout.session.completed).
+                    from the subscription behind checkout.session.completed). With
+                    Subscriptions: write and PaymentIntents: write it also stamps the
+                    Affitor affiliate metadata (below) on each paid subscription.
+  AFFITOR_PROGRAM_ID
+                    Affitor Wingman program id (default 1082). The web tracker's click id
+                    arrives with /auth/signup and /auth/login (affitor_click_id) and is
+                    written to the Stripe subscription + payment intent metadata as
+                    affitor_click_id / affitor_customer_key / program_id when the
+                    webhook grants a paid tier. No Affitor API is called server-side.
   TELEGRAM_BOT_SECRET
                     shared secret between this backend and telegram/bot.py; /auth/telegram*
                     refuse with 503 until it is set. Any long random string, same value
@@ -294,6 +302,7 @@ STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2"): "senior",
 }
 STRIPE_SIG_TOLERANCE_S = 300
+AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1082")
 TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
@@ -759,6 +768,7 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_event_at BIGINT NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS affitor_click_id TEXT;
                 -- Telegram users: the Telegram id is the login; /auth/telegram/link can
                 -- later point it at an email account instead.
                 CREATE TABLE IF NOT EXISTS telegram_accounts (
@@ -1361,6 +1371,15 @@ def referral_purchase(user_id, tier):
         with conn.cursor() as cur:
             if not referral_program_on(cur):
                 return {"qualified": False, "reason": "program off"}
+            cur.execute("SELECT referrer_user_id FROM referrals WHERE referred_user_id=%s",
+                        (user_id,))
+            row = cur.fetchone()
+            if row is None:
+                return {"qualified": False, "reason": "not referred"}
+            # one referrer's purchases qualify one at a time, so the count below
+            # always includes every earlier qualification (first = Wingman, fifth = shirt)
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",
+                        ("referrer:" + row["referrer_user_id"],))
             cur.execute("""
                 UPDATE referrals SET qualified_at=now(), qualified_tier=%s
                 WHERE referred_user_id=%s AND qualified_at IS NULL
@@ -2539,11 +2558,17 @@ class SignupIn(BaseModel):
     password: str
     display_name: str = "Player"
     ref: str = ""          # referral code from the ?ref= link, if any
+    affitor_click_id: str = ""
 
 
 class LoginIn(BaseModel):
     email: str
     password: str
+    affitor_click_id: str = ""
+
+
+def _clean_click_id(value: str) -> str:
+    return (value or "").strip()[:120]
 
 
 class ResendVerifyIn(BaseModel):
@@ -2692,9 +2717,10 @@ def signup(body: SignupIn):
             user_id = "u_" + secrets.token_hex(12)
             try:
                 cur.execute("""
-                    INSERT INTO users (user_id, display_name, tier, plan_reset_at)
-                    VALUES (%s,%s,'freshman', now() + interval '1 month')
-                """, (user_id, body.display_name.strip()[:40] or "Player"))
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at, affitor_click_id)
+                    VALUES (%s,%s,'freshman', now() + interval '1 month', NULLIF(%s, ''))
+                """, (user_id, body.display_name.strip()[:40] or "Player",
+                      _clean_click_id(body.affitor_click_id)))
                 cur.execute("""
                     INSERT INTO accounts (email, user_id, password_hash, verified_at)
                     VALUES (%s,%s,%s,NULL)
@@ -2714,7 +2740,8 @@ def signup(body: SignupIn):
         email_sent = True
     except (HTTPException, requests.RequestException):
         email_sent = False
-    return {"ok": True, "needs_verification": True, "email": email, "email_sent": email_sent}
+    return {"ok": True, "needs_verification": True, "email": email, "email_sent": email_sent,
+            "user_id": user_id}
 
 
 @app.get("/auth/verify", response_class=HTMLResponse)
@@ -2778,6 +2805,10 @@ def login(body: LoginIn):
                                     detail="email_unverified|Check your inbox and confirm "
                                            "your email before logging in")
             token = _new_session(cur, acct["user_id"])
+            click_id = _clean_click_id(body.affitor_click_id)
+            if click_id:
+                cur.execute("UPDATE users SET affitor_click_id=%s WHERE user_id=%s",
+                            (click_id, acct["user_id"]))
             conn.commit()
     finally:
         conn.close()
@@ -3678,6 +3709,41 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
     return user_id if applied else ""
 
 
+def _affitor_stamp(user_id: str, subscription_id: str, payment_intent_id: str) -> None:
+    """Writes the Affitor attribution the user signed up with onto the Stripe subscription
+    and the invoice's payment intent (metadata affitor_click_id / affitor_customer_key /
+    program_id). Same values every time, so a redelivered event changes nothing. Best
+    effort: needs STRIPE_API_KEY with write access to both; failures are logged, never
+    raised, so the tier grant that already happened is not retried."""
+    if not STRIPE_API_KEY:
+        return
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT affitor_click_id FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    click_id = (row or {}).get("affitor_click_id") or ""
+    if not click_id:
+        return
+    form = {"metadata[affitor_click_id]": click_id,
+            "metadata[affitor_customer_key]": user_id,
+            "metadata[program_id]": AFFITOR_PROGRAM_ID}
+    targets = [("subscriptions", subscription_id), ("payment_intents", payment_intent_id)]
+    for kind, obj_id in targets:
+        if not obj_id:
+            continue
+        try:
+            r = requests.post(f"https://api.stripe.com/v1/{kind}/{obj_id}", data=form,
+                              auth=(STRIPE_API_KEY, ""), timeout=15)
+            if r.status_code != 200:
+                print(f"[affitor] could not stamp {kind}/{obj_id}: {r.status_code} "
+                      f"{r.text[:200]}", flush=True)
+        except requests.RequestException as e:
+            print(f"[affitor] could not stamp {kind}/{obj_id}: {e}", flush=True)
+
+
 def _stripe_subscription_tier(subscription_id: str) -> str:
     """Tier of the price on a subscription, via STRIPE_API_KEY. Raises 503 when the key is
     missing or Stripe is unreachable so Stripe keeps retrying the event."""
@@ -3767,6 +3833,9 @@ async def stripe_webhook(request: Request):
         applied = _apply_stripe_event(user["user_id"], tier, customer_id, sub, event_at)
         if not applied:
             return {"ok": True, "ignored": "stale event"}
+        pi = obj.get("payment_intent")
+        pi = pi if isinstance(pi, str) else (pi or {}).get("id", "") or ""
+        _affitor_stamp(applied, sub, pi)
         return {"ok": True, "user_id": applied, "tier": tier}
 
     if kind == "checkout.session.completed":
@@ -3795,6 +3864,7 @@ async def stripe_webhook(request: Request):
         applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at, checkout=True)
         if not applied:
             return {"ok": True, "ignored": "stale event"}
+        _affitor_stamp(applied, sub, "")
         return {"ok": True, "user_id": applied, "tier": tier}
 
     if kind == "customer.subscription.deleted" or \

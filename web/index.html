@@ -13,6 +13,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="The House" />
+  <script src="https://api.affitor.com/js/affitor-tracker.js" data-affitor-program-id="1082"></script>
   <style>
     :root {
       --ink: #0d0918;
@@ -703,6 +704,14 @@
       const data = await response.json().catch(() => null);
       return { response, data };
     }
+    function affitorClickId() {
+      try { return (window.affitor && window.affitor.getClickId()) || ''; } catch (_) { return ''; }
+    }
+    function affitorSignup(userId, email) {
+      try {
+        if (window.affitor && userId) window.affitor.signup(userId, email).catch(() => {});
+      } catch (_) {}
+    }
     function errText(data, fallback) {
       if (!data) return fallback;
       const d = data.detail || data.error;
@@ -721,8 +730,10 @@
           password: document.getElementById('signup-password').value,
           display_name: document.getElementById('signup-name').value.trim(),
           ref: localStorage.getItem(REF_KEY) || '',
+          affitor_click_id: affitorClickId(),
         });
         if (response.ok) localStorage.removeItem(REF_KEY);
+        if (response.ok && data) affitorSignup(data.user_id, email);
         if (response.ok && data && data.needs_verification) {
           showVerifyPane(data.email || email, data.email_sent === false
             ? 'Account created, but the email could not be sent. Hit Resend.'
@@ -748,6 +759,7 @@
       try {
         const { response, data } = await postJson('/auth/login', {
           email, password: document.getElementById('login-password').value,
+          affitor_click_id: affitorClickId(),
         });
         if (response.ok && data && data.token) {
           localStorage.setItem(TOKEN_KEY, data.token);
