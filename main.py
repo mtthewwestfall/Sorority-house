@@ -373,14 +373,26 @@ HOUSE_RULES = (
 )
 
 AUDIT_INSTRUCTION = (
-    "You are writing a confidential Psychological Audit for the Sorority House. "
-    "Using the full relationship record below (rolling memory summary plus recent "
-    "exchanges), produce a sharp, honest, in-character analysis for the user of their "
-    "journey with this girl: where they started, what they have done well, the walls "
-    "still standing, missteps or pressure that pushed her away, and the most effective "
-    "next move to deepen trust. Be direct and specific — quote patterns from the "
-    "conversation, never vague compliments. Format as short labeled sections. This is "
-    "a paid product at $2.99 (free for Seniors) — make it worth it."
+    "You are writing a confidential Psychological Audit for the Sorority House: a paid, "
+    "honest coaching report for the user about one girl. Use the relationship record "
+    "(rolling memory, recent exchanges) and the TRUST ENGINE STATE block, which is the "
+    "ground truth for stage, days and remembered key points - never contradict it.\n"
+    "Write exactly these four sections, each headed by its title on its own line, "
+    "2-4 tight sentences or bullets each, about 350 words total. Plain text, no markdown "
+    "symbols, no preamble, no closing line.\n"
+    "1. How She Feels About Him - her real read on him at this stage, in her voice's "
+    "terms. Quote or paraphrase a concrete moment from the record.\n"
+    "2. What He's Doing Wrong - the specific pattern costing him trust. Name pushiness, "
+    "forcing pace, fishing for a reaction or steering the talk to himself when it is "
+    "there; pushy reads as cold to her and cold conduct regresses a stage. Be direct.\n"
+    "3. How To Make It Better - coach the three trust gates she actually runs on: "
+    "(a) show up over distinct real days at this stage, (b) remember and bring back her "
+    "key points in his own words (tell him which he has kept vs still owes), (c) warm "
+    "conduct by her own standards - steady, curious, unhurried, not forcing anything. "
+    "Give one concrete next move.\n"
+    "4. Estimated Time To Level 4 Trust - state the estimate from the TRUST ENGINE STATE "
+    "block as-is (or that it is already reached), then one sentence on what would make it "
+    "slower (going cold, silence, pushing)."
 )
 
 # ---------------------------------------------------------------------------
@@ -2909,7 +2921,29 @@ def audit(body: AuditIn, user=Depends(current_user)):
 
         recent = last_messages(user["user_id"], girl, AUDIT_WINDOW)
         record = [f"{m['sender']}: {m['message']}" for m in recent]
+        # Deterministic time-to-M4 so the report quotes the engine, not a guess:
+        # remaining day floors of every stage up to M4, less days already banked here.
+        cur_ms = max(1, int(rel.get("milestone") or 1))
+        kept = len(rel.get("pinned_kept") or [])
+        if cur_ms >= 4:
+            eta = "already reached (currently M%d)" % cur_ms
+            need_kept = "n/a"
+        else:
+            days_needed = max(1, sum(stage_days_needed(girl, s) for s in range(cur_ms, 4))
+                              - rel_days_in_stage(rel))
+            eta = ("about %d more day%s of actually talking to her, at the earliest"
+                   % (days_needed, "" if days_needed == 1 else "s"))
+            need_kept = str(kept_needed(girl, cur_ms + 1))
+        engine_state = ("TRUST ENGINE STATE:\n"
+                        "- Current stage: M%d\n"
+                        "- Real days talked at this stage: %d (needs %d)\n"
+                        "- Key points remembered: %d (next stage needs %s)\n"
+                        "- Conduct standard: %s\n"
+                        "- Estimated time to M4: %s"
+                        % (cur_ms, rel_days_in_stage(rel), stage_days_needed(girl, cur_ms),
+                           kept, need_kept, engine_for(girl)["conduct_note"], eta))
         full_context = ("Character: " + name + " - " + persona_text +
+                        "\n\n" + engine_state +
                         "\n\nROLLING MEMORY:\n" + (rel["summary"] or "(none yet)") +
                         "\n\nRECENT EXCHANGES:\n" + ("\n".join(record) if record else "(none)"))
 
