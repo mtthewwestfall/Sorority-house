@@ -604,7 +604,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -1198,9 +1198,9 @@
     // A report is paid for and delivered once, so a finished audit is kept per girl
     // (survives closing her room mid-request and a reload) until it has been shown.
     // Keyed to the signed-in session so another account on this browser cannot read it.
-    function savedAuditKey(girl) { return 'sh-audit:' + getToken().slice(-24) + ':' + girl; }
-    function saveAudit(girl, text) {
-      try { localStorage.setItem(savedAuditKey(girl), text); } catch (_) {}
+    function savedAuditKey(girl, token) { return 'sh-audit:' + (token || getToken()).slice(-24) + ':' + girl; }
+    function saveAudit(girl, token, text) {
+      try { localStorage.setItem(savedAuditKey(girl, token), text); } catch (_) {}
     }
     function showSavedAudit(girl) {
       if (!girl || currentGirl !== girl) return;
@@ -1214,7 +1214,7 @@
     async function requestAudit() {
       if (!currentGirl || chatAuditBtn.disabled) return;
       chatAuditBtn.disabled = true;
-      const girl = currentGirl;
+      const girl = currentGirl, token = getToken();
       const pending = addMessage('typing', 'compiling your audit…');
       try {
         const response = await fetch(API_BASE_URL + '/audit', {
@@ -1229,8 +1229,8 @@
           auditStatus.free_audits_left = data.free_left;
           auditStatus.audit_credits = data.paid_left;
         }
-        if (currentGirl !== girl) {
-          if (delivered) saveAudit(girl, data.audit);
+        if (currentGirl !== girl || getToken() !== token) {
+          if (delivered) saveAudit(girl, token, data.audit);
           return;
         }
         if (response.status === 401) {
