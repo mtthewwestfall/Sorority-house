@@ -207,6 +207,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
+GEMINI_THINKING_BUDGET = 2048
 MODEL_TIMEOUT_S = float(os.environ.get("MODEL_TIMEOUT_S", "120"))
 # Reasoning models (DeepSeek v4 / reasoner) bill their thinking against
 # max_tokens, so the brain's memory digest needs far more headroom than 600.
@@ -1757,7 +1758,10 @@ def _gemini_payload(messages, thinking=False, max_tokens=600, temperature=0.8):
     if system_parts:
         payload["system_instruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
     if thinking:
-        payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 2048}
+        # Gemini bills thinking against maxOutputTokens, so the budget goes on top
+        # or the visible answer gets cut off mid-sentence.
+        payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": GEMINI_THINKING_BUDGET}
+        payload["generationConfig"]["maxOutputTokens"] = max_tokens + GEMINI_THINKING_BUDGET
     return payload
 
 
@@ -2924,13 +2928,16 @@ def audit(body: AuditIn, user=Depends(current_user)):
         # Deterministic time-to-M4 so the report quotes the engine, not a guess:
         # remaining day floors of every stage up to M4, less days already banked here.
         cur_ms = max(1, int(rel.get("milestone") or 1))
-        kept = len(rel.get("pinned_kept") or [])
+        kept_list = list(rel.get("pinned_kept") or [])
+        owed_list = [k for k in engine_for(girl)["key_points"] if k not in kept_list]
         if cur_ms >= 4:
             eta = "already reached (currently M%d)" % cur_ms
             need_kept = "n/a"
         else:
-            days_needed = max(1, sum(stage_days_needed(girl, s) for s in range(cur_ms, 4))
-                              - rel_days_in_stage(rel))
+            # stage_days resets on every stage change, so extra days banked at the
+            # current stage never shorten the floors of the stages still ahead.
+            days_needed = max(1, max(0, stage_days_needed(girl, cur_ms) - rel_days_in_stage(rel))
+                              + sum(stage_days_needed(girl, s) for s in range(cur_ms + 1, 4)))
             eta = ("about %d more day%s of actually talking to her, at the earliest"
                    % (days_needed, "" if days_needed == 1 else "s"))
             need_kept = str(kept_needed(girl, cur_ms + 1))
@@ -2938,10 +2945,15 @@ def audit(body: AuditIn, user=Depends(current_user)):
                         "- Current stage: M%d\n"
                         "- Real days talked at this stage: %d (needs %d)\n"
                         "- Key points remembered: %d (next stage needs %s)\n"
+                        "  kept: %s\n"
+                        "  still owed: %s\n"
                         "- Conduct standard: %s\n"
                         "- Estimated time to M4: %s"
                         % (cur_ms, rel_days_in_stage(rel), stage_days_needed(girl, cur_ms),
-                           kept, need_kept, engine_for(girl)["conduct_note"], eta))
+                           len(kept_list), need_kept,
+                           "; ".join(kept_list) or "(none yet)",
+                           "; ".join(owed_list) or "(none - no canonical list for her)",
+                           engine_for(girl)["conduct_note"], eta))
         full_context = ("Character: " + name + " - " + persona_text +
                         "\n\n" + engine_state +
                         "\n\nROLLING MEMORY:\n" + (rel["summary"] or "(none yet)") +
