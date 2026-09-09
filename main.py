@@ -84,12 +84,11 @@ API CONTRACT implemented here (point your chat app at these):
                                                             frontend shows * when audit_count>=5
   POST /admin/persona {"girl","name","door_title","persona","secret"} (upsert; paste full
                                                             doc; REQUIRES ADMIN_SECRET)
-  GET  /roster                                          -> {"tiers":[...],"girls":[{girl,name,
-                                                            door_title,blurb,avatar_url,
-                                                            min_tier,tier_label}]}
+  GET  /roster                                          -> {"girls":[{girl,name,
+                                                            door_title,blurb,avatar_url}]}
                                                             the doors to render; door text and
                                                             art only, never the persona doc
-  POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,min_tier,sort_order,
+  POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,sort_order,
                             active,difficulty,persona}     -> add or rewrite a sister; the
                                                             roster is data, so no deploy.
                                                             difficulty (easy|normal|hard|ice)
@@ -307,8 +306,9 @@ TIERS = {
     "senior":     {"label": "Senior",    "limit": 4000},
 }
 
-# Tier order, low to high. min_tier is a paywall only: a door also has to be earned
-# (see open_doors). Everyone but Veronica is available on every tier.
+# Tier order, low to high. A tier only sizes the monthly message allowance and
+# audit freebies: it never opens a door and never moves a trust stage - every
+# door and every stage is earned per girl by progression alone (see open_doors).
 TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
 
 # Doors open in sets, in roster order. The first set is open from day one; the
@@ -324,22 +324,22 @@ def tier_rank(tier):
 
 # The roster is the personas table, not this file, so a new sister can be added
 # from the admin console without a deploy. These are only the first-boot seeds:
-# door text, art and the tier she is sold on, all editable afterwards.
+# door text and art, all editable afterwards.
 ROSTER_SEED = [
-    # slug, min_tier, order, avatar, door blurb
-    ("dakota",   "freshman",  10, "assets/dakota.jpg",
+    # slug, order, avatar, door blurb
+    ("dakota",   10, "assets/dakota.jpg",
      "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
-    ("zoe",      "freshman",  20, "assets/zoe.jpg",
+    ("zoe",      20, "assets/zoe.jpg",
      "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "freshman",  30, "assets/willow.jpg",
+    ("willow",   30, "assets/willow.jpg",
      "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
-    ("brittany", "freshman",  40, "assets/brittany.jpg",
+    ("brittany", 40, "assets/brittany.jpg",
      "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
-    ("sasha",    "freshman",  50, "assets/sasha.webp",
+    ("sasha",    50, "assets/sasha.webp",
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "freshman",  60, "assets/piper.jpg",
+    ("piper",    60, "assets/piper.jpg",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
-    ("veronica", "senior",    70, "assets/veronica.webp",
+    ("veronica", 70, "assets/veronica.webp",
      "The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
 ]
 
@@ -353,7 +353,7 @@ DEFAULT_PERSONAS = {
     "brittany": ("Brittany", "The sweet trap", "Warm, charming, everyone's favorite. Her openness is armor; the real her lives behind the sunshine she gives everyone."),
     "sasha":    ("Sasha",    "The wildcard",   "Sharp, composed, impossible to impress with a performance. Direct; wants to be known, not conquered."),
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
-    "veronica": ("Veronica", "The host",       "Senior exclusive. The social chair who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
+    "veronica": ("Veronica", "The host",       "The social chair who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
@@ -794,18 +794,19 @@ def init_db():
             """)
             for row in cur.fetchall():
                 cur.execute(f'ALTER TABLE "{row["tablename"]}" ENABLE ROW LEVEL SECURITY')
-            # The roster lives with the persona doc: which tier opens her door, what
-            # the door shows, and whether she is in the house at all. Rows written
-            # before these columns existed get their door filled in once, here - after
-            # that the console owns them and startup never touches them again.
+            # The roster lives with the persona doc: where she sits in door order,
+            # what the door shows, and whether she is in the house at all. Rows
+            # written before these columns existed get their door filled in once,
+            # here - after that the console owns them and startup never touches
+            # them again. (The legacy min_tier/doors_earned columns are inert now:
+            # doors are earned by progression only, never bought.)
             cur.execute("""
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = current_schema()
-                  AND table_name = 'personas' AND column_name = 'min_tier'
+                  AND table_name = 'personas' AND column_name = 'sort_order'
             """)
             legacy_rows = cur.fetchone() is None
             cur.execute("""
-                ALTER TABLE personas ADD COLUMN IF NOT EXISTS min_tier TEXT NOT NULL DEFAULT 'freshman';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 100;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
@@ -814,16 +815,6 @@ def init_db():
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _repair_dead_portraits(cur)
-            # Doors moved from tier-gated to progression-gated. The marker column
-            # makes the tier-wall lift run once, so the console owns min_tier after.
-            cur.execute("""
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = 'personas' AND column_name = 'doors_earned'
-            """)
-            if cur.fetchone() is None:
-                cur.execute("ALTER TABLE personas ADD COLUMN IF NOT EXISTS doors_earned BOOLEAN NOT NULL DEFAULT TRUE")
-                _lift_tier_walls(cur)
         conn.commit()
     finally:
         conn.close()
@@ -836,19 +827,11 @@ def _repair_dead_portraits(cur):
     """The original portraits were hot-linked from a host that no longer exists. Point
     the seeded sisters at the copies shipped in web/assets and blank anyone else's
     dead link so the door shows its styled art instead of a broken image."""
-    for girl, _tier, _order, avatar, _blurb in ROSTER_SEED:
+    for girl, _order, avatar, _blurb in ROSTER_SEED:
         cur.execute("UPDATE personas SET avatar_url = %s WHERE girl = %s AND avatar_url LIKE %s",
                     (avatar, girl, DEAD_PORTRAIT_HOST + "%"))
     cur.execute("UPDATE personas SET avatar_url = '' WHERE avatar_url LIKE %s",
                 (DEAD_PORTRAIT_HOST + "%",))
-
-
-def _lift_tier_walls(cur):
-    """Doors used to be sold by tier; now they are earned by progression and only
-    Veronica stays behind the Senior paywall. Drop the old tier walls off the
-    seeded sisters so nobody is stuck behind both gates."""
-    for girl, min_tier, _order, _avatar, _blurb in ROSTER_SEED:
-        cur.execute("UPDATE personas SET min_tier = %s WHERE girl = %s", (min_tier, girl))
 
 
 def _seed_roster(cur, backfill=False):
@@ -857,20 +840,20 @@ def _seed_roster(cur, backfill=False):
     and the console owns her after. `backfill` is the one-time upgrade of rows written
     before the roster columns existed, and runs only on the migration that adds them -
     so a door the owner deliberately saved blank stays blank."""
-    for girl, min_tier, order, avatar, blurb in ROSTER_SEED:
+    for girl, order, avatar, blurb in ROSTER_SEED:
         name, title, fallback = DEFAULT_PERSONAS[girl]
         cur.execute("""
             INSERT INTO personas (girl, name, door_title, persona,
-                                  min_tier, sort_order, avatar_url, blurb)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                                  sort_order, avatar_url, blurb)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (girl) DO NOTHING
-        """, (girl, name, title, fallback, min_tier, order, avatar, blurb))
+        """, (girl, name, title, fallback, order, avatar, blurb))
         if backfill:
             cur.execute("""
-                UPDATE personas SET min_tier = %s, sort_order = %s,
+                UPDATE personas SET sort_order = %s,
                                     avatar_url = %s, blurb = %s
                 WHERE girl = %s
-            """, (min_tier, order, avatar, blurb, girl))
+            """, (order, avatar, blurb, girl))
 
 
 def _check_admin(secret: str, strict: bool = False):
@@ -1115,13 +1098,13 @@ def remaining_for(user):
 
 def roster(include_retired=False):
     """The house, in door order. Rows are dicts with girl, name, door_title,
-    blurb, avatar_url, min_tier, sort_order, active, difficulty."""
+    blurb, avatar_url, sort_order, active, difficulty."""
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT girl, name, door_title, blurb, avatar_url,
-                       min_tier, sort_order, active, difficulty
+                       sort_order, active, difficulty
                 FROM personas
                 WHERE active OR %s
                 ORDER BY sort_order, girl
@@ -1143,9 +1126,9 @@ def milestones_for(user_id):
 
 
 def door_rules():
-    """How the doors unlock: doors_locked (False = every door is open, tier
-    permitting), door_set (girls per set) and unlock_stage (milestone with a girl
-    of the previous set that opens the next). Admin-set, defaults from the code."""
+    """How the doors unlock: doors_locked (False = every door is open), door_set
+    (girls per set) and unlock_stage (milestone with a girl of the previous set
+    that opens the next). Admin-set, defaults from the code."""
     rules = dict(DOOR_RULE_DEFAULTS)
     conn = db()
     try:
@@ -1184,37 +1167,30 @@ def door_pairs(house, size=DOOR_PAIR):
     return [girls[i:i + size] for i in range(0, len(girls), size)]
 
 
-def open_doors(user_id, tier, house=None, milestones=None, rules=None):
-    """girl -> door state for this user. A door is open when it has been EARNED
-    (first set free; each later set once the user hit the unlock stage with one
-    of the set before it - unless the admin turned door locking off) AND the
-    user's tier covers her min_tier. A shut door carries the reason so the
-    frontend can say what would open it."""
+def open_doors(user_id, house=None, milestones=None, rules=None):
+    """girl -> door state for this user. A door is open only when it has been
+    EARNED: the first set is free, and each later set opens once the user hits
+    the unlock stage with one of the set before it (unless the admin turned door
+    locking off). No door is ever sold: the paid tier is not read here. A shut
+    door carries the reason so the frontend can say what would open it."""
     house = house if house is not None else roster()
     rules = rules if rules is not None else door_rules()
     reached = milestones if milestones is not None else milestones_for(user_id)
-    rank = tier_rank(tier)
     stage = rules["unlock_stage"]
     doors, earned, previous = {}, True, []
     for pair in door_pairs(house, rules["door_set"]):
         if previous and rules["doors_locked"]:
             earned = any(reached.get(g["girl"], 0) >= stage for g in previous)
         for r in pair:
-            paid = tier_rank(r["min_tier"]) <= rank
-            if earned and paid:
-                reason = ""
-            elif not earned:
-                reason = "Reach stage %d with %s to open this door" % (
-                    stage, " or ".join(g["name"] for g in previous))
-            else:
-                reason = TIERS.get(r["min_tier"], {}).get("label", r["min_tier"].title()) + " exclusive"
-            doors[r["girl"]] = {"open": not reason, "earned": earned, "paid": paid, "reason": reason}
+            reason = "" if earned else "Reach stage %d with %s to open this door" % (
+                stage, " or ".join(g["name"] for g in previous))
+            doors[r["girl"]] = {"open": earned, "reason": reason}
         previous = pair
     return doors
 
 
-def girl_open(user_id, girl, tier):
-    door = open_doors(user_id, tier).get(girl)
+def girl_open(user_id, girl):
+    door = open_doors(user_id).get(girl)
     return bool(door and door["open"])
 
 
@@ -1631,11 +1607,11 @@ def brain_milestone(brain, fallback):
 # ONE TURN — prompt assembly and persistence, shared by /chat and /chat/stream.
 # ---------------------------------------------------------------------------
 def chat_preflight(user, girl_raw):
-    """Tier/door/allowance checks. Reserves one message atomically (conditional
+    """Door/allowance checks. Reserves one message atomically (conditional
     UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
     remaining AFTER this turn). Callers refund_message() if no reply is delivered."""
     girl = girl_raw.strip().lower()
-    if not girl_open(user["user_id"], girl, user["tier"]):
+    if not girl_open(user["user_id"], girl):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
     limit = TIERS.get(user["tier"], TIERS["freshman"])["limit"]
     conn = db()
@@ -2163,11 +2139,11 @@ pre{white-space:pre-wrap;margin:0}
 <span id="dRule" class="row2" style="margin:0">&middot; sets of <input id="dSet" type="number" min=1 max=12 style="width:64px"> girls, in roster order; the next set opens at stage
 <select id="dStage"></select> with any one girl of the set before it</span>
 <button class="p" onclick="saveDoors()">Save</button></div>
-<div class="mut">Unlocked: every door is open (paid tier still applies). Locked: the first set is open from day one and each later set has to be earned. Live for every player on their next reload.</div></div>
+<div class="mut">Unlocked: every door is open. Locked: the first set is open from day one and each later set has to be earned - no door is ever sold. Live for every player on their next reload.</div></div>
 <div class="card"><div class="plist" id="plist"></div>
 <div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
 <button class="s" onclick="exportRoster()">Download backup</button></div>
-<div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the paid tier she needs (doors themselves are earned by progression) and her
+<div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, her pacing and her
 full character doc, which is her Layer-1 system block. Changes are live on the next reload - no deploy.
 Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
 <div id="pedit" class="card hid"></div>
@@ -2194,18 +2170,17 @@ async function loadOverview(){try{const s=await api('/admin/overview');const st=
  const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
  $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
-let PERS=[],CURP=null;const TIERS=['freshman','sophomore','junior','senior'];
+let PERS=[],CURP=null;
 const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:'Hard - slow to trust',ice:'Ice queen - barely thaws'};
 function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
 async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'freshman',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
 function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
  <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
  <label>Name <input id="pName" value="${esc(p.name)}"></label>
  <label>Door title <input id="pTitle" value="${esc(p.door_title)}" style="min-width:200px"></label>
- <label>Paid tier <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
  <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label>
  <label>Difficulty <select id="pDiff">${Object.keys(DIFFS).map(d=>`<option value="${d}"${d===(p.difficulty||'normal')?' selected':''}>${DIFFS[d]}</option>`).join('')}</select></label></div>
  <div class="mut">Difficulty only stretches the real days each trust stage takes - she still has to be treated right, and remembered, to open up.</div>
@@ -2219,7 +2194,7 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
 async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
  try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
-  blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
+  blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
   persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
@@ -2401,7 +2376,6 @@ class AdminGirlIn(BaseModel):
     door_title: str = ""
     blurb: str = ""
     avatar_url: str = ""
-    min_tier: str = "freshman"
     sort_order: int = 100
     difficulty: str = DIFFICULTY_DEFAULT
     active: bool = True
@@ -2787,7 +2761,7 @@ def image_status(user=Depends(current_user)):
 @app.post("/image")
 def image(body: ImageIn, user=Depends(current_user)):
     girl = body.girl.strip().lower()
-    if not girl_open(user["user_id"], girl, user["tier"]):
+    if not girl_open(user["user_id"], girl):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
     uid = user["user_id"]
     conn = db()
@@ -2847,18 +2821,16 @@ def history(girl: str, user=Depends(current_user)):
 def public_roster():
     """The doors to render, newest roster edits included. Public: door text and
     art only - never the persona doc, which is the model's system prompt."""
-    return {"tiers": TIER_ORDER,
-            "girls": [{"girl": r["girl"], "name": r["name"],
+    return {"girls": [{"girl": r["girl"], "name": r["name"],
                        "door_title": r["door_title"], "blurb": r["blurb"],
-                       "avatar_url": r["avatar_url"], "min_tier": r["min_tier"],
-                       "tier_label": TIERS.get(r["min_tier"], {}).get("label", "")}
+                       "avatar_url": r["avatar_url"]}
                       for r in roster()]}
 
 
 @app.get("/state")
 def state(user=Depends(current_user)):
     house = roster()
-    doors = open_doors(user["user_id"], user["tier"], house)
+    doors = open_doors(user["user_id"], house)
     girls = {}
     for row in house:
         door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
@@ -2883,7 +2855,7 @@ def state(user=Depends(current_user)):
 def audit(body: AuditIn, user=Depends(current_user)):
     girl = body.girl.strip().lower()
 
-    if not girl_open(user["user_id"], girl, user["tier"]):
+    if not girl_open(user["user_id"], girl):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
 
     # --- AUDIT BILLING: free monthly allowance first, then bought credits ---
@@ -3873,8 +3845,7 @@ def admin_personas():
         persona, _name = get_persona(row["girl"])
         seed = DEFAULT_PERSONAS.get(row["girl"])
         out.append(dict(row, persona=persona,
-                        seeded=not (seed and persona.strip() == seed[2].strip()),
-                        tiers=TIER_ORDER))
+                        seeded=not (seed and persona.strip() == seed[2].strip())))
     return out
 
 
@@ -3891,7 +3862,7 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 
 @app.post("/admin/console/girl", dependencies=[Depends(admin_required)])
 def admin_console_girl(body: AdminGirlIn):
-    """Add a sister or rewrite an existing one - door, art, tier gate and doc.
+    """Add a sister or rewrite an existing one - door, art and doc.
     This is the whole roster, so it never needs a deploy to change."""
     girl = body.girl.strip().lower()
     if not _SLUG_RE.match(girl):
@@ -3899,8 +3870,6 @@ def admin_console_girl(body: AdminGirlIn):
                             detail="slug must be lowercase letters, digits, - or _ (2-31 chars)")
     if not body.name.strip() or not body.persona.strip():
         raise HTTPException(status_code=400, detail="name and persona are required")
-    if body.min_tier not in TIER_ORDER:
-        raise HTTPException(status_code=400, detail="min_tier must be one of " + ", ".join(TIER_ORDER))
     if body.difficulty not in DIFFICULTY:
         raise HTTPException(status_code=400,
                             detail="difficulty must be one of " + ", ".join(DIFFICULTY))
@@ -3909,17 +3878,17 @@ def admin_console_girl(body: AdminGirlIn):
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
-                                      avatar_url, min_tier, sort_order, active,
+                                      avatar_url, sort_order, active,
                                       difficulty)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
-                    avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
+                    avatar_url=EXCLUDED.avatar_url,
                     sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
                     difficulty=EXCLUDED.difficulty
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
-                  body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
+                  body.blurb.strip(), body.avatar_url.strip(),
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
                   body.difficulty))
             conn.commit()
