@@ -320,10 +320,12 @@
     .chat-photo { flex: none; width: min(78%, 320px); border-radius: 18px; overflow: hidden; align-self: flex-start; border: 1px solid var(--line); margin-bottom: 8px; }
     .chat-photo img { display: block; width: 100%; height: auto; }
     .chat-photo figcaption { padding: 6px 10px; color: var(--muted); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; background: rgba(9,7,17,.7); }
-    #chat-photo-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: var(--white); font: inherit; font-size: 1.7rem; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0 0 3px; }
-    #chat-photo-btn:hover:not([disabled]) { background: rgba(255,255,255,.14); }
-    #chat-photo-btn[disabled] { opacity: .5; cursor: not-allowed; }
-    #chat-photo-btn[hidden] { display: none; }
+    #chat-photo-btn, #chat-audit-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: var(--white); font: inherit; font-size: 1.7rem; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0 0 3px; }
+    #chat-audit-btn { font-size: 1.2rem; padding: 0; }
+    #chat-photo-btn:hover:not([disabled]), #chat-audit-btn:hover:not([disabled]) { background: rgba(255,255,255,.14); }
+    #chat-photo-btn[disabled], #chat-audit-btn[disabled] { opacity: .5; cursor: not-allowed; }
+    #chat-photo-btn[hidden], #chat-audit-btn[hidden] { display: none; }
+    .msg.audit { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.05); border: 1px solid var(--line); font-size: .92rem; line-height: 1.45; padding: 14px 16px; margin: 6px 0 10px; }
     .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 0 6px; }
     /* picture request sheet, opened from the + button */
     .pic-sheet { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; font-size: .9rem; margin: 6px 0 10px; }
@@ -350,8 +352,9 @@
     .chat-form textarea { color: var(--chat-ink); background: #fff; border-color: var(--chat-line); }
     .chat-form textarea::placeholder { color: var(--chat-muted); }
     .chat-form textarea:focus { border-color: rgba(0,0,0,.3); }
-    #chat-photo-btn { background: rgba(0,0,0,.06); color: var(--chat-ink); }
-    #chat-photo-btn:hover:not([disabled]) { background: rgba(0,0,0,.1); }
+    #chat-photo-btn, #chat-audit-btn { background: rgba(0,0,0,.06); color: var(--chat-ink); }
+    #chat-photo-btn:hover:not([disabled]), #chat-audit-btn:hover:not([disabled]) { background: rgba(0,0,0,.1); }
+    .msg.audit { background: #f5f5f7; border-color: var(--chat-line); color: var(--chat-ink); }
     .chat-photo { border-color: var(--chat-line); }
     .chat-photo figcaption { color: var(--chat-muted); background: #f2f2f4; }
     .pic-sheet { background: #f5f5f7; border-color: var(--chat-line); color: var(--chat-ink); }
@@ -585,6 +588,7 @@
       <div class="chat-foot">
         <div class="chat-form" id="chat-form">
           <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
+          <button id="chat-audit-btn" type="button" aria-label="Run a psychological audit" title="Psychological audit" hidden>&#9998;</button>
           <div class="field">
             <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
             <button class="button" id="chat-send" type="button" aria-label="Send">&uarr;</button>
@@ -784,7 +788,9 @@
     const chatSend = document.getElementById('chat-send');
     const chatRemaining = document.getElementById('chat-remaining');
     const chatPhotoBtn = document.getElementById('chat-photo-btn');
+    const chatAuditBtn = document.getElementById('chat-audit-btn');
     let currentGirl = null;
+    let auditStatus = null;   // free_audits_left / audit_credits / audit_price_usd from /state
     let sending = false;
 
     function addMessage(kind, text) {
@@ -1071,6 +1077,7 @@
         Object.keys(data.girls).forEach((g) => { if (data.girls[g].locked_reason) reasons[g] = data.girls[g].locked_reason; });
         setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open), reasons);
         showRemaining(data.remaining);
+        auditStatus = { free_audits_left: data.free_audits_left, audit_credits: data.audit_credits, audit_price_usd: data.audit_price_usd };
       } catch (error) { /* keep whatever is shown */ }
     }
     // Delegated so cards rendered from /roster are clickable too.
@@ -1086,6 +1093,7 @@
     // Pictures: every account starts with a few free pictures; packs add credits.
     // The + button is always there; /image is checked each time a chat opens.
     chatPhotoBtn.hidden = false;
+    chatAuditBtn.hidden = false;
     async function loadPictureStatus() {
       if (!isLoggedIn()) return;
       const token = getToken();
@@ -1142,9 +1150,86 @@
     }
     chatPhotoBtn.addEventListener('click', () => {
       if (!currentGirl || chatPhotoBtn.disabled) return;
+      closeAuditSheet();
       if (picSheet) { closePicSheet(); return; }
       openPicSheet();
     });
+
+    // Psychological audit: confirm + price first, then POST /audit and render the
+    // real report (no optimistic render - the report is what was paid for).
+    let auditSheet = null;
+    function closeAuditSheet() { if (auditSheet) { auditSheet.remove(); auditSheet = null; } }
+    function auditPriceLine() {
+      const s = auditStatus;
+      if (!s) return 'Runs against your free monthly allowance first, then bought credits.';
+      const price = typeof s.audit_price_usd === 'number' ? '$' + s.audit_price_usd.toFixed(2) : '$2.99';
+      const free = s.free_audits_left || 0, paid = s.audit_credits || 0;
+      if (free > 0) return `Free - ${free} free audit${free === 1 ? '' : 's'} left this month.`;
+      if (paid > 0) return `Uses 1 credit - ${paid} credit${paid === 1 ? '' : 's'} left.`;
+      return `${price} per audit. You have no free audits or credits left.`;
+    }
+    function openAuditSheet() {
+      closeAuditSheet();
+      auditSheet = document.createElement('div');
+      auditSheet.className = 'pic-sheet';
+      const h = document.createElement('h4');
+      h.textContent = 'Psychological audit';
+      const p = document.createElement('p');
+      p.textContent = 'How she feels about you, what is holding her back, and how long until she trusts you. ' + auditPriceLine();
+      const row = document.createElement('div');
+      row.className = 'row';
+      const run = document.createElement('button');
+      run.type = 'button'; run.className = 'button'; run.textContent = 'Run audit';
+      run.addEventListener('click', () => { closeAuditSheet(); requestAudit(); });
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
+      cancel.addEventListener('click', closeAuditSheet);
+      row.append(run, cancel);
+      auditSheet.append(h, p, row);
+      chatLog.appendChild(auditSheet);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    chatAuditBtn.addEventListener('click', () => {
+      if (!currentGirl || chatAuditBtn.disabled) return;
+      closePicSheet();
+      if (auditSheet && auditSheet.isConnected) { closeAuditSheet(); return; }
+      openAuditSheet();
+    });
+    async function requestAudit() {
+      if (!currentGirl || chatAuditBtn.disabled) return;
+      chatAuditBtn.disabled = true;
+      const girl = currentGirl;
+      const pending = addMessage('typing', 'compiling your audit…');
+      try {
+        const response = await fetch(API_BASE_URL + '/audit', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ girl }),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        if (currentGirl !== girl) return;
+        if (response.status === 401) {
+          handleUnauthorized();
+        } else if (response.status === 402) {
+          const detail = (data && data.detail) || '';
+          addMessage('note', detail.split('|').pop() || 'You are out of audits.');
+        } else if (!response.ok || !data || data.ok === false || !data.audit) {
+          addMessage('error', (data && (data.error || data.detail)) || 'No audit right now. Try again in a moment.');
+        } else {
+          addMessage('audit', data.audit);
+          if (auditStatus) {
+            auditStatus.free_audits_left = data.free_left;
+            auditStatus.audit_credits = data.paid_left;
+          }
+        }
+      } catch (error) {
+        pending.remove();
+        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+      } finally {
+        chatAuditBtn.disabled = false;
+      }
+    }
     async function requestPicture() {
       if (!currentGirl || chatPhotoBtn.disabled) return;
       chatPhotoBtn.disabled = true;
