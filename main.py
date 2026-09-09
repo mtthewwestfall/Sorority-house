@@ -59,6 +59,14 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "girls":{girl:{open,milestone}}}
   POST /audit       {"girl"}            (bearer)        -> {"audit","audit_count",
                                                             "free_left","paid_left"}
+  GET  /referral                        (bearer)        -> {"code","link","signups","qualified",
+                                                            "wingman","shirt_eligible","program_on"}
+                    the user's referral link (SITE_URL/?ref=code). /auth/signup takes
+                    an optional "ref" (the code) to attribute the signup. A referral
+                    qualifies on the friend's first Junior+ purchase (Sophomore does
+                    not count); the referrer's first qualifying one comps both of them
+                    to Senior for 30 days (an already-Senior referrer gets 30 more
+                    days instead), 100 pairs house-wide; 5 qualifying = the shirt.
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
                                                             by hand (tier 'freshman' = cancelled)
   POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
@@ -101,6 +109,9 @@ API CONTRACT implemented here (point your chat app at these):
                                                             is earned (stage with a girl of the
                                                             set before); locked=false opens all
   GET  /admin/console/export                              -> the roster as JSON (backup)
+  GET  /admin/referrals                                   -> {program_on,wingman_pairs,
+                                                            wingman_pair_cap,referrers:[...]}
+  POST /admin/referrals/program {on}                      -> switch the referral program
   (the /admin/console/* endpoints take ADMIN_SECRET as the X-Admin-Secret header)
   GET  /health
 
@@ -330,6 +341,22 @@ DOOR_RULE_DEFAULTS = {"doors_locked": True, "door_set": DOOR_PAIR, "unlock_stage
 
 def tier_rank(tier):
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
+
+
+# Referrals. Every account has a code; a signup through ?ref=<code> is attributed to
+# that account. The referral QUALIFIES when the referred account buys Junior or above
+# (Sophomore does not count), once per referred account, ever. The referrer's FIRST
+# qualifying referral is the Wingman: both of them are comped to Senior for
+# WINGMAN_DAYS and then fall back to the paid tier each had (the comp columns). A
+# referrer who already IS Senior keeps the tier and gets WINGMAN_DAYS added to it
+# instead. WINGMAN_PAIR_CAP pairs house-wide; SHIRT_REFERRALS qualifying referrals
+# flag the referrer for the Wingman shirt. The admin console can switch the whole
+# program off (house_rules.referrals_on): nothing qualifies and nothing is granted.
+REFERRAL_MIN_TIER = "junior"
+WINGMAN_DAYS = 30
+WINGMAN_PAIR_CAP = 100
+SHIRT_REFERRALS = 5
+REFERRAL_CODE_LEN = 8
 
 # The roster is the personas table, not this file, so a new sister can be added
 # from the admin console without a deploy. These are only the first-boot seeds:
@@ -795,6 +822,23 @@ def init_db():
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+                -- referrals: the code a user shares, who referred them, and the
+                -- day they hit SHIRT_REFERRALS qualifying referrals
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS shirt_eligible_at TIMESTAMPTZ;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users (referral_code);
+                -- one row per referred signup; qualified_at is set once, on the first
+                -- Junior+ purchase, and wingman_at on the rows that spent a buddy pair
+                CREATE TABLE IF NOT EXISTS referrals (
+                    referred_user_id TEXT PRIMARY KEY REFERENCES users(user_id),
+                    referrer_user_id TEXT NOT NULL REFERENCES users(user_id),
+                    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    qualified_at     TIMESTAMPTZ,
+                    qualified_tier   TEXT,
+                    wingman_at       TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals (referrer_user_id);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -1186,6 +1230,223 @@ def save_door_rules(doors_locked, door_set, unlock_stage):
             conn.commit()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# REFERRALS
+# ---------------------------------------------------------------------------
+def referral_program_on(cur=None):
+    """The admin on/off switch (house_rules.referrals_on). Default on."""
+    if cur is not None:
+        cur.execute("SELECT value FROM house_rules WHERE key='referrals_on'")
+        row = cur.fetchone()
+        return row is None or row["value"] == "1"
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            return referral_program_on(cur)
+    finally:
+        conn.close()
+
+
+def set_referral_program(on):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO house_rules (key, value) VALUES ('referrals_on', %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """, ("1" if on else "0",))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def _new_referral_code():
+    # unambiguous lowercase alphabet, fine to read out loud
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(REFERRAL_CODE_LEN))
+
+
+def _referral_code(cur, user_id):
+    """The user's referral code, minted on first use (accounts that pre-date
+    referrals have none). Retries on the rare collision."""
+    cur.execute("SELECT referral_code FROM users WHERE user_id=%s", (user_id,))
+    row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown user")
+    if row["referral_code"]:
+        return row["referral_code"]
+    for _ in range(5):
+        code = _new_referral_code()
+        cur.execute("""
+            UPDATE users SET referral_code=%s
+            WHERE user_id=%s AND referral_code IS NULL
+              AND NOT EXISTS (SELECT 1 FROM users WHERE referral_code=%s)
+        """, (code, user_id, code))
+        if cur.rowcount == 1:
+            return code
+        cur.execute("SELECT referral_code FROM users WHERE user_id=%s", (user_id,))
+        code = cur.fetchone()["referral_code"]
+        if code:   # a concurrent caller minted it first
+            return code
+    raise HTTPException(status_code=500, detail="Could not mint a referral code")
+
+
+def referral_link(code):
+    return f"{SITE_URL}/?ref={code}"
+
+
+def _attribute_referral(cur, new_user_id, code):
+    """Record that new_user_id signed up through `code`. Unknown or blank codes are
+    ignored (a bad link must never block a signup). Returns the referrer's id or ""."""
+    code = (code or "").strip().lower()
+    if not code:
+        return ""
+    cur.execute("SELECT user_id FROM users WHERE referral_code=%s", (code,))
+    row = cur.fetchone()
+    if row is None or row["user_id"] == new_user_id:
+        return ""
+    cur.execute("UPDATE users SET referred_by=%s WHERE user_id=%s", (row["user_id"], new_user_id))
+    cur.execute("""
+        INSERT INTO referrals (referred_user_id, referrer_user_id) VALUES (%s, %s)
+        ON CONFLICT (referred_user_id) DO NOTHING
+    """, (new_user_id, row["user_id"]))
+    return row["user_id"]
+
+
+def _wingman_grant(cur, user_id):
+    """One side of a Wingman pair. Not Senior yet: comp to Senior for WINGMAN_DAYS,
+    remembering the tier and allowance they hold now so _ensure_user puts them back
+    exactly there when it ends. Already Senior: keep the tier and add WINGMAN_DAYS to
+    whatever is keeping them Senior - the comp's end if they are comped, otherwise
+    the paid month (plan_reset_at). Returns what was done, for the log."""
+    cur.execute("SELECT * FROM users WHERE user_id=%s FOR UPDATE", (user_id,))
+    u = cur.fetchone()
+    if u is None:
+        return "missing"
+    comped = u.get("comp_until") is not None and u["comp_until"] > datetime.now(timezone.utc)
+    if u["tier"] == "senior":
+        if comped:
+            cur.execute("UPDATE users SET comp_until = comp_until + (%s * interval '1 day') WHERE user_id=%s",
+                        (WINGMAN_DAYS, user_id))
+            return "extended_comp"
+        cur.execute("UPDATE users SET plan_reset_at = plan_reset_at + (%s * interval '1 day') WHERE user_id=%s",
+                    (WINGMAN_DAYS, user_id))
+        return "extended_paid"
+    if comped:
+        # already on someone's free time: stack the Senior window on top, keep the
+        # tier they will fall back to
+        cur.execute("""
+            UPDATE users SET tier='senior', msg_used=0, free_audits_used=0,
+                plan_reset_at = now() + interval '1 month',
+                comp_until = comp_until + (%s * interval '1 day')
+            WHERE user_id=%s
+        """, (WINGMAN_DAYS, user_id))
+        return "upgraded_over_comp"
+    cur.execute("""
+        UPDATE users SET tier='senior', msg_used=0, free_audits_used=0,
+            plan_reset_at = now() + interval '1 month',
+            comp_until = now() + (%s * interval '1 day'),
+            comp_prev_tier=%s, comp_prev_msg_used=%s, comp_prev_free_audits=%s,
+            comp_prev_reset_at=%s
+        WHERE user_id=%s
+    """, (WINGMAN_DAYS, u["tier"], int(u["msg_used"]), int(u["free_audits_used"]),
+          u["plan_reset_at"], user_id))
+    return "upgraded"
+
+
+def referral_purchase(user_id, tier):
+    """Called once a paid tier has been applied to user_id. If they were referred and
+    this is the first Junior+ purchase of their life, the referral qualifies: it
+    counts toward the referrer's total (SHIRT_REFERRALS flags the shirt) and, if it
+    is the referrer's first, spends one of the WINGMAN_PAIR_CAP buddy pairs on the
+    two of them. Renewals and Sophomore purchases change nothing. Everything happens
+    in one transaction; the cap is checked under a lock so parallel purchases cannot
+    overshoot it. Returns a small dict describing what happened (for logs/tests)."""
+    if tier_rank(tier) < tier_rank(REFERRAL_MIN_TIER):
+        return {"qualified": False, "reason": "tier below " + REFERRAL_MIN_TIER}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if not referral_program_on(cur):
+                return {"qualified": False, "reason": "program off"}
+            cur.execute("SELECT referrer_user_id FROM referrals WHERE referred_user_id=%s",
+                        (user_id,))
+            row = cur.fetchone()
+            if row is None:
+                return {"qualified": False, "reason": "not referred"}
+            # one referrer's purchases qualify one at a time, so the count below
+            # always includes every earlier qualification (first = Wingman, fifth = shirt)
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",
+                        ("referrer:" + row["referrer_user_id"],))
+            cur.execute("""
+                UPDATE referrals SET qualified_at=now(), qualified_tier=%s
+                WHERE referred_user_id=%s AND qualified_at IS NULL
+                RETURNING referrer_user_id
+            """, (tier, user_id))
+            row = cur.fetchone()
+            if row is None:
+                conn.rollback()
+                return {"qualified": False, "reason": "not referred or already qualified"}
+            referrer = row["referrer_user_id"]
+            cur.execute("""
+                SELECT count(*) AS n FROM referrals
+                WHERE referrer_user_id=%s AND qualified_at IS NOT NULL
+            """, (referrer,))
+            qualified = int(cur.fetchone()["n"])
+            out = {"qualified": True, "referrer": referrer, "qualified_total": qualified,
+                   "wingman": "", "shirt": False}
+            if qualified >= SHIRT_REFERRALS:
+                cur.execute("""
+                    UPDATE users SET shirt_eligible_at = now()
+                    WHERE user_id=%s AND shirt_eligible_at IS NULL
+                """, (referrer,))
+                out["shirt"] = cur.rowcount == 1
+            if qualified == 1:
+                # the referrer's first: one buddy pair, if any are left. The lock
+                # serialises the count + spend across concurrent purchases.
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext('wingman_pairs'))")
+                cur.execute("SELECT count(*) AS n FROM referrals WHERE wingman_at IS NOT NULL")
+                pairs = int(cur.fetchone()["n"])
+                if pairs < WINGMAN_PAIR_CAP:
+                    cur.execute("UPDATE referrals SET wingman_at=now() WHERE referred_user_id=%s",
+                                (user_id,))
+                    out["wingman"] = {"referrer": _wingman_grant(cur, referrer),
+                                      "buyer": _wingman_grant(cur, user_id)}
+                else:
+                    out["wingman"] = "cap reached"
+            conn.commit()
+            print(f"[referral] {user_id} bought {tier}: {out}", flush=True)
+            return out
+    finally:
+        conn.close()
+
+
+def referral_status(user_id):
+    """What GET /referral shows: the code + link and how the referrals are doing."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            code = _referral_code(cur, user_id)
+            conn.commit()
+            cur.execute("""
+                SELECT count(*) AS signups,
+                       count(*) FILTER (WHERE qualified_at IS NOT NULL) AS qualified,
+                       bool_or(wingman_at IS NOT NULL) AS wingman
+                FROM referrals WHERE referrer_user_id=%s
+            """, (user_id,))
+            r = cur.fetchone()
+            cur.execute("SELECT shirt_eligible_at FROM users WHERE user_id=%s", (user_id,))
+            shirt = cur.fetchone()["shirt_eligible_at"]
+            on = referral_program_on(cur)
+    finally:
+        conn.close()
+    return {"code": code, "link": referral_link(code), "program_on": on,
+            "signups": int(r["signups"]), "qualified": int(r["qualified"]),
+            "wingman": bool(r["wingman"]), "shirt_eligible": shirt is not None,
+            "shirt_at": SHIRT_REFERRALS, "min_tier": REFERRAL_MIN_TIER,
+            "wingman_days": WINGMAN_DAYS}
 
 
 def door_pairs(house, size=DOOR_PAIR):
@@ -2150,6 +2411,10 @@ pre{white-space:pre-wrap;margin:0}
 <div class="card"><h4 style="margin-top:0">Messages per day (14d)</h4><div id="daily" class="bars"></div><div style="height:18px"></div></div>
 <div class="card"><h4 style="margin-top:0">Girls</h4><table><thead><tr><th>Girl</th><th>Players</th><th>M5+</th><th>Avg stage</th></tr></thead><tbody id="girlRows"></tbody></table></div>
 </div>
+<div class="card" style="margin-top:16px"><div class="row2"><h4 style="margin:0">Referrals</h4>
+<label><input id="refOn" type="checkbox" onchange="setReferrals(this.checked)"> Program on</label><span id="refSum" class="mut"></span></div>
+<div class="mut">A referral qualifies when the friend buys Junior or Senior (Sophomore does not count), once per friend. The referrer's first qualifying referral is the Wingman: both go Senior for 30 days, then back to their own paid tier; a referrer already on Senior gets 30 more days instead. 100 pairs total. 5 qualifying referrals = the shirt. Off: nothing new qualifies, nothing is granted.</div>
+<table><thead><tr><th>Referrer</th><th>Tier</th><th>Signups</th><th>Qualified</th><th>Wingman</th><th>Shirt</th><th>Code</th></tr></thead><tbody id="refRows"></tbody></table></div>
 </section>
 
 <section id="acc" class="hid">
@@ -2203,7 +2468,10 @@ async function loadOverview(){try{const s=await api('/admin/overview');const st=
   +st('Active 24h',s.active_24h,`${s.active_7d} this week`)+st('Messages 24h',s.messages_24h,`${s.messages} all time`)+st('Audits run',s.audits)+st('Open complaints',s.open_complaints);
  const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
- $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
+ $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>';loadReferrals()}catch(e){toast(e.message,true)}}
+async function loadReferrals(){try{const r=await api('/admin/referrals');$('#refOn').checked=r.program_on;$('#refSum').textContent=`${r.wingman_pairs} / ${r.wingman_pair_cap} Wingman pairs used`;
+ $('#refRows').innerHTML=r.referrers.map(a=>`<tr class="row" onclick="show('acc');openAccount('${esc(a.email)}')"><td>${esc(a.email)}</td><td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.signups}</td><td>${a.qualified}</td><td>${a.wingman_at?d(a.wingman_at):'—'}</td><td>${a.shirt_eligible_at?`<span class="pill resolved">earned ${d(a.shirt_eligible_at)}</span>`:'—'}</td><td class="mut">${esc(a.referral_code||'')}</td></tr>`).join('')||'<tr><td colspan=7 class="mut">no referrals yet</td></tr>'}catch(e){toast(e.message,true)}}
+async function setReferrals(on){try{await api('/admin/referrals/program',{method:'POST',body:JSON.stringify({on})});toast(on?'Referral program on':'Referral program off');loadReferrals()}catch(e){toast(e.message,true)}}
 let PERS=[],CURP=null;const TIERS=['freshman','sophomore','junior','senior'];
 const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:'Hard - slow to trust',ice:'Ice queen - barely thaws'};
 function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
@@ -2251,6 +2519,7 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <div>Resets</div><div>${dt(a.plan_reset_at)}</div><div>Audit credits</div><div>${a.audit_credits} <span class="mut">(${a.total_audits_used} used total)</span></div>
   <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp()">End now</button>`:'none'}</div>
   <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div>
+  <div>Referrals</div><div>${a.referral_signups} signed up · ${a.referral_qualified} qualified${a.wingman_at?` · Wingman ${d(a.wingman_at)}`:''}${a.shirt_eligible_at?' · <span class="pill resolved">shirt</span>':''}${a.referred_by?`<br><span class="mut">referred by ${esc(a.referred_by)}</span>`:''}${a.referral_code?`<br><span class="mut">code ${esc(a.referral_code)}</span>`:''}</div>
   <div>Email</div><div>${a.verified_at?`verified ${dt(a.verified_at)}`:`<span class="pill open">unverified</span> <button class="s" onclick="markVerified()">Mark verified</button>`}</div></div>
   <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">none yet</td></tr>'}</tbody></table>
  </div><div>
@@ -2288,6 +2557,7 @@ class SignupIn(BaseModel):
     email: str
     password: str
     display_name: str = "Player"
+    ref: str = ""          # referral code from the ?ref= link, if any
     affitor_click_id: str = ""
 
 
@@ -2456,6 +2726,7 @@ def signup(body: SignupIn):
                     VALUES (%s,%s,%s,NULL)
                 """, (email, user_id, _hash_pw(body.password)))
                 token = _issue_verify_token(cur, email)
+                _attribute_referral(cur, user_id, body.ref)
                 conn.commit()
             except psycopg2.IntegrityError:
                 conn.rollback()
@@ -2901,6 +3172,12 @@ def state(user=Depends(current_user)):
             "girls": girls}
 
 
+@app.get("/referral")
+def referral(user=Depends(current_user)):
+    """The signed-in user's referral link and how it is doing."""
+    return referral_status(user["user_id"])
+
+
 @app.post("/audit")
 def audit(body: AuditIn, user=Depends(current_user)):
     girl = body.girl.strip().lower()
@@ -3171,6 +3448,8 @@ def _apply_tier(user, tier):
             conn.commit()
     finally:
         conn.close()
+    if tier != "freshman":
+        referral_purchase(user["user_id"], tier)
 
 
 @app.post("/admin/grant-audits")
@@ -3425,6 +3704,8 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
             conn.commit()
     finally:
         conn.close()
+    if applied and tier != "freshman":
+        referral_purchase(user_id, tier)
     return user_id if applied else ""
 
 
@@ -3729,6 +4010,20 @@ def admin_account(email: str):
             cur.execute("SELECT count(*) AS n FROM chat_logs WHERE user_id=%s AND sender='user'",
                         (user["user_id"],))
             acct["messages_total"] = cur.fetchone()["n"]
+            cur.execute("""
+                SELECT u.referral_code, u.shirt_eligible_at,
+                       (SELECT coalesce(a.email, 'tg:' || t.telegram_id) FROM users r
+                          LEFT JOIN accounts a ON a.user_id=r.user_id
+                          LEFT JOIN telegram_accounts t ON t.user_id=r.user_id
+                         WHERE r.user_id=u.referred_by LIMIT 1) AS referred_by,
+                       (SELECT count(*) FROM referrals x WHERE x.referrer_user_id=u.user_id) AS referral_signups,
+                       (SELECT count(*) FROM referrals x
+                         WHERE x.referrer_user_id=u.user_id AND x.qualified_at IS NOT NULL) AS referral_qualified,
+                       (SELECT max(wingman_at) FROM referrals x
+                         WHERE x.referrer_user_id=u.user_id OR x.referred_user_id=u.user_id) AS wingman_at
+                FROM users u WHERE u.user_id=%s
+            """, (user["user_id"],))
+            acct.update(cur.fetchone())
     finally:
         conn.close()
     return acct
@@ -3897,6 +4192,10 @@ def admin_overview():
                          AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=t.user_id)) AS accounts_7d,
                   (SELECT count(*) FROM telegram_accounts) AS telegram,
                   (SELECT count(*) FROM users WHERE comp_until > now()) AS comped,
+                  (SELECT count(*) FROM referrals) AS referral_signups,
+                  (SELECT count(*) FROM referrals WHERE qualified_at IS NOT NULL) AS referral_qualified,
+                  (SELECT count(*) FROM referrals WHERE wingman_at IS NOT NULL) AS wingman_pairs,
+                  (SELECT count(*) FROM users WHERE shirt_eligible_at IS NOT NULL) AS shirt_eligible,
                   (SELECT count(*) FROM complaints WHERE status='open') AS open_complaints,
                   (SELECT count(*) FROM chat_logs WHERE sender='user') AS messages,
                   (SELECT count(*) FROM chat_logs WHERE sender='user' AND created_at > now() - interval '1 day') AS messages_24h,
@@ -4023,6 +4322,47 @@ def admin_console_doors_set(body: AdminDoorRulesIn):
         raise HTTPException(status_code=400, detail="unlock_stage must be 1-8")
     save_door_rules(body.doors_locked, body.door_set, body.unlock_stage)
     return door_rules()
+
+
+class AdminReferralProgramIn(BaseModel):
+    on: bool
+
+
+@app.get("/admin/referrals", dependencies=[Depends(admin_required)])
+def admin_referrals(limit: int = 100):
+    """The referral program at a glance: the switch, pairs spent against the cap,
+    and every referrer with their signup / qualified counts (shirt winners first)."""
+    limit = max(1, min(500, limit))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            on = referral_program_on(cur)
+            cur.execute("SELECT count(*) AS n FROM referrals WHERE wingman_at IS NOT NULL")
+            pairs = int(cur.fetchone()["n"])
+            cur.execute(f"""
+                SELECT {_ACCOUNT_COLS}, u.referral_code, u.shirt_eligible_at,
+                       count(x.referred_user_id) AS signups,
+                       count(x.qualified_at) AS qualified,
+                       max(x.wingman_at) AS wingman_at
+                {_ACCOUNT_FROM}
+                JOIN referrals x ON x.referrer_user_id=u.user_id
+                WHERE {_ACCOUNT_ANY}
+                GROUP BY a.email, t.telegram_id, t.created_at, u.user_id
+                ORDER BY qualified DESC, signups DESC LIMIT %s
+            """, (limit,))
+            rows = [_account_view(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return {"program_on": on, "wingman_pairs": pairs, "wingman_pair_cap": WINGMAN_PAIR_CAP,
+            "min_tier": REFERRAL_MIN_TIER, "shirt_at": SHIRT_REFERRALS, "referrers": rows}
+
+
+@app.post("/admin/referrals/program", dependencies=[Depends(admin_required)])
+def admin_referrals_program(body: AdminReferralProgramIn):
+    """Switch the program on or off. Off: signups are still attributed, but no
+    purchase qualifies and no Wingman pair is granted until it is back on."""
+    set_referral_program(body.on)
+    return {"ok": True, "program_on": referral_program_on()}
 
 
 @app.get("/admin/console/export", dependencies=[Depends(admin_required)])
