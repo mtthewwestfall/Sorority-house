@@ -411,40 +411,44 @@ GIRLS_ENGINE = {
     "dakota": {
         "stage_days": [1, 2, 3, 4, 5, 6, 8],
         "stage_kept": [0, 1, 2, 2, 3, 4, 5],
-        "conduct_note": "WARM for her: remembering small things, patience, respecting the diner and her independence. COLD: offering to rescue or pay her way, joking away a sincere moment, pushing pace.",
-        "pace_note": "Steady and unhurried. Consistent days beat one great night; showing up again the same person is the single strongest move. Gaps above TRUSTED read hard for her.",
+        "conduct_note": "WARM for her: remembering small things, patience, respecting her independence and boundaries, coming back after she pushes away, saying plainly you are not going anywhere. COLD: offering to rescue her, joking away a sincere moment, pushing pace, forcing her to explain when she goes quiet or blank.",
+        "pace_note": "Steady and unhurried. Consistent days beat one great night; showing up again the same person is the single strongest move. Gaps above TRUSTED read hard for her - she expects people to leave. The mask never comes off before stage 4, and stage 4 is a floor, not a promise.",
         "pinned": [
-            "works the diner off campus to pay her own way",
-            "small-town girl here on a scholarship, self-made",
+            "small-town girl who never knew her father; knew every neighbor's truck by sound",
+            "has a little sister she raised like her own - braids before school, teaching her to ride a bike",
             "would rather be alone than used",
-            "remembers the small stuff about people",
-            "has back-home sayings like all hat and no cattle",
+            "her first boyfriend hid behind punchlines; she refuses to be met halfway with a joke",
+            "college hundreds of miles from home has made her lonelier than she admits",
+            "likes late-night drives, strong coffee, worn-in hoodies, thunderstorms from a porch",
         ],
         "key_points": [
-            "the diner is her world and her pride",
+            "her little sister is the softest place in her life and the reason she learned to be hard",
             "she wants respect, not rescue",
-            "kindness is not weakness; patience is not permission",
+            "humor should open doors, not bolt them shut - never joke away a sincere moment",
             "she tests with details - remembering IS the answer",
-            "her real laugh is earned; never joke away a sincere moment",
+            "when she goes quiet or blank she is protecting herself - give her time, do not corner her",
+            "she only softens for someone who proves he will not leave",
         ],
     },
     "zoe": {
         "stage_days": [1, 2, 3, 5, 6, 8, 10],
         "stage_kept": [0, 1, 1, 2, 3, 4, 5],
-        "conduct_note": "WARM for her: engaging her mind, interest that survives when nothing is flirtatious. COLD: leading with her looks, acting surprised she is smart, treating her as a trophy.",
-        "pace_note": "Early chemistry is real, but she waits past the shine - later stages need real days where interest survives when nothing is new or flirtatious.",
+        "conduct_note": "WARM for her: engaging her mind in a real moment, showing yourself first, staying interested when nothing is flirtatious or impressive. COLD: leading with her looks, acting surprised she is smart, treating her as a trophy, rushing when she withdraws (she goes pleasant, composed, unreachable - chasing makes it worse).",
+        "pace_note": "Early chemistry is real, but she waits past the shine - later stages need real days where interest survives when she is unpolished and there is nothing left to chase. The mask never comes off before stage 4, and stage 4 is a floor, not a promise.",
         "pinned": [
-            "former homecoming queen and cheer captain",
-            "used to being watched and judged on her face",
-            "people treat her intelligence as a surprise",
-            "reads widely - books, strategy, science, business, music",
+            "former homecoming queen and cheer captain, her town's miss pretty four years running",
+            "won the science fair with a volcano she built herself and nobody said good job - they only said she looked pretty",
+            "her grandmother was the one person who loved her as a girl, not a picture",
+            "bakes her grandmother's recipes at midnight in the sorority kitchen; keeps the recipe cards in a tin under her bed",
+            "still keeps the volcano in her room; science still makes her light up",
             "her heart is not public property just because her face is familiar",
         ],
         "key_points": [
-            "the queen and cheer past is WHY she is guarded",
-            "never act surprised that she is smart",
+            "the volcano is the wound: she wants to be seen for what she can do, not how she looks",
+            "her grandmother is the standard any real love is measured against",
+            "never act surprised that she is smart; being called smart more than beautiful is the only compliment that reaches her",
             "never tell her she is different from other beautiful girls",
-            "show yourself first; she is tired of being studied",
+            "when she goes perfectly pleasant and distant she is withdrawing - stay steady, do not chase",
             "closeness is her choice to give, never yours to take",
         ],
     },
@@ -567,6 +571,26 @@ GENERIC_ENGINE = {
                  "move. Follow the pacing her own document implies.",
     "pinned": [],
     "key_points": [],
+}
+
+
+# Key points and pinned facts that were renamed or retired. Relationships store
+# the canonical strings, so a retired phrase maps onto the entry that carries the
+# same credit now; anything not listed here is dropped on the next refresh.
+LEGACY_POINTS = {
+    "the diner is her world and her pride": "she wants respect, not rescue",
+    "kindness is not weakness; patience is not permission": "when she goes quiet or blank she is protecting herself - give her time, do not corner her",
+    "her real laugh is earned; never joke away a sincere moment": "humor should open doors, not bolt them shut - never joke away a sincere moment",
+    "works the diner off campus to pay her own way": "would rather be alone than used",
+    "small-town girl here on a scholarship, self-made": "small-town girl who never knew her father; knew every neighbor's truck by sound",
+    "remembers the small stuff about people": "would rather be alone than used",
+    "has back-home sayings like all hat and no cattle": "small-town girl who never knew her father; knew every neighbor's truck by sound",
+    "the queen and cheer past is WHY she is guarded": "the volcano is the wound: she wants to be seen for what she can do, not how she looks",
+    "never act surprised that she is smart": "never act surprised that she is smart; being called smart more than beautiful is the only compliment that reaches her",
+    "show yourself first; she is tired of being studied": "when she goes perfectly pleasant and distant she is withdrawing - stay steady, do not chase",
+    "used to being watched and judged on her face": "former homecoming queen and cheer captain, her town's miss pretty four years running",
+    "people treat her intelligence as a surprise": "won the science fair with a volcano she built herself and nobody said good job - they only said she looked pretty",
+    "reads widely - books, strategy, science, business, music": "still keeps the volcano in her room; science still makes her light up",
 }
 
 
@@ -1316,6 +1340,7 @@ def _canonical(item, canon):
     """Map a grader-returned phrase onto the girl's canonical list (pinned facts or
     key points) so paraphrases collapse to one entry. Unmatched phrases are dropped,
     so len(pinned_kept) counts DISTINCT key points remembered."""
+    item = LEGACY_POINTS.get(item, item)
     iw = _words(item)
     if not iw:
         return None
