@@ -880,7 +880,7 @@
       receipt = null;
       lastStampAt = 0;
       addMessage('note', 'Her door is open. Say hi.');
-      loadHistory(currentGirl);
+      loadHistory(currentGirl).then(() => showSavedAudit(card.dataset.girl));
       loadPictureStatus();
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
@@ -1195,10 +1195,26 @@
       if (auditSheet && auditSheet.isConnected) { closeAuditSheet(); return; }
       openAuditSheet();
     });
+    // A report is paid for and delivered once, so a finished audit is kept per girl
+    // (survives closing her room mid-request and a reload) until it has been shown.
+    // Keyed to the signed-in session so another account on this browser cannot read it.
+    function savedAuditKey(girl, token) { return 'sh-audit:' + (token || getToken()).slice(-24) + ':' + girl; }
+    function saveAudit(girl, token, text) {
+      try { localStorage.setItem(savedAuditKey(girl, token), text); } catch (_) {}
+    }
+    function showSavedAudit(girl) {
+      if (!girl || currentGirl !== girl) return;
+      let text = null;
+      try { text = localStorage.getItem(savedAuditKey(girl)); } catch (_) {}
+      if (!text) return;
+      addMessage('note', 'Your audit came back while you were away');
+      addMessage('audit', text);
+      try { localStorage.removeItem(savedAuditKey(girl)); } catch (_) {}
+    }
     async function requestAudit() {
       if (!currentGirl || chatAuditBtn.disabled) return;
       chatAuditBtn.disabled = true;
-      const girl = currentGirl;
+      const girl = currentGirl, token = getToken();
       const pending = addMessage('typing', 'compiling your audit…');
       try {
         const response = await fetch(API_BASE_URL + '/audit', {
@@ -1208,24 +1224,28 @@
         });
         const data = await response.json().catch(() => null);
         pending.remove();
-        if (currentGirl !== girl) return;
+        const delivered = response.ok && data && data.ok !== false && data.audit;
+        if (delivered && auditStatus) {
+          auditStatus.free_audits_left = data.free_left;
+          auditStatus.audit_credits = data.paid_left;
+        }
+        if (currentGirl !== girl || getToken() !== token) {
+          if (delivered) saveAudit(girl, token, data.audit);
+          return;
+        }
         if (response.status === 401) {
           handleUnauthorized();
         } else if (response.status === 402) {
           const detail = (data && data.detail) || '';
           addMessage('note', detail.split('|').pop() || 'You are out of audits.');
-        } else if (!response.ok || !data || data.ok === false || !data.audit) {
+        } else if (!delivered) {
           addMessage('error', (data && (data.error || data.detail)) || 'No audit right now. Try again in a moment.');
         } else {
           addMessage('audit', data.audit);
-          if (auditStatus) {
-            auditStatus.free_audits_left = data.free_left;
-            auditStatus.audit_credits = data.paid_left;
-          }
         }
       } catch (error) {
         pending.remove();
-        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+        if (currentGirl === girl) addMessage('error', 'Could not reach the house. Check your connection and try again.');
       } finally {
         chatAuditBtn.disabled = false;
       }
