@@ -25,8 +25,11 @@ Lockeddoor.ai / Sorority House: an AI companion chat. One FastAPI backend, one s
 - **Three model roles**: MOUTH (types the reply), BRAIN (memory digest, a turn behind),
   AUDIT (paid report). Each is an OpenAI-compatible endpoint with a Gemini fallback via
   `GEMINI_API_KEY`. Anything the user reads comes from the MOUTH, never the BRAIN.
-- **Tiers gate message limits and doors**; `/admin/*` mutation endpoints refuse with 503 unless
-  `ADMIN_SECRET` is set. Do not loosen that.
+- **Tiers are billing only**: a paid tier sets the monthly message allowance and the
+  Senior free-audit count — it never opens a door and never touches trust. Doors and
+  the M1-M8 ladder are earned per girl by progression alone and must never be
+  purchasable or tied to the subscription tier. `/admin/*` mutation endpoints refuse
+  with 503 unless `ADMIN_SECRET` is set. Do not loosen that.
 - **Chat history**: reopening a chat shows the last 8 messages and continues the conversation;
   no reset, no greeting unless the user has never talked to her.
 - **Payments**: Stripe for subscriptions, Shopify for picture packs (webhook-gated). Never
