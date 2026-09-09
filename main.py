@@ -574,6 +574,26 @@ GENERIC_ENGINE = {
 }
 
 
+# Key points and pinned facts that were renamed or retired. Relationships store
+# the canonical strings, so a retired phrase maps onto the entry that carries the
+# same credit now; anything not listed here is dropped on the next refresh.
+LEGACY_POINTS = {
+    "the diner is her world and her pride": "she wants respect, not rescue",
+    "kindness is not weakness; patience is not permission": "when she goes quiet or blank she is protecting herself - give her time, do not corner her",
+    "her real laugh is earned; never joke away a sincere moment": "humor should open doors, not bolt them shut - never joke away a sincere moment",
+    "works the diner off campus to pay her own way": "would rather be alone than used",
+    "small-town girl here on a scholarship, self-made": "small-town girl who never knew her father; knew every neighbor's truck by sound",
+    "remembers the small stuff about people": "would rather be alone than used",
+    "has back-home sayings like all hat and no cattle": "small-town girl who never knew her father; knew every neighbor's truck by sound",
+    "the queen and cheer past is WHY she is guarded": "the volcano is the wound: she wants to be seen for what she can do, not how she looks",
+    "never act surprised that she is smart": "never act surprised that she is smart; being called smart more than beautiful is the only compliment that reaches her",
+    "show yourself first; she is tired of being studied": "when she goes perfectly pleasant and distant she is withdrawing - stay steady, do not chase",
+    "used to being watched and judged on her face": "former homecoming queen and cheer captain, her town's miss pretty four years running",
+    "people treat her intelligence as a surprise": "won the science fair with a volcano she built herself and nobody said good job - they only said she looked pretty",
+    "reads widely - books, strategy, science, business, music": "still keeps the volcano in her room; science still makes her light up",
+}
+
+
 def engine_for(girl):
     """Her trust x time dials. A sister added from the console has no hand-written
     block, so she gets the generic one - never another girl's facts and pacing."""
@@ -1320,6 +1340,7 @@ def _canonical(item, canon):
     """Map a grader-returned phrase onto the girl's canonical list (pinned facts or
     key points) so paraphrases collapse to one entry. Unmatched phrases are dropped,
     so len(pinned_kept) counts DISTINCT key points remembered."""
+    item = LEGACY_POINTS.get(item, item)
     iw = _words(item)
     if not iw:
         return None
