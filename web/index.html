@@ -524,13 +524,18 @@
           <div class="extra"><h3>Out of messages?</h3><p>Add 1,000 more messages for $7 any time from your account page.</p></div>
           <div class="extra"><h3>Suggest a girl — $4.99/mo</h3><p>Pitch a girl for the house. Keep her private or share her with everyone and earn a free request.</p></div>
         </div>
+        <div class="extras" id="wingman">
+          <div class="extra"><h3>Bring a Wingman</h3><p>Share your link. When a friend you brought in buys Junior or Senior, you both go Senior free for 30 days, then back to your own plan. Already Senior? You get 30 more days instead. Bring five who buy in and the Wingman shirt is yours. The first 100 pairs only.</p>
+            <p id="referral-box" class="plans-note" hidden><span id="referral-stats"></span><br /><code id="referral-link"></code> <button class="button dark" type="button" id="referral-copy">Copy link</button></p>
+            <p id="referral-signin" class="plans-note"><a href="#" id="referral-auth">Sign in</a> to get your link.</p></div>
+        </div>
       </div>
     </section>
   </main>
 
   <footer>
     <div class="wrap footer-inner">
-      <div>© 2026 The Sorority House · Exclusive through referrals<br /><span class="ai-note">The girls are AI characters. Conversations are fiction.</span></div>
+      <div>© 2026 The Sorority House · <a href="#wingman">Bring a Wingman, both go Senior</a><br /><span class="ai-note">The girls are AI characters. Conversations are fiction.</span></div>
       <div class="footer-links"><a href="#merch">Merch</a><a href="#" id="footer-auth">Sign in</a><a href="#" id="footer-install" hidden>Install the app</a><a href="#top">Back to top ↑</a></div>
     </div>
   </footer>
@@ -628,6 +633,13 @@
     const authSub = document.getElementById('auth-sub');
     let pendingVerifyEmail = '';
 
+    // Referral link: ?ref=<code> is remembered until a signup uses it.
+    const REF_KEY = 'sorority_house_ref';
+    (function captureRef() {
+      const ref = new URLSearchParams(location.search).get('ref');
+      if (ref) localStorage.setItem(REF_KEY, ref.trim().toLowerCase());
+    })();
+
     function setAuthMsg(text, kind) {
       authMsg.textContent = text || '';
       authMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
@@ -708,7 +720,9 @@
           email,
           password: document.getElementById('signup-password').value,
           display_name: document.getElementById('signup-name').value.trim(),
+          ref: localStorage.getItem(REF_KEY) || '',
         });
+        if (response.ok) localStorage.removeItem(REF_KEY);
         if (response.ok && data && data.needs_verification) {
           showVerifyPane(data.email || email, data.email_sent === false
             ? 'Account created, but the email could not be sent. Hit Resend.'
@@ -1079,7 +1093,35 @@
         showRemaining(data.remaining);
         auditStatus = { free_audits_left: data.free_audits_left, audit_credits: data.audit_credits, audit_price_usd: data.audit_price_usd };
       } catch (error) { /* keep whatever is shown */ }
+      loadReferral();
     }
+
+    const referralBox = document.getElementById('referral-box');
+    const referralSignin = document.getElementById('referral-signin');
+    async function loadReferral() {
+      referralBox.hidden = true; referralSignin.hidden = !!isLoggedIn();
+      if (!isLoggedIn()) return;
+      const token = getToken();
+      try {
+        const r = await fetch(API_BASE_URL + '/referral', { headers: authHeaders() });
+        if (!r.ok || getToken() !== token) return;
+        const d = await r.json();
+        document.getElementById('referral-link').textContent = d.link;
+        const bits = [`${d.signups} signed up`, `${d.qualified} bought in`];
+        if (d.wingman) bits.push('Wingman earned');
+        if (d.shirt_eligible) bits.push('shirt earned — we will be in touch');
+        else bits.push(`${Math.max(0, d.shirt_at - d.qualified)} more for the shirt`);
+        if (!d.program_on) bits.push('program paused');
+        document.getElementById('referral-stats').textContent = 'Your link · ' + bits.join(' · ');
+        referralBox.hidden = false;
+      } catch (_) {}
+    }
+    document.getElementById('referral-auth').addEventListener('click', (e) => { e.preventDefault(); openAuth(); });
+    document.getElementById('referral-copy').addEventListener('click', async () => {
+      const link = document.getElementById('referral-link').textContent;
+      try { await navigator.clipboard.writeText(link); document.getElementById('referral-copy').textContent = 'Copied'; }
+      catch (_) { window.prompt('Copy your link', link); }
+    });
     // Delegated so cards rendered from /roster are clickable too.
     doorsGrid.addEventListener('click', (event) => {
       const card = event.target.closest('.door-card[data-girl]');
