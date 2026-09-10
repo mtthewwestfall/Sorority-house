@@ -672,14 +672,18 @@ def main() -> None:
         say(f"committed on {branch} (not pushed)")
         return
     git("push", "-q", "-u", "origin", branch)
-    r = subprocess.run(["gh", "pr", "create", "--base", base, "--head", branch, "--title", done["title"],
-                        "--body", done["summary"] + "\n\n---\nOpened by `coder/coder.py` "
-                        f"({model.model}). Task:\n\n> {task}"], cwd=ROOT, capture_output=True, text=True)
-    if r.returncode:
-        say(f"pushed {branch}, but `gh pr create` failed:\n{r.stderr}\nOpen the PR by hand:\n"
+    try:
+        r = subprocess.run(["gh", "pr", "create", "--base", base, "--head", branch, "--title", done["title"],
+                            "--body", done["summary"] + "\n\n---\nOpened by `coder/coder.py` "
+                            f"({model.model}). Task:\n\n> {task}"], cwd=ROOT, capture_output=True, text=True)
+        if r.returncode:
+            say(f"pushed {branch}, but `gh pr create` failed:\n{r.stderr}\nOpen the PR by hand:\n"
+                f"  gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)}")
+        else:
+            say(r.stdout.strip())
+    except FileNotFoundError:
+        say(f"pushed {branch}, but `gh` command not found.\nOpen the PR by hand:\n"
             f"  gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)}")
-    else:
-        say(r.stdout.strip())
 
 
 if __name__ == "__main__":
