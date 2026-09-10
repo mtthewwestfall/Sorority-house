@@ -2252,11 +2252,11 @@ async function importDocs(files){files=[...files];if(!files.length)return;const 
  const plan=files.map(f=>({f,slug:slugOf(f)})).filter(x=>x.slug);const adds=plan.filter(x=>!known.includes(x.slug)).map(x=>x.slug);const mode=$('#docMode').value;
  if(!plan.length){toast('No usable file names',true);return}
  if(!confirm((mode==='append'?'Append to':'Replace')+' the character doc of: '+plan.map(x=>x.slug).join(', ')+(adds.length?'\n\nNew sisters (not on the roster yet): '+adds.join(', '):'')+'\n\nKeeps everything else on her card.'))return;
- let ok=0,skipped=0;for(const {f,slug} of plan){try{const text=await f.text();if(!text.trim())throw new Error(f.name+' is empty');
+ let ok=0,skipped=0;const saved={};for(const {f,slug} of plan){try{const text=await f.text();if(!text.trim())throw new Error(f.name+' is empty');
   const p=PERS.find(x=>x.girl===slug&&!x.isNew)||{name:slug[0].toUpperCase()+slug.slice(1),door_title:'',blurb:'',avatar_url:'',min_tier:'freshman',sort_order:100,difficulty:'normal',active:true,persona:''};
-  const doc=mergeDoc(p.seeded?p.persona:'',text,mode);if(doc===null){skipped++;continue}
+  const cur=slug in saved?saved[slug]:(p.persona||'');const doc=mergeDoc(cur,text,slug in saved?'append':mode);if(doc===null){skipped++;continue}
   await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:p.name,door_title:p.door_title,blurb:p.blurb,avatar_url:p.avatar_url,
-   min_tier:p.min_tier,sort_order:p.sort_order,difficulty:p.difficulty||'normal',persona:doc,active:p.active})});ok++}catch(e){toast(e.message,true)}}
+   min_tier:p.min_tier,sort_order:p.sort_order,difficulty:p.difficulty||'normal',persona:doc,active:p.active})});saved[slug]=doc;ok++}catch(e){toast(e.message,true)}}
  $('#docFiles').value='';toast(ok+' of '+plan.length+' doc(s) saved'+(skipped?', '+skipped+' already in her doc':'')+' - live on the next reload');loadPersonas(CURP?CURP.girl:undefined)}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
