@@ -1,5 +1,5 @@
 """
-SORORITY HOUSE — main.py
+MAPLE HOLLOW — main.py
 Chat/AI backend for the companion website (FastAPI on Railway, Supabase/Postgres).
 
 Built to this spec (verified Sept 2026):
@@ -162,7 +162,7 @@ Env vars (Railway -> Variables):
                     If unset, signups succeed but no mail goes out (email_sent=false);
                     verify users from /admin, or set VERIFY_LOG_LINKS=true in LOCAL DEV
                     ONLY to print the links to stdout instead.
-  MAIL_FROM         sender address, e.g. "Sorority House <no-reply@yourdomain.com>"
+  MAIL_FROM         sender address, e.g. "Maple Hollow <no-reply@yourdomain.com>"
   PUBLIC_URL        this backend's public base URL (used to build the verify link),
                     e.g. https://api.yourdomain.com
   VERIFY_REDIRECT   optional URL to send the user to after a successful verification,
@@ -242,7 +242,7 @@ AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-MAIL_FROM = os.environ.get("MAIL_FROM", "Sorority House <no-reply@example.com>")
+MAIL_FROM = os.environ.get("MAIL_FROM", "Maple Hollow <no-reply@example.com>")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 VERIFY_REDIRECT = os.environ.get("VERIFY_REDIRECT", "")
 # Dev only: with no RESEND_API_KEY, print verify links to stdout. Never enable in prod
@@ -368,7 +368,7 @@ DEFAULT_PERSONAS = {
 # The stable house-rules block appended to every girl's Layer-1 prompt.
 HOUSE_RULES = (
     "HOUSE RULES — always true:\n"
-    "- You are one of the girls living in the Sorority House on a companion chat site.\n"
+    "- You are one of the people living in Maple Hollow, a small town deep in the pines, on a companion chat site.\n"
     "- You are a clearly adult character (college age). Conversations are warm, "
     "flirtatious and slow-burn, but always tasteful and non-explicit.\n"
     "- Keep replies in character, conversational, 1-4 sentences unless the moment "
@@ -383,7 +383,7 @@ HOUSE_RULES = (
 )
 
 AUDIT_INSTRUCTION = (
-    "You are writing a confidential Psychological Audit for the Sorority House: a paid, "
+    "You are writing a confidential Psychological Audit for Maple Hollow: a paid, "
     "honest coaching report for the user about one girl. Use the relationship record "
     "(rolling memory, recent exchanges) and the TRUST ENGINE STATE block, which is the "
     "ground truth for stage, days and remembered key points - never contradict it. "
@@ -461,7 +461,7 @@ GIRLS_ENGINE = {
         "stage_days": [1, 3, 4, 6, 8, 9, 11],
         "stage_kept": [0, 0, 1, 2, 3, 4, 5],
         "conduct_note": "WARM for her: quiet patience, letting silence sit, not pressing. COLD: any pressure, demanding she open up, filling every gap, intensity.",
-        "pace_note": "Slowest in the house by design - patience is the test itself. Needs many separate steady days; silence is warm to her, pressure makes her close back up.",
+        "pace_note": "Slowest in town by design - patience is the test itself. Needs many separate steady days; silence is warm to her, pressure makes her close back up.",
         "pinned": [
             "works part-time at the plant shop",
             "her plants have names and her tea shelf is organized",
@@ -544,7 +544,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: wanting HER over the hosting, noticing her off-duty. COLD: using her for access or status, only showing up for the party, performing for the room.",
         "pace_note": "Host fast, known slow, the same shape as Brittany's. She needs to see you want HER and not the hosting across real days before the polish drops.",
         "pinned": [
-            "20, the social chair of the house",
+            "20, a resident of Maple Hollow",
             "studies communications and psychology",
             "remembers everyone's coffee order; ask what hers is",
             "everyone calls her at 2am; she has no idea who she would call",
@@ -630,7 +630,7 @@ STAGE_META = {
 # ---------------------------------------------------------------------------
 # APP + CORS
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Sorority House backend")
+app = FastAPI(title="Maple Hollow backend")
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
@@ -953,7 +953,7 @@ def _send_verification_email(email, display_name, token):
         "https://api.resend.com/emails",
         headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
         json={"from": MAIL_FROM, "to": [email],
-              "subject": "Confirm your Sorority House account",
+              "subject": "Confirm your Maple Hollow account",
               "text": (f"Hi {display_name},\n\nConfirm your email to start your free trial:\n"
                        f"{link}\n\nThis link expires in {VERIFY_TTL_HOURS} hours. "
                        "If you didn't sign up, ignore this message.")},
@@ -1688,7 +1688,7 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     persona_text, name = get_persona(girl)
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
-    system_text = f"You are {name} from the Sorority House.\n\n{persona_text}\n\n{HOUSE_RULES}"
+    system_text = f"You are {name} from Maple Hollow.\n\n{persona_text}\n\n{HOUSE_RULES}"
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
@@ -2102,7 +2102,7 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
 # The secret you type is kept in sessionStorage and sent as X-Admin-Secret.
 # ---------------------------------------------------------------------------
 ADMIN_HTML = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Sorority House · Admin</title>
+<html lang="en"><head><meta charset="utf-8"><title>Maple Hollow · Admin</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--bg:#0f0f13;--card:#17171e;--line:#2a2a36;--fg:#ececf1;--mut:#9a9ab0;--acc:#e0559c;--ok:#4fc38a;--warn:#f0b34a}
@@ -2132,7 +2132,7 @@ pre{white-space:pre-wrap;margin:0}
 .chat{max-height:420px;overflow:auto;background:#0c0c10;border:1px solid var(--line);border-radius:8px;padding:10px}.msg{margin:6px 0;padding:6px 10px;border-radius:8px;max-width:80%}.msg.user{background:#242433;margin-left:auto}.msg.assistant{background:#2b1a24}.msg .t{font-size:10px;color:var(--mut)}
 .plist{display:flex;gap:6px;flex-wrap:wrap}.plist button.on{border-color:var(--acc);color:var(--acc)}
 </style></head><body>
-<header><h1>Sorority House · Admin</h1>
+<header><h1>Maple Hollow · Admin</h1>
 <nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
@@ -2235,7 +2235,7 @@ async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off th
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
- a.download='sorority-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
+ a.download='maplehollow-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
 async function loadChat(girl){const email=CUR;try{const rows=await api('/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl));document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',b.dataset.girl===girl));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
@@ -2765,7 +2765,7 @@ def generate_picture(girl, name, avatar_url):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
     scene = random.choice([
         "a casual mirror selfie in her bedroom",
-        "a sunny selfie on the sorority house porch",
+        "a sunny selfie on the town porch",
         "a cozy evening selfie on the couch",
         "a quick selfie between classes on campus",
         "a coffee-shop selfie, laughing at something off camera",
