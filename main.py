@@ -2248,7 +2248,7 @@ function mergeDoc(old,add,mode){old=(old||'').replace(/\s+$/,'');add=add.trim();
 async function loadDocFile(f){if(!f)return;const t=mergeDoc($('#pDoc').value,await f.text(),$('#docMode').value);$('#pDocFile').value='';
  if(t===null){toast(f.name+' is already in her doc - nothing added',true);return}$('#pDoc').value=t;$('#pLen').textContent=t.length+' chars';toast('Loaded '+f.name+' - press Save')}
 const slugOf=f=>f.name.replace(/\.[^.]+$/,'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
-async function importDocs(files){files=[...files];if(!files.length)return;const known=PERS.filter(p=>!p.isNew).map(p=>p.girl);
+async function importDocs(files){files=[...files];$('#docFiles').value='';if(!files.length)return;const known=PERS.filter(p=>!p.isNew).map(p=>p.girl);
  const plan=files.map(f=>({f,slug:slugOf(f)})).filter(x=>x.slug);const adds=plan.filter(x=>!known.includes(x.slug)).map(x=>x.slug);const mode=$('#docMode').value;
  if(!plan.length){toast('No usable file names',true);return}
  if(!confirm((mode==='append'?'Append to':'Replace')+' the character doc of: '+plan.map(x=>x.slug).join(', ')+(adds.length?'\n\nNew sisters (not on the roster yet): '+adds.join(', '):'')+'\n\nKeeps everything else on her card.'))return;
@@ -2257,7 +2257,7 @@ async function importDocs(files){files=[...files];if(!files.length)return;const 
   const cur=slug in saved?saved[slug]:(p.persona||'');const doc=mergeDoc(cur,text,slug in saved?'append':mode);if(doc===null){skipped++;continue}
   await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:p.name,door_title:p.door_title,blurb:p.blurb,avatar_url:p.avatar_url,
    min_tier:p.min_tier,sort_order:p.sort_order,difficulty:p.difficulty||'normal',persona:doc,active:p.active})});saved[slug]=doc;ok++}catch(e){toast(e.message,true)}}
- $('#docFiles').value='';toast(ok+' of '+plan.length+' doc(s) saved'+(skipped?', '+skipped+' already in her doc':'')+' - live on the next reload');loadPersonas(CURP?CURP.girl:undefined)}
+ toast(ok+' of '+plan.length+' doc(s) saved'+(skipped?', '+skipped+' already in her doc':'')+' - live on the next reload');loadPersonas(CURP?CURP.girl:undefined)}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
