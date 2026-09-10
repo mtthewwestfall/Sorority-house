@@ -897,8 +897,8 @@
       chat.classList.add('is-open');
       lockedScrollY = window.scrollY;
       document.body.classList.add('chat-locked');
-      lastViewport = '';
-      fitChatToViewport();
+      appliedVvh = appliedTop = -1;
+      applyChatViewport();
       chatInput.value = '';
       growChatInput();
       chatInput.focus();
@@ -907,8 +907,12 @@
     function closeChat() {
       abortStreamAndResync();
       chat.classList.remove('is-open');
+      clearTimeout(fitTimer);
+      clearTimeout(settleTimer);
+      fitTimer = settleTimer = 0;
       chat.style.transform = '';
       chat.style.removeProperty('--vvh');
+      appliedVvh = appliedTop = -1;
       if (document.body.classList.contains('chat-locked')) {
         document.body.classList.remove('chat-locked');
         window.scrollTo(0, lockedScrollY);
@@ -916,50 +920,53 @@
       currentGirl = null;
     }
 
+    // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
+    // viewport and may scroll the page. Size the panel to the visible area and pull it
+    // back up by however far the page was pushed, so nothing hides behind the keyboard.
+    // The keyboard animates for ~250ms and fires a burst of resize/scroll events; laying
+    // out on each one makes the panel visibly step through intermediate sizes. So every
+    // event only re-arms one timer, and the panel is written exactly once, after the
+    // viewport has been still for a moment, and only if the numbers actually changed.
+    const FIT_QUIET_MS = 120;
     let fitTimer = 0;
-    let lastViewport = '';
-    let pendingViewport = '';
+    let settleTimer = 0;
+    let appliedVvh = -1;
+    let appliedTop = -1;
     const mobileChat = window.matchMedia('(max-width: 620px)');
-    function viewportKey() {
-      const vv = window.visualViewport;
-      return `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
-    }
-    function fitChatToViewport() {
-      if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) return;
-      // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
-      // viewport and may scroll the page. Size the panel to the visible area and pull it
-      // back up by however far the page was pushed, so nothing hides behind the keyboard.
-      // Only apply once the viewport has stopped moving: re-laying out during the
-      // keyboard animation makes Safari re-scroll, and the panel shakes.
-      const key = viewportKey();
-      if (key === lastViewport) { clearTimeout(fitTimer); fitTimer = 0; return; }
-      if (key === pendingViewport && fitTimer) return;
-      pendingViewport = key;
-      clearTimeout(fitTimer);
-      fitTimer = setTimeout(() => {
-        fitTimer = 0;
-        if (!chat.classList.contains('is-open')) return;
-        if (!mobileChat.matches) {
+    function applyChatViewport() {
+      fitTimer = 0;
+      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      if (!mobileChat.matches) {
+        if (appliedVvh !== -1 || appliedTop !== -1) {
           chat.style.transform = '';
           chat.style.removeProperty('--vvh');
-          lastViewport = '';
-          return;
+          appliedVvh = appliedTop = -1;
         }
-        const now = viewportKey();
-        if (now !== pendingViewport) { fitChatToViewport(); return; }
-        if (now === lastViewport) return;
-        lastViewport = now;
-        const vv = window.visualViewport;
-        const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
-        chat.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
-        chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
-        if (window.scrollY) window.scrollTo(0, 0);
-        if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
-      }, 90);
+        return;
+      }
+      const vv = window.visualViewport;
+      const vvh = Math.round(vv.height);
+      const top = Math.round(vv.offsetTop);
+      if (vvh === appliedVvh && top === appliedTop) return;
+      const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+      appliedVvh = vvh;
+      appliedTop = top;
+      chat.style.setProperty('--vvh', `${vvh}px`);
+      chat.style.transform = top ? `translateY(${top}px)` : '';
+      if (window.scrollY) window.scrollTo(0, 0);
+      if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
     }
-    // Safari fires the viewport events late (or not at all) around focus; poll briefly.
+    function fitChatToViewport() {
+      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      clearTimeout(fitTimer);
+      fitTimer = setTimeout(applyChatViewport, FIT_QUIET_MS);
+    }
+    // Safari sometimes fires no viewport event at all around focus/blur; one late
+    // fallback fit after the keyboard animation has certainly finished covers that.
+    // It is a no-op when the resize/scroll path already applied the same numbers.
     function settleChatViewport() {
-      for (const ms of [50, 150, 300, 600]) setTimeout(fitChatToViewport, ms);
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(fitChatToViewport, 500);
     }
     chatInput.addEventListener('focus', settleChatViewport);
     chatInput.addEventListener('blur', settleChatViewport);
