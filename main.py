@@ -127,6 +127,10 @@ Env vars (Railway -> Variables):
                     Otherwise audits ride the MOUTH (same voice as chat; the brain never
                     writes what the user reads), with AUDIT_MODEL overriding the model.
   MODEL_TIMEOUT_S   per-call timeout for every provider (default 120).
+  BRAIN_MAX_TOKENS / AUDIT_MAX_TOKENS
+                    token budgets for the digest (default 4000) and the audit report (900).
+                    Reasoning models on an OpenAI endpoint (deepseek-reasoner) bill their
+                    thinking against these, so raise AUDIT_MAX_TOKENS to ~4000 there.
   CHAT_CPS          her typing speed on /chat/stream, characters per second (default 14).
   CHAT_LEAD_CHARS   how far generation may run ahead of the screen (default 240 chars).
                     Generation blocks at this backlog, so she never gets minutes ahead.
@@ -220,6 +224,7 @@ MODEL_TIMEOUT_S = float(os.environ.get("MODEL_TIMEOUT_S", "120"))
 # Reasoning models (DeepSeek v4 / reasoner) bill their thinking against
 # max_tokens, so the brain's memory digest needs far more headroom than 600.
 BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4000"))
+AUDIT_MAX_TOKENS = int(os.environ.get("AUDIT_MAX_TOKENS", "900"))
 
 
 def _role_config(role, default_model):
@@ -2176,7 +2181,13 @@ pre{white-space:pre-wrap;margin:0}
 <div class="mut">Unlocked: every door is open (paid tier still applies). Locked: the first set is open from day one and each later set has to be earned. Live for every player on their next reload.</div></div>
 <div class="card"><div class="plist" id="plist"></div>
 <div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
-<button class="s" onclick="exportRoster()">Download backup</button></div>
+<button class="s" onclick="exportRoster()">Download backup</button>
+<button class="s" onclick="$('#docFiles').click()">Upload character docs</button>
+<select id="docMode"><option value="replace">replace her doc</option><option value="append">append to her doc</option></select>
+<input id="docFiles" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hid" onchange="importDocs(this.files)"></div>
+<div class="mut" style="margin-top:8px">Upload character docs: pick one or more .txt / .md files named after her slug (dakota.txt, zoe.md). Each one
+replaces that sister's character doc, or is appended under it (a file she already contains is skipped, so nothing lands twice).
+The rest of her card is kept; an unknown slug adds a new sister.</div>
 <div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the paid tier she needs (doors themselves are earned by progression) and her
 full character doc, which is her Layer-1 system block. Changes are live on the next reload - no deploy.
 Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
@@ -2224,6 +2235,8 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  <label class="mut">Character doc (her system block)</label>
  <textarea id="pDoc" style="min-height:300px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
  <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="saveGirl(this.dataset.girl)">Save</button>
+ <button class="s" onclick="$('#pDocFile').click()">Load doc from file</button>
+ <input id="pDocFile" type="file" accept=".txt,.md,text/plain,text/markdown" class="hid" onchange="loadDocFile(this.files[0])">
  ${p.isNew?'':`<button class="s" onclick="setActive('${esc(p.girl)}',${p.active?'false':'true'})">${p.active?'Retire her':'Bring her back'}</button>`}
  <span class="mut" id="pLen">${(p.persona||'').length} chars</span></div>`;
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
@@ -2231,6 +2244,20 @@ async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).tr
  try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
   blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
   persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
+function mergeDoc(old,add,mode){old=(old||'').replace(/\s+$/,'');add=add.trim();if(mode!=='append'||!old)return add;if(old.includes(add))return null;return old+'\n\n'+add}
+async function loadDocFile(f){if(!f)return;const t=mergeDoc($('#pDoc').value,await f.text(),$('#docMode').value);$('#pDocFile').value='';
+ if(t===null){toast(f.name+' is already in her doc - nothing added',true);return}$('#pDoc').value=t;$('#pLen').textContent=t.length+' chars';toast('Loaded '+f.name+' - press Save')}
+const slugOf=f=>f.name.replace(/\.[^.]+$/,'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+async function importDocs(files){files=[...files];if(!files.length)return;const known=PERS.filter(p=>!p.isNew).map(p=>p.girl);
+ const plan=files.map(f=>({f,slug:slugOf(f)})).filter(x=>x.slug);const adds=plan.filter(x=>!known.includes(x.slug)).map(x=>x.slug);const mode=$('#docMode').value;
+ if(!plan.length){toast('No usable file names',true);return}
+ if(!confirm((mode==='append'?'Append to':'Replace')+' the character doc of: '+plan.map(x=>x.slug).join(', ')+(adds.length?'\n\nNew sisters (not on the roster yet): '+adds.join(', '):'')+'\n\nKeeps everything else on her card.'))return;
+ let ok=0,skipped=0;for(const {f,slug} of plan){try{const text=await f.text();if(!text.trim())throw new Error(f.name+' is empty');
+  const p=PERS.find(x=>x.girl===slug&&!x.isNew)||{name:slug[0].toUpperCase()+slug.slice(1),door_title:'',blurb:'',avatar_url:'',min_tier:'freshman',sort_order:100,difficulty:'normal',active:true,persona:''};
+  const doc=mergeDoc(p.seeded?p.persona:'',text,mode);if(doc===null){skipped++;continue}
+  await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:p.name,door_title:p.door_title,blurb:p.blurb,avatar_url:p.avatar_url,
+   min_tier:p.min_tier,sort_order:p.sort_order,difficulty:p.difficulty||'normal',persona:doc,active:p.active})});ok++}catch(e){toast(e.message,true)}}
+ $('#docFiles').value='';toast(ok+' of '+plan.length+' doc(s) saved'+(skipped?', '+skipped+' already in her doc':'')+' - live on the next reload');loadPersonas(CURP?CURP.girl:undefined)}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
@@ -2989,7 +3016,7 @@ def audit(body: AuditIn, user=Depends(current_user)):
         # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
         thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
         report = llm(AUDIT, messages, thinking=thinking_on,
-                     max_tokens=900, temperature=0.6)
+                     max_tokens=AUDIT_MAX_TOKENS, temperature=0.6)
     except Exception:
         # no audit delivered: hand the reserved entitlement back
         conn = db()
