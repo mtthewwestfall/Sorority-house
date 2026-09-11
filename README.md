@@ -1,9 +1,9 @@
-# Sorority-house
+# Maple-Hollow
 
-# 🏛️ Sorority AI Empire: Backend Engine
+# 🏛️ Maple Hollow AI Empire: Backend Engine
 
 ## 📌 Project Overview
-This is the core intelligence layer for a high-fidelity AI sorority experience. It manages 28 distinct female personalities, a dynamic trust-progression system, autonomous image generation, and a dual-payment architecture (Stripe + Shopify).
+This is the core intelligence layer for a high-fidelity AI town experience. It manages 28 distinct female personalities, a dynamic trust-progression system, autonomous image generation, and a dual-payment architecture (Stripe + Shopify).
 
 **Architecture:** FastAPI (Python) 
 **Database:** PostgreSQL (via Supabase)
