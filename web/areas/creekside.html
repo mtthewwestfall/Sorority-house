@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Creekside — Maple Hollow</title>
+  <meta name="description" content="Creekside, Maple Hollow. Houses along the water. People who've been here longest." />
+  <style>
+    :root {
+      --ink: #0d0918;
+      --panel: rgba(26, 18, 43, .82);
+      --line: rgba(218, 188, 255, .24);
+      --white: #fff9ff;
+      --muted: #c7b9ca;
+      --gold: #ffb52c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--white); background: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .hero {
+      min-height: 52vh; display: flex; align-items: flex-end;
+      background: linear-gradient(180deg, rgba(0,0,0,.15) 0%, rgba(13,9,24,.92) 100%), url('../assets/bg-creekside.jpg') center/cover;
+      padding: 90px 24px 48px;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; width: 100%; }
+    .eyebrow { color: var(--gold); letter-spacing: .22em; text-transform: uppercase; font-size: .8rem; font-weight: 700; margin: 0 0 12px; }
+    h1 { font-size: clamp(2.6rem, 8vw, 5rem); line-height: 1; margin: 0 0 12px; }
+    .tagline { color: var(--muted); font-size: 1.15rem; margin: 0; }
+    main { padding: 40px 24px 70px; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 18px; padding: 28px; margin-bottom: 26px;
+    }
+    .panel p { color: var(--muted); line-height: 1.75; margin: 0; font-size: 1.02rem; }
+    h2 { font-size: 1.35rem; margin: 0 0 16px; color: var(--gold); }
+    .residents { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .resident {
+      display: block; padding: 16px 18px; border: 1px solid var(--line);
+      border-radius: 14px; text-decoration: none; color: var(--white);
+      background: rgba(34, 23, 53, .6); transition: transform .15s, border-color .15s;
+    }
+    .resident:hover { transform: translateY(-3px); border-color: rgba(255,181,44,.6); }
+    .resident strong { display: block; font-size: 1.05rem; }
+    .resident span { color: var(--muted); font-size: .92rem; }
+    .hangout img { width: 100%; border-radius: 14px; display: block; margin-bottom: 16px; }
+    .hangout h3 { margin: 0 0 8px; font-size: 1.15rem; }
+    .hangout p { color: var(--muted); line-height: 1.7; margin: 0; }
+    .back { display: inline-block; margin-top: 8px; color: var(--gold); text-decoration: none; font-weight: 600; }
+    .back:hover { text-decoration: underline; }
+    nav.areas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 26px; }
+    nav.areas a {
+      padding: 10px 18px; border: 1px solid var(--line); border-radius: 999px;
+      color: var(--white); text-decoration: none; font-size: .92rem;
+    }
+    nav.areas a.current { border-color: var(--gold); color: var(--gold); }
+    nav.areas a:hover { border-color: var(--gold); }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Maple Hollow · Four corners of town</p>
+      <h1>Creekside</h1>
+      <p class="tagline">Houses along the water. People who've been here longest.</p>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <div class="panel">
+        <p>The creek has run past these houses longer than anyone can remember, and the families along it measure time in floods and thaws. Creekside people don't impress easy — they've watched newcomers come and go for decades. Show up steady, and the water vouches for you.</p>
+      </div>
+      <div class="panel">
+        <h2>Who works here</h2>
+        <div class="residents">
+          <a class="resident" href="../index.html#town"><strong>Dean</strong><span>doctor</span></a>
+          <a class="resident" href="../index.html#town"><strong>Kristen</strong><span>veterinarian</span></a>
+          <a class="resident" href="../index.html#town"><strong>Anna</strong><span>EMT and nurse</span></a>
+        </div>
+      </div>
+      <div class="panel hangout"><h2>Around here</h2><img src="../assets/hangout-fishing-trip.jpg" alt="The creek" /><h3>The creek</h3><p>Early mornings, mist on the water, a line in the current. Some of the best conversations in town happen without a word being said.</p></div>
+      <a class="back" href="../index.html">← Back to town</a>
+      <nav class="areas">
+        <a href="main-street.html">Main Street</a>
+        <a href="the-pines.html">The Pines</a>
+        <a href="creekside.html" class="current">Creekside</a>
+        <a href="mill-road.html">Mill Road</a>
+      </nav>
+    </div>
+  </main>
+</body>
+</html>
