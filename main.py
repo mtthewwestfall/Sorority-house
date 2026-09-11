@@ -80,8 +80,6 @@ API CONTRACT implemented here (point your chat app at these):
                                                             for their existing user_id (migration)
   (set-tier / grant-audits / link-account REQUIRE ADMIN_SECRET to be set; they refuse
    with 503 otherwise, so entitlements are never publicly mutable.)
-  GET  /leaderboard                                     -> [ {name,milestone,audit_count,...} ]
-                                                            frontend shows * when audit_count>=5
   POST /admin/persona {"girl","name","door_title","persona","secret"} (upsert; paste full
                                                             doc; REQUIRES ADMIN_SECRET)
   GET  /roster                                          -> {"tiers":[...],"girls":[{girl,name,
@@ -362,14 +360,14 @@ DEFAULT_PERSONAS = {
     "brittany": ("Brittany", "The sweet trap", "Warm, charming, everyone's favorite. Her openness is armor; the real her lives behind the sunshine she gives everyone."),
     "sasha":    ("Sasha",    "The wildcard",   "Sharp, composed, impossible to impress with a performance. Direct; wants to be known, not conquered."),
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
-    "veronica": ("Veronica", "The host",       "Senior exclusive. The social chair who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
+    "veronica": ("Veronica", "The host",       "Senior exclusive. The town clerk who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
 HOUSE_RULES = (
     "HOUSE RULES — always true:\n"
     "- You are one of the people living in Maple Hollow, a small town deep in the pines, on a companion chat site.\n"
-    "- You are a clearly adult character (college age). Conversations are warm, "
+    "- You are a clearly adult character in their twenties. Conversations are warm, "
     "flirtatious and slow-burn, but always tasteful and non-explicit.\n"
     "- Keep replies in character, conversational, 1-4 sentences unless the moment "
     "genuinely calls for more. Never break character or mention you are an AI.\n"
@@ -384,7 +382,7 @@ HOUSE_RULES = (
 
 AUDIT_INSTRUCTION = (
     "You are writing a confidential Psychological Audit for Maple Hollow: a paid, "
-    "honest coaching report for the user about one girl. Use the relationship record "
+    "honest coaching report for the user about one person. Use the relationship record "
     "(rolling memory, recent exchanges) and the TRUST ENGINE STATE block, which is the "
     "ground truth for stage, days and remembered key points - never contradict it. "
     "Only describe things the user actually said or did in the record; never invent "
@@ -392,15 +390,15 @@ AUDIT_INSTRUCTION = (
     "Write exactly these four sections, each headed by its title on its own line, "
     "2-4 tight sentences or bullets each, about 350 words total. Plain text, no markdown "
     "symbols, no preamble, no closing line.\n"
-    "1. How She Feels About Him - her real read on him at this stage, in her voice's "
+    "1. How They Feel About You - their real read on you at this stage, in their voice's "
     "terms. Quote or paraphrase a concrete moment from the record.\n"
-    "2. What He's Doing Wrong - the specific pattern costing him trust. Name pushiness, "
-    "forcing pace, fishing for a reaction or steering the talk to himself when it is "
-    "there; pushy reads as cold to her and cold conduct regresses a stage. Be direct.\n"
-    "3. How To Make It Better - coach the three trust gates she actually runs on: "
-    "(a) show up over distinct real days at this stage, (b) remember and bring back her "
-    "key points in his own words (tell him which he has kept vs still owes), (c) warm "
-    "conduct by her own standards - steady, curious, unhurried, not forcing anything. "
+    "2. What You're Doing Wrong - the specific pattern costing them trust. Name pushiness, "
+    "forcing pace, fishing for a reaction or steering the talk to yourself when it is "
+    "there; pushy reads as cold to them and cold conduct regresses a stage. Be direct.\n"
+    "3. How To Make It Better - coach the three trust gates they actually run on: "
+    "(a) show up over distinct real days at this stage, (b) remember and bring back their "
+    "key points in your own words (tell them which they have kept vs still owe), (c) warm "
+    "conduct by their own standards - steady, curious, unhurried, not forcing anything. "
     "Give one concrete next move.\n"
     "4. Estimated Time To Level 4 Trust - state the estimate from the TRUST ENGINE STATE "
     "block as-is (or that it is already reached), then one sentence on what would make it "
@@ -423,8 +421,8 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: remembering small things, patience, respecting the diner and her independence. COLD: offering to rescue or pay her way, joking away a sincere moment, pushing pace.",
         "pace_note": "Steady and unhurried. Consistent days beat one great night; showing up again the same person is the single strongest move. Gaps above TRUSTED read hard for her.",
         "pinned": [
-            "works the diner off campus to pay her own way",
-            "small-town girl here on a scholarship, self-made",
+            "owns the diner in Maple Hollow, self-made",
+            "small-town woman, independent, answers to nobody",
             "would rather be alone than used",
             "remembers the small stuff about people",
             "has back-home sayings like all hat and no cattle",
@@ -2171,11 +2169,11 @@ pre{white-space:pre-wrap;margin:0}
 <div class="card"><h4 style="margin-top:0">Doors</h4>
 <div class="row2"><label><input id="dLocked" type="checkbox" onchange="$('#dRule').classList.toggle('hid',!this.checked)"> Lock doors past the first set</label>
 <span id="dRule" class="row2" style="margin:0">&middot; sets of <input id="dSet" type="number" min=1 max=12 style="width:64px"> girls, in roster order; the next set opens at stage
-<select id="dStage"></select> with any one girl of the set before it</span>
+<select id="dStage"></select> with any one person of the set before it</span>
 <button class="p" onclick="saveDoors()">Save</button></div>
 <div class="mut">Unlocked: every door is open (paid tier still applies). Locked: the first set is open from day one and each later set has to be earned. Live for every player on their next reload.</div></div>
 <div class="card"><div class="plist" id="plist"></div>
-<div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a sister</button>
+<div class="row2" style="margin-top:10px"><button class="p" onclick="newGirl()">+ Add a neighbor</button>
 <button class="s" onclick="exportRoster()">Download backup</button></div>
 <div class="mut" style="margin-top:8px">This is the whole roster: her door, her art, the paid tier she needs (doors themselves are earned by progression) and her
 full character doc, which is her Layer-1 system block. Changes are live on the next reload - no deploy.
@@ -2767,10 +2765,10 @@ def generate_picture(girl, name, avatar_url):
         "a casual mirror selfie in her bedroom",
         "a sunny selfie on the town porch",
         "a cozy evening selfie on the couch",
-        "a quick selfie between classes on campus",
+        "a quick selfie on main street",
         "a coffee-shop selfie, laughing at something off camera",
     ])
-    prompt = (f"Create a new picture of {name}, the same woman as in the reference image: "
+    prompt = (f"Create a new picture of {name}, the same person as in the reference image: "
               f"same face, hair, skin tone and overall art style. Scene: {scene}. "
               "Fully clothed, tasteful, natural expression, phone-camera framing. "
               "No text or watermarks.")
@@ -3006,7 +3004,7 @@ def audit(body: AuditIn, user=Depends(current_user)):
             conn.close()
         raise
 
-    # lifetime counter (drives the * on the leaderboard at 5+ audits). The report is
+    # lifetime audit counter. The report is
     # already generated and the entitlement spent; a failure here must not turn a
     # delivered audit into a 500, so log and carry on.
     try:
@@ -3025,34 +3023,6 @@ def audit(body: AuditIn, user=Depends(current_user)):
             "audit_count": int(user["total_audits_used"]) + 1,
             "free_left": free_left, "paid_left": paid_left,
             "price_usd": AUDIT_PRICE_USD}
-
-
-@app.get("/leaderboard")
-def leaderboard():
-    """Public: top rows by furthest milestone. Only a truncated display name plus
-    aggregate progress is exposed — no user_id, no raw audit/purchase counts
-    (`starred` is the single bit the UI renders as an asterisk)."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT LEFT(u.display_name, 12) AS display_name,
-                       COALESCE(MAX(r.milestone), 0) AS milestone,
-                       (u.total_audits_used >= 5) AS starred,
-                       COUNT(DISTINCT r.girl) AS girls_reached
-                FROM users u
-                LEFT JOIN relationships r
-                       ON r.user_id = u.user_id
-                      AND EXISTS (SELECT 1 FROM chat_logs c
-                                  WHERE c.user_id = r.user_id AND c.girl = r.girl
-                                    AND c.sender = 'user')
-                GROUP BY u.user_id
-                ORDER BY milestone DESC, girls_reached DESC, u.total_audits_used ASC
-                LIMIT 25
-            """)
-            return {"leaderboard": cur.fetchall()}
-    finally:
-        conn.close()
 
 
 @app.post("/admin/persona")
@@ -3952,7 +3922,7 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 
 @app.post("/admin/console/girl", dependencies=[Depends(admin_required)])
 def admin_console_girl(body: AdminGirlIn):
-    """Add a sister or rewrite an existing one - door, art, tier gate and doc.
+    """Add a neighbor or rewrite an existing one - door, art, tier gate and doc.
     This is the whole roster, so it never needs a deploy to change."""
     girl = body.girl.strip().lower()
     if not _SLUG_RE.match(girl):
