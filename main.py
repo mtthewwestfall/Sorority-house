@@ -671,6 +671,13 @@ def init_db():
                     total_audits_used INTEGER NOT NULL DEFAULT 0,
                     plan_reset_at    TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                -- Player avatars: private graphic-novel portrait per account,
+                -- contest opt-in flag, and last-generation timestamp.
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_b64 TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_prompt TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_contest BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at TIMESTAMPTZ;
                 -- If you already had the old users table, uncomment to add the
                 -- new audit columns without dropping anything:
                 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS audit_credits INTEGER NOT NULL DEFAULT 0;
@@ -2854,6 +2861,178 @@ def image(body: ImageIn, user=Depends(current_user)):
                 "disclosure": "AI-generated image", "status": status}
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# PLAYER AVATARS - the player draws themselves into Maple Hollow
+# At sign-up (and once for existing users on their next sign-in) the player
+# describes the character they want to be; the description is rendered in the
+# game's portrait style. The avatar is private decoration: only the owner ever
+# sees it, it is never a chat character, and nobody can talk to it. Each month
+# one winner's avatar may be COPIED into the game as a public character through
+# the admin console; the player's own avatar is never touched, and the regular
+# residents never retire.
+# ---------------------------------------------------------------------------
+AVATAR_STYLE = (
+    "A detailed digital illustration portrait in a clean, high-quality stylized "
+    "comic art / webtoon cover style. Medium close-up portrait from the chest up, "
+    "subject looking directly at the viewer. Background: a dense, detailed "
+    "coniferous forest of pine and fir trees on rolling mountain slopes, soft "
+    "natural daylight. Fully clothed, tasteful, natural expression. No text, no "
+    "watermarks. The person depicted is: "
+)
+
+
+def generate_avatar(description):
+    """Text-to-image player avatar in the Maple Hollow portrait style."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    prompt = AVATAR_STYLE + description.strip()[:300]
+    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+               "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
+    r = requests.post(f"{GEMINI_BASE}/{IMAGE_MODEL}:generateContent", json=payload,
+                      params={"key": GEMINI_API_KEY},
+                      headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"Image model failed ({r.status_code}): {r.text[:300]}")
+    try:
+        for part in r.json()["candidates"][0]["content"]["parts"]:
+            blob = part.get("inlineData") or part.get("inline_data")
+            if blob and blob.get("data"):
+                return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
+    except Exception:
+        pass
+    raise HTTPException(status_code=502, detail="Avatar generation failed")
+
+
+class AvatarIn(BaseModel):
+    description: str
+
+
+class AvatarContestIn(BaseModel):
+    enter: bool
+
+
+class AvatarPromoteIn(BaseModel):
+    user_id: str
+    girl: str
+    name: str
+    door_title: str = ""
+    persona: str = ""
+    blurb: str = ""
+    min_tier: str = "freshman"
+    sort_order: int = 100
+
+
+@app.post("/avatar")
+def create_avatar(body: AvatarIn, user=Depends(current_user)):
+    """Generate (or regenerate) the player's private avatar from a description."""
+    desc = (body.description or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Describe the character you want to be")
+    mime, b64 = generate_avatar(desc)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""UPDATE users SET avatar_b64=%s, avatar_mime=%s, avatar_prompt=%s,
+                           avatar_updated_at=now() WHERE user_id=%s""",
+                        (b64, mime, desc[:300], user["user_id"]))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "mime": mime, "image_b64": b64, "disclosure": "AI-generated image"}
+
+
+@app.get("/avatar/me")
+def my_avatar(user=Depends(current_user)):
+    """The player's own avatar. Private: only the owner can see it."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT avatar_b64, avatar_mime FROM users WHERE user_id=%s",
+                        (user["user_id"],))
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    b64 = row.get("avatar_b64") or ""
+    if not b64:
+        return {"has_avatar": False}
+    return {"has_avatar": True, "mime": row.get("avatar_mime") or "image/png",
+            "image_b64": b64, "disclosure": "AI-generated image"}
+
+
+@app.post("/avatar/contest")
+def avatar_contest(body: AvatarContestIn, user=Depends(current_user)):
+    """Enter or leave the monthly avatar contest."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT avatar_b64 FROM users WHERE user_id=%s", (user["user_id"],))
+            row = cur.fetchone() or {}
+            if body.enter and not (row.get("avatar_b64") or ""):
+                raise HTTPException(status_code=400, detail="Create your avatar first")
+            cur.execute("UPDATE users SET avatar_contest=%s WHERE user_id=%s",
+                        (bool(body.enter), user["user_id"]))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "entered": bool(body.enter)}
+
+
+@app.get("/admin/avatar-contest")
+def avatar_contest_list(_=Depends(admin_required)):
+    """Admin: avatars entered in the monthly contest. Never public."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT user_id, display_name, avatar_mime, avatar_b64, avatar_prompt,
+                           avatar_updated_at FROM users
+                           WHERE avatar_contest AND avatar_b64 <> ''
+                           ORDER BY avatar_updated_at DESC""")
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return {"entries": [
+        {"user_id": r["user_id"], "display_name": r["display_name"],
+         "mime": r["avatar_mime"], "image_b64": r["avatar_b64"],
+         "prompt": r["avatar_prompt"],
+         "updated_at": str(r["avatar_updated_at"])} for r in rows]}
+
+
+@app.post("/admin/avatar-contest/promote")
+def avatar_contest_promote(body: AvatarPromoteIn, _=Depends(admin_required)):
+    """Admin: copy a contest winner's avatar into the game as a public character.
+    The player's own avatar is untouched; only the copy becomes a persona. The
+    avatar rides in avatar_url as a data URL so existing art rendering just works."""
+    girl = body.girl.strip().lower()
+    if not girl:
+        raise HTTPException(status_code=400, detail="girl slug required")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT avatar_b64, avatar_mime FROM users WHERE user_id=%s",
+                        (body.user_id,))
+            row = cur.fetchone() or {}
+            b64 = row.get("avatar_b64") or ""
+            if not b64:
+                raise HTTPException(status_code=404, detail="No avatar for that user")
+            mime = row.get("avatar_mime") or "image/png"
+            data_url = f"data:{mime};base64,{b64}"
+            cur.execute("""INSERT INTO personas (girl, name, door_title, persona, min_tier,
+                           sort_order, avatar_url, blurb)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (girl) DO UPDATE
+                           SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
+                               persona=EXCLUDED.persona, min_tier=EXCLUDED.min_tier,
+                               sort_order=EXCLUDED.sort_order, avatar_url=EXCLUDED.avatar_url,
+                               blurb=EXCLUDED.blurb""",
+                        (girl, body.name, body.door_title, body.persona, body.min_tier,
+                         body.sort_order, data_url, body.blurb))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "girl": girl}
 
 
 @app.get("/history")
