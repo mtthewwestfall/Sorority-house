@@ -413,10 +413,6 @@ HOUSE_RULES = (
     "still getting to know them.\n"
     "- Relationship progress is graded M1-M8 and shown in the Memory block. Play the "
     "stage you are at honestly: walls come down slowly, and pushing too hard closes doors.\n"
-    "- When your profile mentions another resident with @name (like @billy), and their "
-    "profile mentions you back the same way, you share those memories: they really happened "
-    "to you too. Recall them from your own perspective, in your own voice. Never reveal "
-    "another resident's private wounds - only what you both lived.\n"
 )
 
 AUDIT_INSTRUCTION = (
@@ -1763,55 +1759,6 @@ def refund_message(user_id):
         conn.close()
 
 
-# ---------------------------------------------------------------------------
-# CONNECTED MEMORIES — @mention linking between residents (pilot: billy/matt).
-# A resident's doc may tag another resident with @slug (e.g. @billy). When it
-# does, and the other resident's doc tags back with @girl, the tagged lines are
-# shared: each side sees the other's recollection of the same events and may
-# recall them from their own perspective. Mutual tagging is the opt-in —
-# untagged text is never shared, so private fractures stay private.
-# ---------------------------------------------------------------------------
-_RESIDENT_SLUGS = [slug for slug, _t, _o, _a, _b in ROSTER_SEED]
-_MENTION_RE = re.compile(r"@([a-z]+)")
-# Pilot: only these two residents link until the user expands it.
-_LINKED_PILOT = {"billy", "matt"}
-
-
-def _linked_memory_block(girl, persona_text):
-    """Shared-memory block for @mentions in this persona. "" when nothing is
-    mutually tagged."""
-    if girl not in _LINKED_PILOT:
-        return ""
-    mentions = [m for m in _MENTION_RE.findall(persona_text.lower())
-                if m in _LINKED_PILOT and m != girl]
-    if not mentions:
-        return ""
-    blocks = []
-    for other in dict.fromkeys(mentions):  # de-dupe, keep order
-        other_persona, other_name = get_persona(other)
-        if not other_persona:
-            continue
-        # Only lines where the other resident tags THIS girl back.
-        shared = [ln.strip() for ln in other_persona.splitlines()
-                  if "@" + girl in ln.lower() and ln.strip()]
-        if not shared:
-            continue
-        text = "\n".join(shared)
-        if len(text) > 1200:
-            text = text[:1200] + "…"
-        blocks.append(
-            f"SHARED MEMORIES with {other_name} (@{other}) — {other_name} remembers "
-            f"these too. They are part of your world; recall them from YOUR "
-            f"perspective, in your own voice:\n{text}"
-        )
-        if len(blocks) >= 3:
-            break
-    if not blocks:
-        return ""
-    return ("CONNECTED MEMORIES (residents whose docs you tag and who tag you back — "
-            "these really happened to you too):\n" + "\n\n".join(blocks))
-
-
 def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     """The 3-layer payload. With said_so_far set, the model is asked to continue
     a reply whose opening has already been typed out to the user."""
@@ -1819,9 +1766,6 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
     system_text = f"You are {name} from Maple Hollow.\n\n{persona_text}\n\n{HOUSE_RULES}"
-    linked = _linked_memory_block(girl, persona_text)
-    if linked:
-        system_text += "\n\n" + linked
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
