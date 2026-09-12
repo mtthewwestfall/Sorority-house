@@ -1371,7 +1371,7 @@
     async function loadCompanions() {
       const container = document.getElementById('companion-card-container');
       if (!container) return;
-      const headers = authToken ? { 'Authorization': 'Bearer ' + authToken } : {};
+      const headers = authHeaders();
       try {
         const res = await fetch(API_BASE_URL + '/companions', { headers });
         if (!res.ok) {
@@ -1433,14 +1433,14 @@
       const buySlotBtn = document.getElementById('buy-companion-slot-btn');
       if (buySlotBtn) {
         buySlotBtn.addEventListener('click', async () => {
-          if (!authToken) {
-            openAuthModal();
+          if (!getToken()) {
+            openAuth('login');
             return;
           }
           try {
             const res = await fetch(API_BASE_URL + '/companions/purchase-slot', {
               method: 'POST',
-              headers: { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' }
+              headers: authHeaders()
             });
             const data = await res.json();
             if (res.ok) {
@@ -1481,8 +1481,8 @@
     if (companionForm) {
       companionForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (!authToken) {
-          openAuthModal();
+        if (!getToken()) {
+          openAuth('login');
           return;
         }
         companionMsg.textContent = 'Creating companion...';
@@ -1501,7 +1501,7 @@
         try {
           const res = await fetch(API_BASE_URL + '/companions/create', {
             method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify(body)
           });
           const data = await res.json();
@@ -2295,3 +2295,4 @@
   </script>
 </body>
 </html>
+
