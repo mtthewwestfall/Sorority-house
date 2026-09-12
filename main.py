@@ -333,19 +333,19 @@ def tier_rank(tier):
 # door text, art and the tier she is sold on, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
-    ("dakota",   "freshman",  10, "assets/dakota.jpg",
+    ("dakota",   "freshman",  10, "assets/dakota.jpg?v=2",
      "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
-    ("zoe",      "freshman",  20, "assets/zoe.jpg",
+    ("zoe",      "freshman",  20, "assets/zoe.jpg?v=2",
      "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "freshman",  30, "assets/willow.jpg",
+    ("willow",   "freshman",  30, "assets/willow.jpg?v=2",
      "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
-    ("brittany", "freshman",  40, "assets/brittany.jpg",
+    ("brittany", "freshman",  40, "assets/brittany.jpg?v=2",
      "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
-    ("sasha",    "freshman",  50, "assets/sasha.webp",
+    ("sasha",    "freshman",  50, "assets/sasha.webp?v=2",
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "freshman",  60, "assets/piper.jpg",
+    ("piper",    "freshman",  60, "assets/piper.jpg?v=2",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
-    ("veronica", "freshman",  70, "assets/veronica.webp",
+    ("veronica", "freshman",  70, "assets/veronica.webp?v=2",
      "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
 ]
 
@@ -836,6 +836,16 @@ def init_db():
             """)
             # Veronica is free for everyone now: no tier wall.
             cur.execute("UPDATE personas SET min_tier = 'freshman' WHERE girl = 'veronica'")
+            # Bust portrait caches: point the roster at the versioned image URLs.
+            for _girl, _avatar in (("dakota", "assets/dakota.jpg?v=2"),
+                                   ("zoe", "assets/zoe.jpg?v=2"),
+                                   ("willow", "assets/willow.jpg?v=2"),
+                                   ("brittany", "assets/brittany.jpg?v=2"),
+                                   ("sasha", "assets/sasha.webp?v=2"),
+                                   ("piper", "assets/piper.jpg?v=2"),
+                                   ("veronica", "assets/veronica.webp?v=2")):
+                cur.execute("UPDATE personas SET avatar_url = %s WHERE girl = %s AND avatar_url NOT LIKE %s",
+                            (_avatar, _girl, "%?v=2"))
             # Doors moved from tier-gated to progression-gated. The marker column
             # makes the tier-wall lift run once, so the console owns min_tier after.
             cur.execute("""
