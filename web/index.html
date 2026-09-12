@@ -721,10 +721,24 @@
       document.getElementById('nav-auth').textContent = label;
       document.getElementById('footer-auth').textContent = label;
     }
+    const STATE_CACHE_KEY = 'sorority_house_state_cache';
+    function getCachedState() {
+      try {
+        const raw = localStorage.getItem(STATE_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (_) { return null; }
+    }
+    function setCachedState(data) {
+      try {
+        if (data) localStorage.setItem(STATE_CACHE_KEY, JSON.stringify(data));
+        else localStorage.removeItem(STATE_CACHE_KEY);
+      } catch (_) {}
+    }
     let picStatus = null;   // picture entitlements for the signed-in account (see /image)
     function signOut() {
       const t = getToken();
       localStorage.removeItem(TOKEN_KEY);
+      setCachedState(null);
       picStatus = null;
       updateAuthLinks(); closeChat(); refreshState();
       if (t) fetch(API_BASE_URL + '/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } }).catch(() => {});
@@ -1235,14 +1249,18 @@
     // Every card is clickable; openChat refuses locked ones. Which doors are open
     // comes from GET /state for the signed-in account (defaults = visitor set).
     let DEFAULT_OPEN = ['dakota', 'zoe'];
+    let currentOpenList = DEFAULT_OPEN;
+    let currentReasons = {};
     function setDoors(openList, reasons) {
+      currentOpenList = openList || DEFAULT_OPEN;
+      currentReasons = reasons || {};
       document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
-        const open = openList.includes(card.dataset.girl);
+        const open = currentOpenList.includes(card.dataset.girl);
         card.classList.toggle('open', open);
         card.classList.toggle('locked', !open);
         const status = card.querySelector('.door-status');
         if (status) status.textContent = open ? 'Trust earned' :
-          ((reasons && reasons[card.dataset.girl]) ||
+          ((currentReasons && currentReasons[card.dataset.girl]) ||
            (card.dataset.minTier === 'neighbor' ? 'Neighbor exclusive' : 'Trust not earned'));
       });
     }
@@ -1259,13 +1277,19 @@
       doorsGrid.innerHTML = girls.map((g) => {
         const name = escapeHtml(g.name || g.girl);
         const avatar = escapeHtml(g.avatar_url);
-        return '<article id="door-' + escapeHtml(g.girl) + '" class="door-card locked" data-girl="' + escapeHtml(g.girl) + '"' +
+        const girlKey = g.girl;
+        const open = currentOpenList.includes(girlKey);
+        const reasonText = (currentReasons && currentReasons[girlKey]) ||
+          ((g.min_tier || 'visitor') === 'neighbor' ? 'Neighbor exclusive' : 'Trust not earned');
+        const statusText = open ? 'Trust earned' : reasonText;
+        const cardClass = 'door-card' + (open ? ' open' : ' locked');
+        return '<article id="door-' + escapeHtml(girlKey) + '" class="' + cardClass + '" data-girl="' + escapeHtml(girlKey) + '"' +
           ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
           ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
           ' data-avatar="' + avatar + '">' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
           (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
-          '<div class="door-copy"><div class="door-status">Trust not earned</div>' +
+          '<div class="door-copy"><div class="door-status">' + escapeHtml(statusText) + '</div>' +
           '<div class="door-name">' + name + '</div>' +
           '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
           '<p>' + escapeHtml(g.blurb) + '</p>' +
@@ -1274,6 +1298,7 @@
       }).join('');
       // Signed out, only the first pair of doors is open.
       DEFAULT_OPEN = girls.slice(0, 2).map((g) => g.girl);
+      setDoors(currentOpenList, currentReasons);
     }
     // A portrait that fails to load leaves the styled door art behind it instead of
     // the browser's broken-image box.
@@ -1309,6 +1334,7 @@
     } else {
       scrollToDoorHash();
     }
+    window.addEventListener('hashchange', scrollToDoorHash);
     // Whoever last wrote the allowance owns it: every send, abort or state read
     // takes the next turn, and a slower answer for an older turn is dropped
     // rather than replacing a newer count.
@@ -1325,7 +1351,15 @@
     async function refreshState() {
       const seq = ++stateSeq;
       turnSeq++;
-      setDoors(DEFAULT_OPEN); chatRemaining.textContent = '';
+      const cached = isLoggedIn() ? getCachedState() : null;
+      if (cached && cached.girls) {
+        const reasons = {};
+        Object.keys(cached.girls).forEach((g) => { if (cached.girls[g].locked_reason) reasons[g] = cached.girls[g].locked_reason; });
+        setDoors(Object.keys(cached.girls).filter((g) => cached.girls[g].open), reasons);
+        showRemaining(cached.remaining);
+      } else {
+        setDoors(DEFAULT_OPEN); chatRemaining.textContent = '';
+      }
       if (!isLoggedIn()) return;
       try {
         const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
@@ -1333,6 +1367,7 @@
         if (response.status === 401) { handleUnauthorized(); return; }
         const data = await response.json().catch(() => null);
         if (seq !== stateSeq || !response.ok || !data || !data.girls) return;
+        setCachedState(data);
         const reasons = {};
         Object.keys(data.girls).forEach((g) => { if (data.girls[g].locked_reason) reasons[g] = data.girls[g].locked_reason; });
         setDoors(Object.keys(data.girls).filter((g) => data.girls[g].open), reasons);
