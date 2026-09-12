@@ -679,6 +679,13 @@
           <input id="comp-name" type="text" placeholder="e.g. Maya" required style="width: 100%;" />
         </div>
         <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Girl or Boy</label>
+          <select id="comp-gender" style="width: 100%; padding: 8px; border-radius: 8px; background: rgba(0,0,0,.35); color: var(--white); border: 1px solid rgba(216,184,148,.3);">
+            <option value="female" selected>Girl</option>
+            <option value="male">Boy</option>
+          </select>
+        </div>
+        <div>
           <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Looks & Appearance</label>
           <input id="comp-looks" type="text" placeholder="e.g. Dark wavy hair, amber eyes, oversized wool sweater" required style="width: 100%;" />
         </div>
@@ -1405,7 +1412,7 @@
         if (comps.length > 0) {
           comps.forEach(c => {
             const name = escapeHtml(c.first_name);
-            const title = c.is_married ? 'Married / Spouse' : 'Your Custom Companion';
+            const title = (c.is_married ? 'Married / Spouse' : 'Your Custom Companion') + (c.gender === 'male' ? ' \u00B7 Him' : ' \u00B7 Her');
             const avatar = c.portrait_url ? (c.portrait_url.startsWith('data:') ? c.portrait_url : 'data:image/png;base64,' + c.portrait_url) : '';
 
             html += '<article class="door-card open companion-card" style="border: 2px solid var(--gold); background: rgba(40, 25, 15, 0.85); margin-bottom: 20px;">' +
@@ -1514,6 +1521,7 @@
           pet_peeves: document.getElementById('comp-peeves').value.trim(),
           non_negotiables: document.getElementById('comp-nonneg').value.trim(),
           defense: document.getElementById('comp-defense').value.trim(),
+          gender: document.getElementById('comp-gender').value,
         };
 
         try {

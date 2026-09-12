@@ -872,6 +872,7 @@ def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     UNIQUE(user_id, slot_number)
                 );
+                ALTER TABLE companions ADD COLUMN IF NOT EXISTS gender TEXT NOT NULL DEFAULT 'female';
 
                 CREATE TABLE IF NOT EXISTS companion_chat_logs (
                     id BIGSERIAL PRIMARY KEY,
@@ -2537,6 +2538,7 @@ class CompanionCreateIn(BaseModel):
     pet_peeves: str
     non_negotiables: str
     defense: str
+    gender: str = "female"
 
 
 class AuditIn(BaseModel):
@@ -3089,7 +3091,7 @@ def image(body: ImageIn, user=Depends(current_user)):
 # Strictly isolated from 17 residents.
 # ---------------------------------------------------------------------------
 
-def _generate_companion_trauma(first_name, backstory, personality):
+def _generate_companion_trauma(first_name, backstory, personality, gender="female"):
     """Generates server-side hidden trauma (wound/fracture) for the companion.
     The player never sees this or specifies it — it unlocks over real-days trust.
     STRICT CONTENT LAW: No sexual violence ever."""
@@ -3101,22 +3103,24 @@ def _generate_companion_trauma(first_name, backstory, personality):
             "Focus on themes of loss, betrayal, sudden responsibility, broken trust, or sacrifice. "
             "Keep it to 2-3 compelling sentences written in third person."
         )},
-        {"role": "user", "content": f"Companion Name: {first_name}\nBackstory context: {backstory}\nPersonality: {personality}"}
+        {"role": "user", "content": f"Companion Name: {first_name} ({gender})\nBackstory context: {backstory}\nPersonality: {personality}"}
     ]
     try:
         res = llm(BRAIN, prompt, max_tokens=250, temperature=0.7)
         return res.strip()
     except Exception:
-        return f"Someone {first_name} trusted deeply walked away when things got hard, leaving her guarded about who she lets close."
+        pron = "him" if gender == "male" else "her"
+        return f"Someone {first_name} trusted deeply walked away when things got hard, leaving {pron} guarded about who {first_name} lets close."
 
 
-def _build_companion_persona_file(first_name, looks, personality, backstory, pet_peeves, non_negotiables, defense, trauma):
+def _build_companion_persona_file(first_name, looks, personality, backstory, pet_peeves, non_negotiables, defense, trauma, gender="female"):
     """Compiles the complete hardwired persona file for the custom companion."""
     return f"""COMPANION SPECIFICATION: {first_name.upper()}
 You are {first_name}, a custom companion residing in Maple Hollow. You are NOT the player's avatar. You talk and act like a real person living here.
 
 Identity & Appearance:
 - Name: {first_name}
+- Gender: {gender}
 - Appearance: {looks}
 - Personality & Vibe: {personality}
 - Backstory: {backstory}
@@ -3151,6 +3155,9 @@ def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
         body.first_name, body.looks, body.personality,
         body.backstory, body.pet_peeves, body.non_negotiables, body.defense
     )
+    gender = (body.gender or "female").strip().lower()
+    if gender not in ("female", "male"):
+        gender = "female"
     uid = user["user_id"]
     conn = db()
     try:
@@ -3174,18 +3181,18 @@ def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
         portrait_mime = "image/png"
         if GEMINI_API_KEY:
             try:
-                portrait_mime, portrait_b64 = generate_avatar(f"Portrait of {body.first_name}: {body.looks}")
+                portrait_mime, portrait_b64 = generate_avatar(f"Portrait of {body.first_name} ({"man" if gender == "male" else "woman"}): {body.looks}")
             except Exception:
                 pass
 
         # Generate hidden server-side trauma
-        trauma = _generate_companion_trauma(body.first_name, body.backstory, body.personality)
+        trauma = _generate_companion_trauma(body.first_name, body.backstory, body.personality, gender)
 
         # Build distilled persona file
         persona_file = _build_companion_persona_file(
             body.first_name, body.looks, body.personality,
             body.backstory, body.pet_peeves, body.non_negotiables,
-            body.defense, trauma
+            body.defense, trauma, gender
         )
 
         with conn.cursor() as cur:
@@ -3193,13 +3200,13 @@ def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
                 INSERT INTO companions (
                     user_id, slot_number, first_name, looks_desc, portrait_url,
                     personality, backstory, pet_peeves, non_negotiables, defense,
-                    trauma, persona_file, stage_since
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
-                RETURNING id, slot_number, first_name, looks_desc, personality, backstory, pet_peeves, non_negotiables, defense, is_married, milestone, created_at
+                    trauma, persona_file, gender, stage_since
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                RETURNING id, slot_number, first_name, looks_desc, personality, backstory, pet_peeves, non_negotiables, defense, gender, is_married, milestone, created_at
             """, (
                 uid, next_slot, body.first_name.strip(), body.looks.strip(), portrait_b64,
                 body.personality.strip(), body.backstory.strip(), body.pet_peeves.strip(),
-                body.non_negotiables.strip(), body.defense.strip(), trauma, persona_file
+                body.non_negotiables.strip(), body.defense.strip(), trauma, persona_file, gender
             ))
             comp = cur.fetchone()
         conn.commit()
@@ -3654,7 +3661,7 @@ def get_user_companions(user=Depends(current_user)):
             cur.execute("""
                 SELECT id, slot_number, first_name, looks_desc, portrait_url,
                        personality, backstory, pet_peeves, non_negotiables, defense,
-                       is_married, milestone, stage_days, created_at
+                       gender, is_married, milestone, stage_days, created_at
                 FROM companions WHERE user_id=%s ORDER BY slot_number ASC
             """, (uid,))
             comps = cur.fetchall() or []
@@ -3678,7 +3685,7 @@ def get_companion_detail(companion_id: int, user=Depends(current_user)):
             cur.execute("""
                 SELECT id, slot_number, first_name, looks_desc, portrait_url,
                        personality, backstory, pet_peeves, non_negotiables, defense,
-                       is_married, milestone, stage_days, created_at
+                       gender, is_married, milestone, stage_days, created_at
                 FROM companions WHERE id=%s AND user_id=%s
             """, (companion_id, uid))
             comp = cur.fetchone()
