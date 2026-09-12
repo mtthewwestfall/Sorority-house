@@ -439,6 +439,11 @@
             </ul>
           </div>
         </div>
+        <!-- Custom Companion Banner & Container -->
+        <div id="companion-section" style="margin-bottom: 30px;">
+          <div id="companion-card-container"></div>
+        </div>
+
         <!-- These seven are the fallback: GET /roster replaces them with whatever
              the house holds now, so a new sister needs no deploy. -->
         <div class="doors" id="doors-grid">
@@ -644,6 +649,49 @@
       <div class="auth-msg" id="avatar-msg" aria-live="polite"></div>
     </div>
   </div>
+  <!-- Companion Creation Modal -->
+  <div class="chat-backdrop" id="companion-modal" role="dialog" aria-modal="true" aria-labelledby="companion-modal-heading">
+    <div class="chat-panel auth-panel" style="max-width: 550px; max-height: 90vh; overflow-y: auto;">
+      <button class="chat-close auth-close" id="companion-modal-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="companion-modal-heading">Create Your Custom Companion</h2>
+      <p class="auth-sub">Design someone to talk to in Maple Hollow. This companion is strictly private to your account.</p>
+
+      <form id="companion-create-form" style="display: flex; flex-direction: column; gap: 12px; margin-top: 15px; text-align: left;">
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">First Name</label>
+          <input id="comp-name" type="text" placeholder="e.g. Maya" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Looks & Appearance</label>
+          <input id="comp-looks" type="text" placeholder="e.g. Dark wavy hair, amber eyes, oversized wool sweater" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Personality & Vibe</label>
+          <textarea id="comp-personality" rows="2" placeholder="e.g. Witty, sarcastic humor, fiercely loyal, quiet observer" required style="width: 100%;"></textarea>
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Backstory</label>
+          <textarea id="comp-backstory" rows="2" placeholder="e.g. Grew up in a small coastal town, left her job to find peace" required style="width: 100%;"></textarea>
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Pet Peeves</label>
+          <input id="comp-peeves" type="text" placeholder="e.g. Being interrupted, fake promises, lukewarm coffee" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">What matters most (Non-negotiables)</label>
+          <input id="comp-nonneg" type="text" placeholder="e.g. Absolute honesty, keeping word, standing by loved ones" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Defense (How they act when untrusting)</label>
+          <input id="comp-defense" type="text" placeholder="e.g. Cool politeness, keeping conversations light and surface-level" required style="width: 100%;" />
+        </div>
+
+        <button class="button" type="submit" style="margin-top: 10px;">Create Companion</button>
+      </form>
+      <div class="auth-msg" id="companion-msg" aria-live="polite"></div>
+    </div>
+  </div>
+
   <div class="chat-backdrop" id="profile" role="dialog" aria-modal="true" aria-labelledby="profile-heading">
     <div class="chat-panel auth-panel">
       <button class="chat-close auth-close" id="profile-close" type="button" aria-label="Close">&times;</button>
@@ -669,6 +717,10 @@
         <div class="who">
           <strong id="chat-name"></strong>
           <div id="chat-title"></div>
+        </div>
+        <div id="companion-actions-bar" style="margin-left: auto; display: flex; gap: 6px;" hidden>
+          <button class="button dark" id="comp-propose-btn" type="button" style="font-size: 0.75rem; padding: 4px 8px;" hidden>Propose Marriage</button>
+          <button class="button dark" id="comp-remember-btn" type="button" style="font-size: 0.75rem; padding: 4px 8px;" hidden>Remember Person</button>
         </div>
       </div>
       <div class="chat-service">AI Message<small>Private &middot; AI companion</small></div>
@@ -1135,6 +1187,7 @@
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her.'); return; }
       abortStreamAndResync();
+      currentCompanionId = null;
       currentGirl = card.dataset.girl;
       document.getElementById('chat-name').textContent = card.dataset.name;
       document.getElementById('chat-title').textContent = card.dataset.title;
@@ -1142,6 +1195,14 @@
       avatar.classList.remove('is-broken');
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
+
+      const actionsBar = document.getElementById('companion-actions-bar');
+      const photoBtn = document.getElementById('chat-photo-btn');
+      const auditBtn = document.getElementById('chat-audit-btn');
+      if (actionsBar) actionsBar.hidden = true;
+      if (photoBtn) photoBtn.hidden = false;
+      if (auditBtn) auditBtn.hidden = false;
+
       chatLog.innerHTML = '';
       receipt = null;
       lastStampAt = 0;
@@ -1307,6 +1368,92 @@
       const img = event.target;
       if (img instanceof HTMLImageElement) img.classList.remove('is-broken');
     }, true);
+    async function loadCompanions() {
+      const container = document.getElementById('companion-card-container');
+      if (!container) return;
+      const headers = authToken ? { 'Authorization': 'Bearer ' + authToken } : {};
+      try {
+        const res = await fetch(API_BASE_URL + '/companions', { headers });
+        if (!res.ok) {
+          container.innerHTML = '';
+          return;
+        }
+        const data = await res.json();
+        const comps = data.companions || [];
+        const maxSlots = data.max_slots || 1;
+
+        let html = '';
+
+        if (comps.length > 0) {
+          comps.forEach(c => {
+            const name = escapeHtml(c.first_name);
+            const title = c.is_married ? 'Married / Spouse' : 'Your Custom Companion';
+            const avatar = c.portrait_url ? (c.portrait_url.startsWith('data:') ? c.portrait_url : 'data:image/png;base64,' + c.portrait_url) : '';
+
+            html += '<article class="door-card open companion-card" style="border: 2px solid var(--gold); background: rgba(40, 25, 15, 0.85); margin-bottom: 20px;">' +
+              '<div class="door-art" data-initial="' + escapeHtml(name.charAt(0).toUpperCase()) + '">' +
+              (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
+              '<div class="door-copy">' +
+              '<div class="door-status" style="background: var(--gold); color: #000; font-weight: bold; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; display: inline-block; margin-bottom: 6px;">YOUR COMPANION &middot; YOURS</div>' +
+              '<div class="door-name">' + name + '</div>' +
+              '<div class="door-title" style="color: var(--gold);">' + escapeHtml(title) + '</div>' +
+              '<p>' + escapeHtml(c.personality) + '</p>' +
+              '<button class="button door-cta open-companion-chat-btn" type="button" data-companion-id="' + c.id + '">Talk to ' + name + '</button>' +
+              '</div></article>';
+          });
+        }
+
+        if (comps.length < maxSlots) {
+          html += '<div style="background: rgba(20, 20, 30, 0.6); border: 1px dashed var(--gold); border-radius: 12px; padding: 20px; text-align: center;">' +
+            '<h3 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 6px;">Create a Custom Companion</h3>' +
+            '<p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 12px;">Build your own private companion with custom traits and full-ratchet trust evolution.</p>' +
+            '<button class="button" type="button" id="open-companion-create-btn">Create Companion (' + comps.length + '/' + maxSlots + ' slots used)</button>' +
+            '</div>';
+        } else {
+          html += '<div style="background: rgba(20, 20, 30, 0.6); border: 1px solid rgba(216, 184, 148, 0.2); border-radius: 12px; padding: 15px; text-align: center;">' +
+            '<p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 8px;">Want another companion? Unlock an extra slot for $4.99 (one-time).</p>' +
+            '<button class="button dark" type="button" id="buy-companion-slot-btn">Purchase Extra Slot ($4.99)</button>' +
+            '</div>';
+        }
+
+        container.innerHTML = html;
+        bindCompanionEvents();
+      } catch (e) {
+        container.innerHTML = '';
+      }
+    }
+
+    function bindCompanionEvents() {
+      const createBtn = document.getElementById('open-companion-create-btn');
+      if (createBtn) {
+        createBtn.addEventListener('click', () => {
+          document.getElementById('companion-modal').classList.add('is-open');
+        });
+      }
+      const buySlotBtn = document.getElementById('buy-companion-slot-btn');
+      if (buySlotBtn) {
+        buySlotBtn.addEventListener('click', async () => {
+          if (!authToken) {
+            openAuthModal();
+            return;
+          }
+          try {
+            const res = await fetch(API_BASE_URL + '/companions/purchase-slot', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            if (res.ok) {
+              alert(data.message || 'Extra slot purchased!');
+              loadCompanions();
+            } else {
+              alert(data.detail || 'Could not purchase slot');
+            }
+          } catch (err) { alert('Purchase failed'); }
+        });
+      }
+    }
+
     async function loadRoster() {
       try {
         const response = await fetch(API_BASE_URL + '/roster');
@@ -1315,9 +1462,69 @@
         // not fall back to the seven in the markup.
         if (!response.ok || !data || !Array.isArray(data.girls)) return;
         renderRoster(data.girls);
+        loadCompanions();
         scrollToDoorHash();
       } catch (error) { /* keep the doors already in the page */ }
     }
+    // Companion Creation Form Submission
+    const companionForm = document.getElementById('companion-create-form');
+    const companionModal = document.getElementById('companion-modal');
+    const companionModalClose = document.getElementById('companion-modal-close');
+    const companionMsg = document.getElementById('companion-msg');
+
+    if (companionModalClose) {
+      companionModalClose.addEventListener('click', () => {
+        companionModal.classList.remove('is-open');
+      });
+    }
+
+    if (companionForm) {
+      companionForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!authToken) {
+          openAuthModal();
+          return;
+        }
+        companionMsg.textContent = 'Creating companion...';
+        companionMsg.style.color = 'var(--gold)';
+
+        const body = {
+          first_name: document.getElementById('comp-name').value.trim(),
+          looks: document.getElementById('comp-looks').value.trim(),
+          personality: document.getElementById('comp-personality').value.trim(),
+          backstory: document.getElementById('comp-backstory').value.trim(),
+          pet_peeves: document.getElementById('comp-peeves').value.trim(),
+          non_negotiables: document.getElementById('comp-nonneg').value.trim(),
+          defense: document.getElementById('comp-defense').value.trim(),
+        };
+
+        try {
+          const res = await fetch(API_BASE_URL + '/companions/create', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          const data = await res.json();
+          if (res.ok) {
+            companionMsg.textContent = 'Companion created successfully!';
+            companionMsg.style.color = '#73d13d';
+            companionForm.reset();
+            setTimeout(() => {
+              companionModal.classList.remove('is-open');
+              companionMsg.textContent = '';
+              loadCompanions();
+            }, 1000);
+          } else {
+            companionMsg.textContent = data.detail || 'Could not create companion.';
+            companionMsg.style.color = '#ff4d4f';
+          }
+        } catch (err) {
+          companionMsg.textContent = 'Creation failed. Please try again.';
+          companionMsg.style.color = '#ff4d4f';
+        }
+      });
+    }
+
     // Deep links from the area pages (index.html#door-<girl>): the roster
     // renders after the fetch, so scroll once the cards exist.
     function scrollToDoorHash() {
@@ -1360,11 +1567,112 @@
         auditStatus = { free_audits_left: data.free_audits_left, audit_credits: data.audit_credits, audit_price_usd: data.audit_price_usd };
       } catch (error) { /* keep whatever is shown */ }
     }
+    let currentCompanionId = null;
+
     // Delegated so cards rendered from /roster are clickable too.
     doorsGrid.addEventListener('click', (event) => {
       const card = event.target.closest('.door-card[data-girl]');
       if (card) openChat(card);
     });
+
+    const companionContainer = document.getElementById('companion-card-container');
+    if (companionContainer) {
+      companionContainer.addEventListener('click', (event) => {
+        const btn = event.target.closest('.open-companion-chat-btn');
+        if (btn) {
+          const compId = btn.dataset.companionId;
+          if (compId) openCompanionChat(parseInt(compId, 10));
+        }
+      });
+    }
+
+    async function openCompanionChat(companionId) {
+      if (!isLoggedIn()) { openAuth('signup', 'Create a free account to talk to your companion.'); return; }
+      abortStreamAndResync();
+      currentGirl = null;
+      currentCompanionId = companionId;
+
+      const headers = authHeaders();
+      try {
+        const res = await fetch(API_BASE_URL + '/companions/' + companionId, { headers });
+        if (!res.ok) { alert('Could not load companion'); return; }
+        const data = await res.json();
+        const comp = data.companion;
+
+        // HOME header view if married
+        const playerDisplayName = 'Player';
+        const titleText = comp.is_married ? ('HOME: ' + playerDisplayName + ' & ' + comp.first_name) : 'Your Custom Companion';
+        document.getElementById('chat-name').textContent = comp.first_name;
+        document.getElementById('chat-title').textContent = titleText;
+
+        const avatar = document.getElementById('chat-avatar');
+        avatar.classList.remove('is-broken');
+        avatar.src = comp.portrait_url ? (comp.portrait_url.startsWith('data:') ? comp.portrait_url : 'data:image/png;base64,' + comp.portrait_url) : '';
+        avatar.alt = comp.first_name;
+
+        // Action buttons
+        const actionsBar = document.getElementById('companion-actions-bar');
+        const proposeBtn = document.getElementById('comp-propose-btn');
+        const rememberBtn = document.getElementById('comp-remember-btn');
+        const photoBtn = document.getElementById('chat-photo-btn');
+        const auditBtn = document.getElementById('chat-audit-btn');
+
+        if (photoBtn) photoBtn.hidden = true;
+        if (auditBtn) auditBtn.hidden = false;
+        if (actionsBar) actionsBar.hidden = false;
+
+        if (proposeBtn) {
+          proposeBtn.hidden = (comp.milestone < 4 || comp.is_married);
+          proposeBtn.onclick = async () => {
+            if (!confirm('Propose marriage to ' + comp.first_name + '?')) return;
+            try {
+              const pRes = await fetch(API_BASE_URL + '/companions/' + companionId + '/propose', { method: 'POST', headers: authHeaders() });
+              const pData = await pRes.json();
+              if (pRes.ok) {
+                alert(pData.message);
+                openCompanionChat(companionId);
+              } else alert(pData.detail || 'Proposal failed');
+            } catch (err) { alert('Failed to propose'); }
+          };
+        }
+
+        if (rememberBtn) {
+          rememberBtn.hidden = (comp.milestone < 5);
+          rememberBtn.onclick = async () => {
+            const name = prompt('Enter a person\'s name for ' + comp.first_name + ' to remember (e.g. Matt):');
+            if (!name) return;
+            const relation = prompt('Enter their relation to you (e.g. my best friend):');
+            if (!relation) return;
+            try {
+              const rRes = await fetch(API_BASE_URL + '/companions/' + companionId + '/remember', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ name, relation })
+              });
+              const rData = await rRes.json();
+              if (rRes.ok) alert(comp.first_name + ' will now remember ' + name + ' (' + relation + ')!');
+              else alert(rData.detail || 'Could not save memory');
+            } catch (err) { alert('Failed to save memory'); }
+          };
+        }
+
+        chatLog.innerHTML = '';
+        receipt = null;
+        lastStampAt = 0;
+        addMessage('note', 'Companion chat initialized. Say hi.');
+
+        chat.classList.add('is-open');
+        lockedScrollY = window.scrollY;
+        document.body.classList.add('chat-locked');
+        appliedVvh = appliedTop = -1;
+        applyChatViewport();
+        chatInput.value = '';
+        growChatInput();
+        chatInput.focus();
+      } catch (e) {
+        alert('Could not open companion chat');
+      }
+    }
     loadRoster().then(refreshState);
     document.getElementById('chat-close').addEventListener('click', closeChat);
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
@@ -1470,11 +1778,39 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     }
     chatAuditBtn.addEventListener('click', () => {
+      if (currentCompanionId) {
+        requestCompanionAudit(currentCompanionId);
+        return;
+      }
       if (!currentGirl || chatAuditBtn.disabled) return;
       closePicSheet();
       if (auditSheet && auditSheet.isConnected) { closeAuditSheet(); return; }
       openAuditSheet();
     });
+
+    async function requestCompanionAudit(companionId) {
+      if (chatAuditBtn.disabled) return;
+      chatAuditBtn.disabled = true;
+      const pending = addMessage('typing', 'compiling psychological audit…');
+      try {
+        const response = await fetch(API_BASE_URL + '/companions/' + companionId + '/audit', {
+          method: 'POST',
+          headers: authHeaders(),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        if (response.ok && data && data.report) {
+          addMessage('audit', data.report);
+        } else {
+          addMessage('error', (data && (data.error || data.detail)) || 'Could not compile audit right now.');
+        }
+      } catch (err) {
+        pending.remove();
+        addMessage('error', 'Could not reach the backend. Check your connection.');
+      } finally {
+        chatAuditBtn.disabled = false;
+      }
+    }
     // A report is paid for and delivered once, so a finished audit is kept per girl
     // (survives closing her room mid-request and a reload) until it has been shown.
     // Keyed to the signed-in session so another account on this browser cannot read it.
@@ -1697,7 +2033,7 @@
     document.getElementById('chat-send').addEventListener('click', sendChatMessage);
     async function sendChatMessage() {
       const message = chatInput.value.trim();
-      if (!message || sending || !currentGirl) return;
+      if (!message || sending || (!currentGirl && !currentCompanionId)) return;
 
       sending = true;
       chatSend.disabled = true;
@@ -1706,6 +2042,32 @@
       addStamp('Today');
       addMessage('me', message);
       const typing = addMessage('typing', 'typing…');
+
+      if (currentCompanionId) {
+        try {
+          const res = await fetch(API_BASE_URL + '/companions/' + currentCompanionId + '/chat', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ message })
+          });
+          typing.remove();
+          const data = await res.json();
+          if (res.ok) {
+            addMessage('her', data.reply);
+            if (typeof data.remaining === 'number') showRemaining(data.remaining);
+          } else {
+            addMessage('error', data.detail || 'Companion did not answer.');
+          }
+        } catch (err) {
+          typing.remove();
+          addMessage('error', 'Could not reach companion. Try again.');
+        } finally {
+          sending = false;
+          chatSend.disabled = false;
+          chatInput.focus();
+        }
+        return;
+      }
 
       try {
         if (!streamSupported || !(await streamReply(message, typing))) {
