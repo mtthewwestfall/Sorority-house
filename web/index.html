@@ -203,6 +203,11 @@
 
     .merch { background: rgba(12, 8, 24, .74); }
     .merch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 900px; margin: 0 auto; }
+    .audit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 900px; margin: 0 auto; }
+    .audit-card { overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: var(--shadow); }
+    .audit-card img { width: 100%; display: block; }
+    .audit-card figcaption { padding: 20px 24px 24px; color: var(--muted); }
+    .audit-card figcaption strong { color: var(--white); }
     .merch-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease; }
     .merch-card:hover { transform: translateY(-6px); border-color: rgba(46,157,75,.66); }
     .merch-card img { width: 100%; aspect-ratio: 1 / 1; display: block; object-fit: cover; background: rgba(9,7,17,.6); }
@@ -365,7 +370,7 @@
       nav a:not(.nav-cta) { display: none; }
       .hero { min-height: 720px; }
       section { padding: 76px 0; }
-      .doors, .plan-grid, .extras, .merch-grid { grid-template-columns: 1fr; }
+      .doors, .plan-grid, .extras, .merch-grid, .audit-grid { grid-template-columns: 1fr; }
       .door-card { min-height: auto; }
       .door-art { height: 300px; }
       .hallway { min-height: 330px; }
@@ -523,6 +528,16 @@
           <article class="step"><div class="number">01</div><h3>Talk</h3><p>Every conversation is real — they remember what you said.</p></article>
           <article class="step"><div class="number">02</div><h3>Earn</h3><p>Trust takes distinct real days. No shortcuts, no pay-to-skip.</p></article>
           <article class="step"><div class="number">03</div><h3>Learn</h3><p>Psychological audits show you exactly where you stand — and how to communicate better.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="audits" class="audits">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">Psychological audits</p><h2>No flattery. Just the truth.</h2><p>Every audit is traced to your actual words — how she feels about you, what you're doing wrong, and how to earn her trust. Real audits, from today.</p></div>
+        <div class="audit-grid">
+          <figure class="audit-card"><img src="assets/audit-zoe.jpg" alt="Zoe's psychological audit" loading="lazy"><figcaption><strong>Zoe</strong> — she quoted his exact insult back at him.</figcaption></figure>
+          <figure class="audit-card"><img src="assets/audit-dakota.jpg" alt="Dakota's psychological audit" loading="lazy"><figcaption><strong>Dakota</strong> — she caught the crack in her own guard.</figcaption></figure>
         </div>
       </div>
     </section>
