@@ -347,6 +347,26 @@ ROSTER_SEED = [
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
     ("veronica", "freshman",  70, "assets/veronica.webp?v=2",
      "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
+    ("matt",     "freshman",  80, "assets/matt.jpg",
+     "Sheriff of Maple Hollow. Fixes your taillight instead of writing the ticket; carries the town's weight quietly."),
+    ("dean",     "freshman",  90, "assets/dean.jpg",
+     "The town doctor. The man Maple Hollow trusts with its worst days — calm under pressure, kind when it counts."),
+    ("ty",       "freshman", 100, "assets/ty.jpg",
+     "Hardware store owner. The young man who can find anything in the store — handy, honest, easy to talk to."),
+    ("billy",    "freshman", 110, "assets/billy.jpg",
+     "Diner cook. The man behind the grill who never lets a plate go out wrong — gruff, loyal, softer than he looks."),
+    ("kristen",  "freshman", 120, "assets/kristen.jpg",
+     "The town veterinarian. The woman the animals trust first — gentle hands, sharp eyes, quiet confidence."),
+    ("ryan",     "freshman", 130, "assets/ryan.jpg",
+     "Town lawyer. The man the town tells the truth to — sharp, discreet, harder to read than he looks."),
+    ("darwin",   "freshman", 140, "assets/darwin.jpg",
+     "The town librarian. Keeper of the quietest room in Maple Hollow — remembers every book and every borrower."),
+    ("jordan",   "freshman", 150, "assets/jordan.jpg",
+     "Deputy sheriff. The law's youngest true believer — earnest, brave, and still proving herself."),
+    ("mia",      "freshman", 160, "assets/mia.jpg",
+     "News reporter. The woman who knows everything first — curious, quick, always chasing the real story."),
+    ("anna",     "freshman", 170, "assets/anna.jpg",
+     "EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together."),
 ]
 
 # Fallback personas used only until you seed full docs via /admin/persona.
@@ -360,6 +380,16 @@ DEFAULT_PERSONAS = {
     "sasha":    ("Sasha",    "The wildcard",   "Sharp, composed, impossible to impress with a performance. Direct; wants to be known, not conquered."),
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
     "veronica": ("Veronica", "The host",       "The town clerk who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
+    "matt":     ("Matt",     "The sheriff",    "Sheriff of Maple Hollow, 27. Quietly carries the town's emergencies; steadiness is identity, not a tactic."),
+    "dean":     ("Dean",     "The doctor",     "Town doctor, 28. Calm under pressure; the man the town trusts with its worst days."),
+    "ty":       ("Ty",       "The hardware guy","Hardware store owner, 23. Handy, honest, easy to talk to; can find anything in the store."),
+    "billy":    ("Billy",    "The grill",      "Diner cook, 25. Gruff and loyal behind the grill; softer than he looks."),
+    "kristen":  ("Kristen",  "The gentle hands","Veterinarian, 26. The woman the animals trust first; gentle hands, sharp eyes."),
+    "ryan":     ("Ryan",     "The truth keeper","Town lawyer, 29. Sharp and discreet; the man the town tells the truth to."),
+    "darwin":   ("Darwin",   "The quiet room", "Librarian, 29. Keeper of the quietest room in town; remembers every book and borrower."),
+    "jordan":   ("Jordan",   "The true believer","Deputy sheriff, 24. The law's youngest true believer; earnest, brave, still proving herself."),
+    "mia":      ("Mia",      "The first to know","News reporter, 23. Curious and quick; the woman who knows everything first."),
+    "anna":     ("Anna",     "The steady hands","EMT and nurse, 23. The woman who doesn't flinch; steady hands, steady heart."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
@@ -883,6 +913,20 @@ def _lift_tier_walls(cur):
         cur.execute("UPDATE personas SET min_tier = %s WHERE girl = %s", (min_tier, girl))
 
 
+def _character_file_text(girl):
+    """Full approved character file for a resident, shipped in characters/.
+
+    Used as the starting persona for newly seeded rows only; a row that already
+    exists is never rewritten, so the admin console keeps owning the live copy.
+    """
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "characters", girl + ".md")) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
 def _seed_roster(cur, backfill=False):
     """Put the seven original sisters in the table so the roster has a starting point.
     A row that already exists is never rewritten: the seed is a floor, not the truth,
@@ -891,12 +935,13 @@ def _seed_roster(cur, backfill=False):
     so a door the owner deliberately saved blank stays blank."""
     for girl, min_tier, order, avatar, blurb in ROSTER_SEED:
         name, title, fallback = DEFAULT_PERSONAS[girl]
+        persona_text = _character_file_text(girl) or fallback
         cur.execute("""
             INSERT INTO personas (girl, name, door_title, persona,
                                   min_tier, sort_order, avatar_url, blurb)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (girl) DO NOTHING
-        """, (girl, name, title, fallback, min_tier, order, avatar, blurb))
+        """, (girl, name, title, persona_text, min_tier, order, avatar, blurb))
         if backfill:
             cur.execute("""
                 UPDATE personas SET min_tier = %s, sort_order = %s,
