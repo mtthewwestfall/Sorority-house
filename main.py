@@ -1314,6 +1314,17 @@ def free_audits_left(user):
 # ---------------------------------------------------------------------------
 # LAYER 2 helpers — the rolling per-girl memory summary
 # ---------------------------------------------------------------------------
+def get_relationships_for_user(user_id):
+    """Fetch all existing relationship records for a user in a single query."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM relationships WHERE user_id=%s", (user_id,))
+            return {r["girl"]: r for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+
 def get_relationship(user_id, girl):
     conn = db()
     try:
@@ -3148,11 +3159,15 @@ def public_roster():
 def state(user=Depends(current_user)):
     house = roster()
     doors = open_doors(user["user_id"], user["tier"], house)
+    # Bolt Optimization: Fetch all relationships in a single DB query instead of querying in a loop
+    user_rels = get_relationships_for_user(user["user_id"])
     girls = {}
     for row in house:
         door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
         if door["open"]:
-            rel = get_relationship(user["user_id"], row["girl"])
+            rel = user_rels.get(row["girl"])
+            if rel is None:
+                rel = get_relationship(user["user_id"], row["girl"])
             band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
             girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
                                   "kept": len(rel.get("pinned_kept") or [])}
