@@ -16,17 +16,17 @@
   <script src="https://api.affitor.com/js/affitor-tracker.js" data-affitor-program-id="1083"></script>
   <style>
     :root {
-      --ink: #D9BE93;
-      --panel: rgba(247, 238, 220, .94);
-      --panel-2: rgba(238, 224, 196, .92);
-      --line: rgba(122, 90, 58, .28);
-      --white: #2E2417;
-      --muted: #7C6B57;
-      --gold: #277A3D;
-      --pink: #6F4B2A;
-      --violet: #6F4B2A;
+      --ink: #1E4B2D;
+      --panel: rgba(217, 190, 147, .96);
+      --panel-2: rgba(206, 177, 131, .94);
+      --line: rgba(217, 190, 147, .30);
+      --white: #F7EEDC;
+      --muted: #C9B48C;
+      --gold: #D9BE93;
+      --pink: #D9BE93;
+      --violet: #D9BE93;
       --blue: #273b79;
-      --shadow: 0 22px 70px rgba(90,64,35,.22);
+      --shadow: 0 22px 70px rgba(8, 28, 16, .38);
     }
 
     * { box-sizing: border-box; }
@@ -108,7 +108,7 @@
     .topbar {
       position: fixed; z-index: 20; top: 0; left: 0; right: 0;
       padding: 16px 0;
-      background: linear-gradient(180deg, rgba(217,190,147,.96), rgba(217,190,147,.12));
+      background: linear-gradient(180deg, rgba(30,75,45,.96), rgba(30,75,45,.10));
       backdrop-filter: blur(9px);
     }
     .topbar .inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
@@ -248,7 +248,7 @@
     .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
     .footer-links { display: flex; gap: 18px; }
     .footer-links a { color: var(--muted); text-decoration: none; }
-    .footer-links a:hover { color: #2E2417; }
+    .footer-links a:hover { color: #F7EEDC; }
 
     .ai-note { color: rgba(124,107,87,.9); font-size: .78rem; letter-spacing: .04em; }
     .hero .ai-note { margin: 26px 0 0; }
@@ -413,14 +413,6 @@
       body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
     }
   
-    /* ===== Alternating scheme: sandalwood bg -> green surfaces -> sandalwood text ===== */
-    .button { background: #277A3D; color: #F7EEDC; box-shadow: 0 12px 28px rgba(39,122,61,.30); }
-    .button.hero-cta { background: #277A3D; color: #F7EEDC; box-shadow: 0 12px 28px rgba(39,122,61,.35); }
-    .hall-card, .founders-coupon, .step, .plan, .profile-card, .trial-banner,
-    .install-bar, .audit-card, .merch-card, .photo-card, .auth-panel {
-      background: #277A3D; border-color: rgba(247,238,220,.30); color: #F7EEDC;
-      --white: #F7EEDC; --muted: #EBD9B4; --line: rgba(247,238,220,.30);
-      --pink: #F7EEDC; --gold: #EBD9B4;
     }
     .hall-card .button, .founders-coupon .button, .step .button, .plan .button,
     .profile-card .button, .trial-banner .button, .install-bar .button,
@@ -431,6 +423,25 @@
     .auth-panel input, .auth-panel textarea, .auth-panel select,
     .merch-card select, .merch-card input { color: #2E2417; }
     .sandalwood-text { color: #277A3D; }
+    
+    /* ===== Forest scheme: green bg -> sandalwood surfaces -> dark green text ===== */
+    .button { background: #D9BE93; color: #17452A; box-shadow: 0 12px 28px rgba(8,28,16,.30); }
+    .button.hero-cta { background: #D9BE93; color: #17452A; box-shadow: 0 12px 28px rgba(8,28,16,.35); }
+    .door-card, .founders-coupon, .step, .plan, .profile-card, .trial-banner,
+    .install-bar, .audit-card, .merch-card, .auth-panel {
+      background: #D9BE93; border-color: rgba(23,69,42,.32); color: #17452A;
+      --white: #17452A; --muted: #2E5A3A; --line: rgba(23,69,42,.32);
+      --pink: #17452A; --gold: #17452A;
+    }
+    .door-card .button, .founders-coupon .button, .step .button, .plan .button,
+    .profile-card .button, .trial-banner .button, .install-bar .button,
+    .audit-card .button, .merch-card .button, .auth-panel .button {
+      background: #17452A; color: #D9BE93; box-shadow: none;
+    }
+    .founders-coupon .coupon-code { background: #17452A; color: #D9BE93; }
+    .auth-panel input, .auth-panel textarea, .auth-panel select,
+    .merch-card select, .merch-card input { color: #17452A; }
+    .sandalwood-text { color: #D9BE93; }
     </style>
 </head>
 <body>
