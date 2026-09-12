@@ -1502,6 +1502,11 @@
         companionModal.classList.remove('is-open');
       });
     }
+    if (companionModal) {
+      companionModal.addEventListener('click', (e) => {
+        if (e.target === companionModal) companionModal.classList.remove('is-open');
+      });
+    }
 
     if (companionForm) {
       companionForm.addEventListener('submit', async (e) => {
