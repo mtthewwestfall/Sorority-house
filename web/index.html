@@ -792,6 +792,7 @@
     function closeAvatarSetup() { avatarSetupBox.classList.remove('is-open'); }
     function skipAvatarSetup() {
       if (pendingAvatarEmail) markAvatarSkipped(pendingAvatarEmail);
+      try { fetch(API_BASE_URL + '/avatar/skip', { method: 'POST', headers: authHeaders() }); } catch (_) {}
       closeAvatarSetup();
     }
     // After any successful sign-in: one-time avatar prompt for users without one.
@@ -801,6 +802,7 @@
       if (pendingAvatarEmail && avatarSkipped(pendingAvatarEmail)) return;
       const a = await fetchMyAvatar();
       refreshAvatarThumb();
+      if (a && a.avatar_skipped) return;
       if (a && !a.has_avatar) openAvatarSetup();
     }
     async function generateAvatar(desc, msgFn, btn) {
@@ -816,7 +818,8 @@
           msgFn((data && (data.detail || data.error)) || 'Could not paint it. Try again.', 'error');
           return null;
         }
-        myAvatar = { has_avatar: true, mime: data.mime, image_b64: data.image_b64, disclosure: data.disclosure };
+        myAvatar = { has_avatar: true, mime: data.mime, image_b64: data.image_b64, disclosure: data.disclosure,
+                       avatar_contest: !!(myAvatar && myAvatar.avatar_contest) };
         refreshAvatarThumb();
         msgFn('');
         return myAvatar;
@@ -853,6 +856,7 @@
       document.getElementById('profile-avatar-wrap').classList.toggle('auth-hidden', !has);
       document.getElementById('profile-no-avatar').classList.toggle('auth-hidden', has);
       if (has) document.getElementById('profile-avatar-img').src = avatarDataUrl(a);
+      document.getElementById('contest-toggle').checked = !!(a && a.avatar_contest);
       profileBox.classList.add('is-open');
     }
     function closeProfile() { profileBox.classList.remove('is-open'); }

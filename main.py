@@ -707,6 +707,7 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_prompt TEXT NOT NULL DEFAULT '';
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_contest BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at TIMESTAMPTZ;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_skipped BOOLEAN NOT NULL DEFAULT FALSE;
                 -- If you already had the old users table, uncomment to add the
                 -- new audit columns without dropping anything:
                 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS audit_credits INTEGER NOT NULL DEFAULT 0;
@@ -3019,16 +3020,34 @@ def my_avatar(user=Depends(current_user)):
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT avatar_b64, avatar_mime FROM users WHERE user_id=%s",
+            cur.execute("SELECT avatar_b64, avatar_mime, avatar_contest, avatar_skipped FROM users WHERE user_id=%s",
                         (user["user_id"],))
             row = cur.fetchone() or {}
     finally:
         conn.close()
     b64 = row.get("avatar_b64") or ""
     if not b64:
-        return {"has_avatar": False}
+        return {"has_avatar": False,
+                "avatar_contest": bool(row.get("avatar_contest")),
+                "avatar_skipped": bool(row.get("avatar_skipped"))}
     return {"has_avatar": True, "mime": row.get("avatar_mime") or "image/png",
-            "image_b64": b64, "disclosure": "AI-generated image"}
+            "image_b64": b64, "disclosure": "AI-generated image",
+            "avatar_contest": bool(row.get("avatar_contest")),
+            "avatar_skipped": bool(row.get("avatar_skipped"))}
+
+
+@app.post("/avatar/skip")
+def skip_avatar_setup(user=Depends(current_user)):
+    """Durable skip: the player chose not to make an avatar right now."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET avatar_skipped=TRUE WHERE user_id=%s",
+                        (user["user_id"],))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
 
 
 @app.post("/avatar/contest")
