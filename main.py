@@ -345,8 +345,8 @@ ROSTER_SEED = [
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
     ("piper",    "freshman",  60, "assets/piper.jpg",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
-    ("veronica", "senior",    70, "assets/veronica.webp",
-     "The social chair who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
+    ("veronica", "freshman",  70, "assets/veronica.webp",
+     "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
 ]
 
 # Fallback personas used only until you seed full docs via /admin/persona.
@@ -359,7 +359,7 @@ DEFAULT_PERSONAS = {
     "brittany": ("Brittany", "The sweet trap", "Warm, charming, everyone's favorite. Her openness is armor; the real her lives behind the sunshine she gives everyone."),
     "sasha":    ("Sasha",    "The wildcard",   "Sharp, composed, impossible to impress with a performance. Direct; wants to be known, not conquered."),
     "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
-    "veronica": ("Veronica", "The host",       "Senior exclusive. The town clerk who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
+    "veronica": ("Veronica", "The host",       "The town clerk who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
@@ -834,6 +834,8 @@ def init_db():
                 INSERT INTO house_rules (key, value) VALUES ('doors_locked', '0')
                 ON CONFLICT (key) DO UPDATE SET value = '0'
             """)
+            # Veronica is free for everyone now: no tier wall.
+            cur.execute("UPDATE personas SET min_tier = 'freshman' WHERE girl = 'veronica'")
             # Doors moved from tier-gated to progression-gated. The marker column
             # makes the tier-wall lift run once, so the console owns min_tier after.
             cur.execute("""
