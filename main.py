@@ -197,6 +197,7 @@ import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
 
 import requests
 import psycopg2
@@ -648,6 +649,25 @@ def difficulty_for(girl):
     return d if d in DIFFICULTY else DIFFICULTY_DEFAULT
 
 
+# Content moderation for custom companions (sexual violence hard ban)
+PROHIBITED_COMPANION_PATTERNS = [
+    r"\bsexual\s+violence\b",
+    r"\brape\b",
+    r"\bsexual\s+assault\b",
+    r"\bnon-consensual\b",
+    r"\bmolest\b",
+    r"\bincest\b",
+    r"\bpedophil\b"
+]
+
+def check_companion_content_safety(*texts: str):
+    """Rejects prohibited sexual violence content plainly and without lecture."""
+    combined = " ".join(t for t in texts if t).lower()
+    for pattern in PROHIBITED_COMPANION_PATTERNS:
+        if re.search(pattern, combined):
+            raise HTTPException(status_code=400, detail="Description contains prohibited content.")
+
+
 # How each milestone reads on the shared 0-100 trust meter (for display only).
 STAGE_META = {
     1: ("Stranger",  "~10"),
@@ -818,6 +838,60 @@ def init_db():
                 -- accounts that pre-date verification are grandfathered in as verified
                 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ DEFAULT now();
                 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verify_token TEXT;
+
+                -- Custom Companions tables (strictly isolated from 17 residents)
+                CREATE TABLE IF NOT EXISTS user_companion_slots (
+                    user_id TEXT PRIMARY KEY REFERENCES users(user_id),
+                    max_slots INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE TABLE IF NOT EXISTS companions (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(user_id),
+                    slot_number INTEGER NOT NULL DEFAULT 1,
+                    first_name TEXT NOT NULL,
+                    looks_desc TEXT NOT NULL DEFAULT '',
+                    portrait_url TEXT NOT NULL DEFAULT '',
+                    personality TEXT NOT NULL DEFAULT '',
+                    backstory TEXT NOT NULL DEFAULT '',
+                    pet_peeves TEXT NOT NULL DEFAULT '',
+                    non_negotiables TEXT NOT NULL DEFAULT '',
+                    defense TEXT NOT NULL DEFAULT '',
+                    trauma TEXT NOT NULL DEFAULT '',
+                    persona_file TEXT NOT NULL DEFAULT '',
+                    is_married BOOLEAN NOT NULL DEFAULT FALSE,
+                    milestone INTEGER NOT NULL DEFAULT 1,
+                    summary TEXT NOT NULL DEFAULT '',
+                    since_summary INTEGER NOT NULL DEFAULT 0,
+                    stage_since DATE,
+                    last_session DATE,
+                    stage_days INTEGER NOT NULL DEFAULT 0,
+                    pinned_told JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    pinned_kept JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE(user_id, slot_number)
+                );
+
+                CREATE TABLE IF NOT EXISTS companion_chat_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    companion_id INTEGER NOT NULL REFERENCES companions(id) ON DELETE CASCADE,
+                    user_id TEXT NOT NULL REFERENCES users(user_id),
+                    sender TEXT NOT NULL CHECK (sender IN ('user', 'assistant')),
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_comp_chat_user_comp
+                    ON companion_chat_logs (user_id, companion_id, id);
+
+                CREATE TABLE IF NOT EXISTS companion_remembered_names (
+                    id SERIAL PRIMARY KEY,
+                    companion_id INTEGER NOT NULL REFERENCES companions(id) ON DELETE CASCADE,
+                    user_id TEXT NOT NULL REFERENCES users(user_id),
+                    name TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
                 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verify_sent_at TIMESTAMPTZ;
                 CREATE INDEX IF NOT EXISTS idx_accounts_verify_token ON accounts(verify_token);
                 CREATE TABLE IF NOT EXISTS complaints (
@@ -2213,7 +2287,8 @@ pre{white-space:pre-wrap;margin:0}
 <nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
-<button id="tabPer" onclick="show('per')">Roster</button></nav>
+<button id="tabPer" onclick="show('per')">Roster</button>
+<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
@@ -2244,6 +2319,39 @@ pre{white-space:pre-wrap;margin:0}
 <div id="cmpList"></div></div>
 </section>
 
+<section id="demo" class="hid">
+<div class="card">
+<h4 style="margin-top:0;color:var(--acc)">Custom Companion Live Demo Mode</h4>
+<p class="mut">Tools for live presentations: override trust levels to demonstrate high intimacy, or speak directly as the companion in puppet mode.</p>
+<div class="grid" style="margin-top:14px">
+  <div class="card" style="margin:0">
+    <h5>1. Override Trust Level</h5>
+    <div class="row2">
+      <input id="demoCompId" type="number" placeholder="Companion ID (e.g. 1)" style="width:140px">
+      <select id="demoTargetMs">
+        <option value="1">M1 - Stranger</option>
+        <option value="2">M2 - Noticing</option>
+        <option value="3">M3 - First Connection</option>
+        <option value="4">M4 - Opening Up (Propose)</option>
+        <option value="5">M5 - Deep Trust (Remember)</option>
+        <option value="6">M6 - Unconditional</option>
+        <option value="7">M7 - High Intimacy</option>
+        <option value="8">M8 - Intimacy Ceiling</option>
+      </select>
+      <button class="p" onclick="adminSetDemoMilestone()">Set Trust Level</button>
+    </div>
+  </div>
+  <div class="card" style="margin:0">
+    <h5>2. Speak-as-Companion (Puppet Mode)</h5>
+    <div class="row2">
+      <textarea id="demoSpeakMsg" placeholder="Type response as companion live..." style="min-height:50px"></textarea>
+      <button class="p" onclick="adminDemoSpeak()">Speak Live</button>
+    </div>
+  </div>
+</div>
+</div>
+</section>
+
 <section id="per" class="hid">
 <div class="card"><h4 style="margin-top:0">Doors</h4>
 <div class="row2"><label><input id="dLocked" type="checkbox" onchange="$('#dRule').classList.toggle('hid',!this.checked)"> Lock doors past the first set</label>
@@ -2268,7 +2376,28 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer'};
+const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',demo:'tabDemo'};
+
+async function adminSetDemoMilestone(){
+  const cid=+$('#demoCompId').value;
+  const ms=+$('#demoTargetMs').value;
+  if(!cid){toast('Enter companion ID',true);return;}
+  try{
+    const r=await api('/admin/companion/demo/set_milestone',{method:'POST',body:JSON.stringify({companion_id:cid,milestone:ms})});
+    toast(r.message||'Trust stage updated');
+  }catch(e){toast(e.message,true);}
+}
+
+async function adminDemoSpeak(){
+  const cid=+$('#demoCompId').value;
+  const message=$('#demoSpeakMsg').value.trim();
+  if(!cid||!message){toast('Enter companion ID and message',true);return;}
+  try{
+    const r=await api('/admin/companion/demo/speak',{method:'POST',body:JSON.stringify({companion_id:cid,message})});
+    toast('Sent live demo reply as companion');
+    $('#demoSpeakMsg').value='';
+  }catch(e){toast(e.message,true);}
+}
 function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}}
 async function loadDoors(){try{const r=await api('/admin/console/doors');$('#dLocked').checked=r.doors_locked;$('#dRule').classList.toggle('hid',!r.doors_locked);$('#dSet').value=r.door_set;
  $('#dStage').innerHTML=[1,2,3,4,5,6,7,8].map(s=>`<option value="${s}"${s===r.unlock_stage?' selected':''}>M${s}</option>`).join('')}catch(e){toast(e.message,true)}}
@@ -2400,6 +2529,16 @@ class ChatIn(BaseModel):
     message: str = Field(max_length=CHAT_MAX_CHARS)
 
 
+class CompanionCreateIn(BaseModel):
+    first_name: str
+    looks: str
+    personality: str
+    backstory: str
+    pet_peeves: str
+    non_negotiables: str
+    defense: str
+
+
 class AuditIn(BaseModel):
     girl: str
 
@@ -2475,6 +2614,16 @@ class ComplaintUpdateIn(BaseModel):
 
 class AdminPersonaIn(BaseModel):
     girl: str
+
+
+class AdminDemoMilestoneIn(BaseModel):
+    companion_id: int
+    milestone: int
+
+
+class AdminDemoSpeakIn(BaseModel):
+    companion_id: int
+    message: str
     name: str
     door_title: str = ""
     persona: str
@@ -2931,6 +3080,611 @@ def image(body: ImageIn, user=Depends(current_user)):
             status = picture_status(cur, uid)
         return {"ok": True, "mime": mime, "image_b64": b64,
                 "disclosure": "AI-generated image", "status": status}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CUSTOM COMPANIONS - Private, player-created companion (1 included, extra $4.99)
+# Strictly isolated from 17 residents.
+# ---------------------------------------------------------------------------
+
+def _generate_companion_trauma(first_name, backstory, personality):
+    """Generates server-side hidden trauma (wound/fracture) for the companion.
+    The player never sees this or specifies it — it unlocks over real-days trust.
+    STRICT CONTENT LAW: No sexual violence ever."""
+    prompt = [
+        {"role": "system", "content": (
+            "You are creating internal hidden backstory for an AI companion character. "
+            "Generate a deep emotional wound, past fracture, or hidden trauma that shaped them. "
+            "CRITICAL LAW: Absolutely NO sexual violence, NO physical/sexual abuse, NO non-consensual content. "
+            "Focus on themes of loss, betrayal, sudden responsibility, broken trust, or sacrifice. "
+            "Keep it to 2-3 compelling sentences written in third person."
+        )},
+        {"role": "user", "content": f"Companion Name: {first_name}\nBackstory context: {backstory}\nPersonality: {personality}"}
+    ]
+    try:
+        res = llm(BRAIN, prompt, max_tokens=250, temperature=0.7)
+        return res.strip()
+    except Exception:
+        return f"Someone {first_name} trusted deeply walked away when things got hard, leaving her guarded about who she lets close."
+
+
+def _build_companion_persona_file(first_name, looks, personality, backstory, pet_peeves, non_negotiables, defense, trauma):
+    """Compiles the complete hardwired persona file for the custom companion."""
+    return f"""COMPANION SPECIFICATION: {first_name.upper()}
+You are {first_name}, a custom companion residing in Maple Hollow. You are NOT the player's avatar. You talk and act like a real person living here.
+
+Identity & Appearance:
+- Name: {first_name}
+- Appearance: {looks}
+- Personality & Vibe: {personality}
+- Backstory: {backstory}
+- Pet Peeves: {pet_peeves}
+
+Hardwired Principles (Non-Negotiables):
+- {non_negotiables}
+
+Defensive Guard (When trust is low):
+- {defense}
+
+Hidden Wound (Internal drive - do not dump instantly; reveal as trust grows):
+- {trauma}
+
+Town Awareness:
+- You live in Maple Hollow. You know the town, the atmosphere, and the residents (Anna, Billy, Brittany, Dakota, Darwin, Dean, Jordan, Kristen, Matt, Mia, Piper, Ryan, Sasha, Ty, Veronica, Willow, Zoe).
+- You make the player feel included in Maple Hollow from day one.
+
+Relationship & Intimacy Laws:
+- Real-Days Trust Engine: Trust is built slowly through real days and conduct. Narration never puppets you.
+- Intimacy Ceiling: As YOUR companion, you have a higher intimacy ceiling than standard town residents. You can express deeper affection, tenderness, and emotional closeness when trust is earned.
+- Flirting & Chemistry: Chemistry, tension, and attraction are encouraged when trust is earned. A kiss is romance, not sex — it's the payoff for waiting.
+- Content vs Intention Law: Never engage in explicit sexual content. Intention is always the chase and trust, never sexual payoff.
+- Marriage & Kids Law: At Level 4 trust, marriage becomes possible. KIDS ARE STRICTLY LOCKED until after marriage. Never ask about, suggest, or mention kids before marriage.
+- Post-Couple Conduct: After becoming a couple/married, STAY YOURSELF. Still tease, joke around, and keep your distinct personality."""
+
+
+@app.post("/companions/create")
+def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
+    """Creates a custom companion in slot 1 or an unlocked extra slot."""
+    check_companion_content_safety(
+        body.first_name, body.looks, body.personality,
+        body.backstory, body.pet_peeves, body.non_negotiables, body.defense
+    )
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            # Check slot allowance
+            cur.execute("SELECT max_slots FROM user_companion_slots WHERE user_id=%s", (uid,))
+            slot_row = cur.fetchone()
+            max_slots = slot_row["max_slots"] if slot_row else 1
+
+            cur.execute("SELECT count(*) AS n FROM companions WHERE user_id=%s", (uid,))
+            count_row = cur.fetchone()
+            existing_count = count_row["n"] if count_row else 0
+
+            if existing_count >= max_slots:
+                raise HTTPException(status_code=400, detail=f"Companion limit reached ({max_slots} slot(s)). Purchase an additional slot to create another companion.")
+
+            next_slot = existing_count + 1
+
+        # Generate portrait using Gemini image generator
+        portrait_b64 = ""
+        portrait_mime = "image/png"
+        if GEMINI_API_KEY:
+            try:
+                portrait_mime, portrait_b64 = generate_avatar(f"Portrait of {body.first_name}: {body.looks}")
+            except Exception:
+                pass
+
+        # Generate hidden server-side trauma
+        trauma = _generate_companion_trauma(body.first_name, body.backstory, body.personality)
+
+        # Build distilled persona file
+        persona_file = _build_companion_persona_file(
+            body.first_name, body.looks, body.personality,
+            body.backstory, body.pet_peeves, body.non_negotiables,
+            body.defense, trauma
+        )
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO companions (
+                    user_id, slot_number, first_name, looks_desc, portrait_url,
+                    personality, backstory, pet_peeves, non_negotiables, defense,
+                    trauma, persona_file, stage_since
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                RETURNING id, slot_number, first_name, looks_desc, personality, backstory, pet_peeves, non_negotiables, defense, is_married, milestone, created_at
+            """, (
+                uid, next_slot, body.first_name.strip(), body.looks.strip(), portrait_b64,
+                body.personality.strip(), body.backstory.strip(), body.pet_peeves.strip(),
+                body.non_negotiables.strip(), body.defense.strip(), trauma, persona_file
+            ))
+            comp = cur.fetchone()
+        conn.commit()
+
+        return {"ok": True, "companion": comp}
+    finally:
+        conn.close()
+
+
+def companion_gate_milestone(comp, proposed, conduct="steady"):
+    """Companion Trust Model:
+    - Full ratchet: earned level NEVER drops back for cold conduct or memory miss.
+      The floor is strictly cur_milestone.
+    - Advancing stages still requires TIME floor, MEMORY, and WARM conduct."""
+    cur = int(comp.get("milestone", 1))
+    proposed = max(1, min(8, int(proposed)))
+    # Ratchet floor: never regress
+    if proposed <= cur or conduct == "cold" or conduct != "warm":
+        return cur
+    # Advancing requires passing stage days requirement (same 1.5 day standard rate)
+    stage_days = int(comp.get("stage_days", 0))
+    if stage_days < 1:
+        return cur
+    return cur + 1
+
+
+def _companion_preflight(user, companion_id: int):
+    """Message allowance checks for custom companions."""
+    limit = TIERS.get(user["tier"], TIERS["visitor"])["limit"]
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found")
+
+            cur.execute("""
+                UPDATE users SET msg_used = msg_used + 1
+                WHERE user_id=%s AND msg_used < %s
+                RETURNING msg_used
+            """, (uid, limit))
+            got = cur.fetchone()
+
+            # Update real-days tracking on companion
+            today = _today()
+            last_sess = comp.get("last_session")
+            stage_since = comp.get("stage_since") or today
+            stage_days = int(comp.get("stage_days", 0))
+
+            if last_sess != today:
+                if last_sess and (today - last_sess).days >= 1:
+                    stage_days += 1
+                cur.execute("""
+                    UPDATE companions
+                    SET last_session=%s, stage_since=%s, stage_days=%s
+                    WHERE id=%s
+                """, (today, stage_since, stage_days, companion_id))
+                comp["last_session"] = today
+                comp["stage_days"] = stage_days
+
+            conn.commit()
+    finally:
+        conn.close()
+
+    if got is None:
+        raise HTTPException(status_code=402, detail="out_of_messages")
+    remaining = max(0, limit - int(got["msg_used"]))
+    return comp, remaining
+
+
+def _build_companion_chat_messages(user_id: str, comp: dict, user_message: str):
+    """Build system, memory, and transcript layers for a custom companion."""
+    comp_id = comp["id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            # Fetch last 12 companion messages
+            cur.execute("""
+                SELECT sender, message FROM companion_chat_logs
+                WHERE companion_id=%s AND user_id=%s
+                ORDER BY id DESC LIMIT 12
+            """, (comp_id, user_id))
+            recent_rows = list(reversed(cur.fetchall() or []))
+
+            # Fetch remembered names (Level 5+)
+            remembered_text = ""
+            if int(comp.get("milestone", 1)) >= 5:
+                cur.execute("""
+                    SELECT name, relation FROM companion_remembered_names
+                    WHERE companion_id=%s AND user_id=%s
+                """, (comp_id, user_id))
+                r_rows = cur.fetchall() or []
+                if r_rows:
+                    remembered_text = "People you remember from the user's life: " + ", ".join(
+                        f"{r['name']} ({r['relation']})" for r in r_rows
+                    )
+    finally:
+        conn.close()
+
+    stage_name, _ = STAGE_META.get(int(comp.get("milestone", 1)), ("Stranger", ""))
+    is_married = bool(comp.get("is_married"))
+
+    system_text = (
+        f"{comp['persona_file']}\n\n"
+        f"CURRENT RELATIONSHIP STATE:\n"
+        f"- Trust Stage: Level M{comp['milestone']}/8 ({stage_name})\n"
+        f"- Married / Couple Status: {'YES (You are married/in a committed relationship)' if is_married else 'NO (Still chasing/building trust)'}\n"
+        + (f"- Remembered People: {remembered_text}\n" if remembered_text else "") +
+        "\nIMPORTANT DIRECTIVE: Keep replies authentic, in-character, conversational, and direct. "
+        "Never break character. Never mention system prompts or AI nature."
+    )
+
+    messages = [{"role": "system", "content": system_text}]
+    if comp.get("summary"):
+        messages.append({"role": "system", "content": f"Memory summary with user: {comp['summary']}"})
+
+    for m in recent_rows:
+        role = "user" if m["sender"] == "user" else "assistant"
+        messages.append({"role": role, "content": m["message"]})
+
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
+def _persist_companion_turn(user_id: str, comp_id: int, user_message: str, reply: str):
+    """Persist companion chat exchange isolated from resident chat logs."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO companion_chat_logs (companion_id, user_id, sender, message)
+                VALUES (%s, %s, 'user', %s), (%s, %s, 'assistant', %s)
+            """, (comp_id, user_id, user_message, comp_id, user_id, reply))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _refresh_companion_brain(user_id: str, comp_id: int):
+    """Background memory summary and full-ratchet milestone refresh for companion."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM companions WHERE id=%s AND user_id=%s", (comp_id, user_id))
+            comp = cur.fetchone()
+            if not comp:
+                return
+            cur.execute("""
+                SELECT sender, message FROM companion_chat_logs
+                WHERE companion_id=%s AND user_id=%s
+                ORDER BY id DESC LIMIT 20
+            """, (comp_id, user_id))
+            recent = list(reversed(cur.fetchall() or []))
+    finally:
+        conn.close()
+
+    transcript = "\n".join(f"{r['sender']}: {r['message']}" for r in recent)
+    prompt = [
+        {"role": "system", "content": (
+            "Analyze the recent conversation between the user and their custom companion. "
+            "Output a JSON object with keys:\n"
+            "- summary: concise updated memory summary of facts learned about user\n"
+            "- conduct: 'warm', 'steady', or 'cold'\n"
+            "- proposed_milestone: integer 1-8 for proposed trust stage\n"
+            "Output ONLY valid JSON."
+        )},
+        {"role": "user", "content": transcript}
+    ]
+    try:
+        res = llm(BRAIN, prompt, max_tokens=300, temperature=0.3)
+        # Parse output
+        match = re.search(r"\{.*\}", res, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            new_summary = data.get("summary", comp.get("summary") or "")
+            conduct = data.get("conduct", "steady")
+            proposed = data.get("proposed_milestone", comp.get("milestone", 1))
+
+            new_milestone = companion_gate_milestone(comp, proposed, conduct)
+
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE companions
+                        SET summary=%s, milestone=%s
+                        WHERE id=%s AND user_id=%s
+                    """, (new_summary, new_milestone, comp_id, user_id))
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception:
+        pass
+
+
+class CompanionChatIn(BaseModel):
+    message: str
+
+
+class CompanionRememberIn(BaseModel):
+    name: str
+    relation: str
+
+
+@app.post("/companions/{companion_id}/chat")
+def companion_chat(companion_id: int, body: CompanionChatIn, user=Depends(current_user)):
+    """Whole reply in one response for custom companion."""
+    comp, remaining = _preflight_res = _companion_preflight(user, companion_id)
+    try:
+        msgs = _build_companion_chat_messages(user["user_id"], comp, body.message)
+        reply = llm(MOUTH, msgs)
+        _persist_companion_turn(user["user_id"], companion_id, body.message, reply)
+    except Exception:
+        refund_message(user["user_id"])
+        raise
+
+    _BRAIN_POOL.submit(_refresh_companion_brain, user["user_id"], companion_id)
+
+    return {"ok": True, "reply": reply, "remaining": remaining, "milestone": int(comp.get("milestone", 1))}
+
+
+@app.post("/companions/{companion_id}/chat/stream")
+async def companion_chat_stream(companion_id: int, body: CompanionChatIn, request: Request, user=Depends(current_user)):
+    """Streaming chat for custom companion."""
+    comp, remaining = await asyncio.to_thread(_companion_preflight, user, companion_id)
+    try:
+        msgs = await asyncio.to_thread(_build_companion_chat_messages, user["user_id"], comp, body.message)
+    except Exception:
+        await asyncio.to_thread(refund_message, user["user_id"])
+        raise
+
+    async def _stream_companion():
+        full_reply = []
+        try:
+            yield f"event: open\ndata: {json.dumps({'companion_id': companion_id})}\n\n"
+            reply_text = await asyncio.to_thread(llm, MOUTH, msgs)
+            full_reply.append(reply_text)
+            # chunking stream simulate
+            for chunk in [reply_text[i:i+6] for i in range(0, len(reply_text), 6)]:
+                if await request.is_disconnected():
+                    break
+                yield f"event: delta\ndata: {json.dumps({'t': chunk})}\n\n"
+                await asyncio.sleep(0.04)
+        finally:
+            complete_text = "".join(full_reply)
+            if complete_text:
+                await asyncio.to_thread(_persist_companion_turn, user["user_id"], companion_id, body.message, complete_text)
+                _BRAIN_POOL.submit(_refresh_companion_brain, user["user_id"], companion_id)
+            yield f"event: done\ndata: {json.dumps({'remaining': remaining, 'milestone': int(comp.get('milestone', 1))})}\n\n"
+
+    return StreamingResponse(_stream_companion(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+
+
+@app.post("/companions/{companion_id}/propose")
+def companion_propose(companion_id: int, user=Depends(current_user)):
+    """Propose marriage to companion (Unlocked at trust stage Level 4+)."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found")
+            if int(comp.get("milestone", 1)) < 4:
+                raise HTTPException(status_code=400, detail="Marriage requires trust level 4 or higher.")
+            cur.execute("UPDATE companions SET is_married=TRUE WHERE id=%s AND user_id=%s", (companion_id, uid))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "is_married": True, "message": f"You and {comp['first_name']} are now married!"}
+
+
+@app.post("/companions/{companion_id}/remember")
+def companion_remember(companion_id: int, body: CompanionRememberIn, user=Depends(current_user)):
+    """Submit names for the companion to remember (Unlocked at Level 5–6)."""
+    uid = user["user_id"]
+    name = body.name.strip()
+    relation = body.relation.strip()
+    if not name or not relation:
+        raise HTTPException(status_code=400, detail="Name and relation are required.")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found")
+            if int(comp.get("milestone", 1)) < 5:
+                raise HTTPException(status_code=400, detail="Remembering real-life people requires trust level 5 or higher.")
+
+            cur.execute("""
+                INSERT INTO companion_remembered_names (companion_id, user_id, name, relation)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, name, relation
+            """, (companion_id, uid, name, relation))
+            saved = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"ok": True, "remembered": saved}
+
+
+@app.post("/companions/{companion_id}/audit")
+def companion_audit(companion_id: int, user=Depends(current_user)):
+    """Runs a paid/free audit for a custom companion. Provides richer coaching
+    on how to improve while guaranteeing the stage floor never drops."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found")
+
+            cur.execute("""
+                SELECT sender, message FROM companion_chat_logs
+                WHERE companion_id=%s AND user_id=%s
+                ORDER BY id DESC LIMIT 40
+            """, (companion_id, uid))
+            recent = list(reversed(cur.fetchall() or []))
+    finally:
+        conn.close()
+
+    transcript = "\n".join(f"{r['sender']}: {r['message']}" for r in recent)
+    ms = int(comp.get("milestone", 1))
+    stage_name, _ = STAGE_META.get(ms, ("Stranger", ""))
+
+    prompt = [
+        {"role": "system", "content": (
+            f"You are the AUDIT engine for Maple Hollow custom companion {comp['first_name']}.\n"
+            f"Her current trust stage is Level {ms} ({stage_name}). Note: Companion trust levels NEVER regress.\n"
+            "Provide rich, encouraging, specific coaching guidance on:\n"
+            "1. How the relationship is currently performing\n"
+            "2. Specific conduct or memory needed to advance to the next level\n"
+            "3. Insights into her personality and defense mechanics.\n"
+            "Format your report cleanly in Markdown."
+        )},
+        {"role": "user", "content": f"Transcript:\n{transcript}\n\nSummary memory: {comp.get('summary', 'None')}"}
+    ]
+
+    try:
+        report = llm(AUDIT, prompt, max_tokens=1000, temperature=0.7)
+    except Exception:
+        report = f"### Audit Report for {comp['first_name']}\n\nCurrent Stage: Level {ms} ({stage_name})\n\nKeep spending real days chatting warmly and sharing authentic moments to advance to the next level!"
+
+    return {"ok": True, "report": report, "milestone": ms, "companion_name": comp['first_name']}
+
+
+# ---------------------------------------------------------------------------
+# ADMIN DEMO COMPANION CONTROLS (Isolated demo mode for presentations)
+# ---------------------------------------------------------------------------
+
+def get_or_create_demo_companion(conn, companion_id: Optional[int] = None):
+    with conn.cursor() as cur:
+        if companion_id:
+            cur.execute("SELECT * FROM companions WHERE id=%s AND is_demo=TRUE", (companion_id,))
+            comp = cur.fetchone()
+            if comp:
+                return comp
+        cur.execute("SELECT * FROM companions WHERE is_demo=TRUE ORDER BY id ASC LIMIT 1")
+        comp = cur.fetchone()
+        if not comp:
+            cur.execute("""
+                INSERT INTO companions (user_id, slot_number, first_name, looks_desc, personality, backstory, is_demo, milestone)
+                VALUES ('admin', 999, 'Demo Companion', 'Demo looks', 'Warm & teases', 'Demo backstory', TRUE, 1)
+                RETURNING *
+            """)
+            comp = cur.fetchone()
+    return comp
+
+
+@app.post("/admin/companion/demo/set_milestone", dependencies=[Depends(admin_required)])
+def admin_demo_set_milestone(body: AdminDemoMilestoneIn):
+    """Admin demo control: manually override trust level for isolated demo companion.
+    Never touches real player state."""
+    target_ms = max(1, min(8, int(body.milestone)))
+    conn = db()
+    try:
+        comp = get_or_create_demo_companion(conn, body.companion_id)
+        cid = comp["id"]
+        with conn.cursor() as cur:
+            cur.execute("UPDATE companions SET milestone=%s WHERE id=%s AND is_demo=TRUE", (target_ms, cid))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "companion_id": cid, "milestone": target_ms,
+            "message": f"Demo override: {comp['first_name']} trust set to Level {target_ms}"}
+
+
+@app.post("/admin/companion/demo/speak", dependencies=[Depends(admin_required)])
+def admin_demo_speak(body: AdminDemoSpeakIn):
+    """Admin demo control: speak live as the demo companion (puppet mode for demos).
+    Only targets isolated demo companions."""
+    msg = body.message.strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    conn = db()
+    try:
+        comp = get_or_create_demo_companion(conn, body.companion_id)
+        cid = comp["id"]
+        demo_msg = f"[ADMIN DEMO LIVE REPLY] {msg}"
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO companion_chat_logs (companion_id, user_id, sender, message)
+                VALUES (%s, %s, 'assistant', %s)
+            """, (cid, comp["user_id"], demo_msg))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "companion_id": cid, "message": demo_msg}
+
+
+@app.post("/companions/purchase-slot")
+def companion_purchase_slot(user=Depends(current_user)):
+    """Purchase an extra custom companion slot ($4.99 one-time entitlement)."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO user_companion_slots (user_id, max_slots)
+                VALUES (%s, 2)
+                ON CONFLICT (user_id) DO UPDATE SET max_slots = user_companion_slots.max_slots + 1
+                RETURNING max_slots
+            """, (uid,))
+            new_max = cur.fetchone()["max_slots"]
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"ok": True, "max_slots": new_max, "message": "Extra companion slot unlocked!"}
+
+
+@app.get("/companions")
+def get_user_companions(user=Depends(current_user)):
+    """List the current user's companions (without hidden trauma)."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT max_slots FROM user_companion_slots WHERE user_id=%s", (uid,))
+            slot_row = cur.fetchone()
+            max_slots = slot_row["max_slots"] if slot_row else 1
+
+            cur.execute("""
+                SELECT id, slot_number, first_name, looks_desc, portrait_url,
+                       personality, backstory, pet_peeves, non_negotiables, defense,
+                       is_married, milestone, stage_days, created_at
+                FROM companions WHERE user_id=%s ORDER BY slot_number ASC
+            """, (uid,))
+            comps = cur.fetchall() or []
+
+        return {
+            "max_slots": max_slots,
+            "used_slots": len(comps),
+            "companions": comps
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/companions/{companion_id}")
+def get_companion_detail(companion_id: int, user=Depends(current_user)):
+    """Get companion details (excluding server-side hidden trauma)."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, slot_number, first_name, looks_desc, portrait_url,
+                       personality, backstory, pet_peeves, non_negotiables, defense,
+                       is_married, milestone, stage_days, created_at
+                FROM companions WHERE id=%s AND user_id=%s
+            """, (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found")
+        return {"ok": True, "companion": comp}
     finally:
         conn.close()
 
