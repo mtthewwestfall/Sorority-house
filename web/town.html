@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Town Guide — Maple Hollow</title>
+  <meta name="description" content="Four corners of Maple Hollow. Pick your way into town." />
+  <style>
+    :root {
+      --ink: #0b120d;
+      --panel: rgba(18, 30, 22, .82);
+      --line: rgba(216, 184, 148, .24);
+      --white: #fff9ff;
+      --muted: #c7b9ca;
+      --gold: #2E9D4B;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--white); background: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .hero {
+      min-height: 44vh; display: flex; align-items: flex-end;
+      background: linear-gradient(180deg, rgba(0,0,0,.15) 0%, rgba(11,18,13,.94) 100%), url('assets/bg-the-pines.jpg') center/cover;
+      padding: 90px 24px 44px;
+    }
+    .wrap { max-width: 1060px; margin: 0 auto; width: 100%; }
+    .eyebrow { color: var(--gold); letter-spacing: .22em; text-transform: uppercase; font-size: .8rem; font-weight: 700; margin: 0 0 12px; }
+    h1 { font-size: clamp(2.4rem, 7vw, 4.4rem); line-height: 1; margin: 0 0 12px; }
+    .tagline { color: var(--muted); font-size: 1.1rem; margin: 0; max-width: 640px; line-height: 1.6; }
+    main { padding: 40px 24px 70px; }
+    .back { display: inline-block; margin-bottom: 26px; color: var(--gold); text-decoration: none; font-weight: 600; }
+
+    /* Crossroads signpost */
+    .crossroads {
+      border-radius: 18px; overflow: hidden;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(8,14,10,.45) 0%, rgba(8,14,10,.88) 100%), url('assets/bg-the-pines.jpg') center/cover;
+      margin-bottom: 34px;
+    }
+    .crossroads-inner { display: flex; gap: 28px; align-items: center; padding: 34px 30px; }
+    .crossroads-copy { flex: 1 1 55%; min-width: 0; }
+    .crossroads-copy h2 { color: var(--gold); font-size: 1.25rem; margin: 0 0 6px; }
+    .crossroads-copy p { color: var(--muted); margin: 0 0 16px; line-height: 1.6; }
+    .signpost { position: relative; flex: 0 0 240px; height: 400px; margin: 0 auto; }
+    .signpost .post {
+      position: absolute; left: 50%; top: 0; bottom: 0; width: 26px; transform: translateX(-50%);
+      background: linear-gradient(90deg, #4a3220 0%, #6b4a2f 30%, #7d5a38 50%, #5a3d26 75%, #3a2617 100%);
+      border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    }
+    .signpost .post::after {
+      content: ""; position: absolute; left: 50%; top: -14px; transform: translateX(-50%);
+      width: 44px; height: 22px; background: #2e1f12; border-radius: 50% 50% 8px 8px;
+    }
+    .signpost .arm {
+      position: absolute; top: 0; height: 52px; width: 196px;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(180deg, #8a653c 0%, #6f4e2d 45%, #5c3f24 100%);
+      border: 1px solid rgba(30,18,8,.6);
+      color: #f7ead0; font-weight: 800; font-size: .98rem; letter-spacing: .04em;
+      text-decoration: none; text-shadow: 0 1px 0 rgba(0,0,0,.55), 0 -1px 0 rgba(255,240,210,.15);
+      box-shadow: 0 4px 10px rgba(0,0,0,.45);
+      transition: transform .15s, filter .15s;
+    }
+    .signpost .arm:hover { filter: brightness(1.12); }
+    .signpost .arm .nail {
+      position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #d8c9a8, #6b5a3e 70%);
+      transform: translateY(-50%); box-shadow: inset 0 1px 2px rgba(0,0,0,.6);
+    }
+    .signpost .arm.right { left: 50%; clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 0 100%); }
+    .signpost .arm.right .nail { left: 14px; }
+    .signpost .arm.left { right: 50%; clip-path: polygon(26px 0, 100% 0, 100% 100%, 26px 100%, 0 50%); }
+    .signpost .arm.left .nail { right: 14px; }
+    .signpost .arm-1 { top: 28px; transform: rotate(-2deg); }
+    .signpost .arm-2 { top: 118px; transform: rotate(1.6deg); }
+    .signpost .arm-3 { top: 208px; transform: rotate(-1.4deg); }
+    .signpost .arm-4 { top: 298px; transform: rotate(2deg); }
+    .signpost .arm-1:hover { transform: rotate(-2deg) scale(1.03); }
+    .signpost .arm-2:hover { transform: rotate(1.6deg) scale(1.03); }
+    .signpost .arm-3:hover { transform: rotate(-1.4deg) scale(1.03); }
+    .signpost .arm-4:hover { transform: rotate(2deg) scale(1.03); }
+
+    /* Area picture cards */
+    .areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+    .area-card {
+      display: block; text-decoration: none; color: var(--white);
+      border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+      background: var(--panel); transition: transform .15s, border-color .15s;
+    }
+    .area-card:hover { transform: translateY(-4px); border-color: rgba(46,157,75,.6); }
+    .area-card img { width: 100%; height: 170px; object-fit: cover; display: block; }
+    .area-card .area-body { padding: 16px 18px 20px; }
+    .area-card strong { display: block; font-size: 1.1rem; color: var(--gold); margin-bottom: 4px; }
+    .area-card span { color: var(--muted); font-size: .94rem; line-height: 1.55; }
+    @media (max-width: 760px) {
+      .crossroads-inner { flex-direction: column; padding: 26px 20px; }
+      .signpost { flex-basis: auto; transform: scale(.86); margin: -18px 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">The town guide</p>
+      <h1>Four corners of town.</h1>
+      <p class="tagline">Every one of them has a reason their walls are up. Pick a way in — each corner of Maple Hollow keeps its own people, its own hangouts, its own rules.</p>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <a class="back" href="index.html">&larr; Back to the front page</a>
+
+      <div class="crossroads">
+        <div class="crossroads-inner">
+          <div class="signpost" aria-label="Town crossroads signpost">
+            <div class="post"></div>
+            <a class="arm right arm-1" href="areas/main-street.html"><span class="nail"></span>Main Street</a>
+            <a class="arm left arm-2" href="areas/the-pines.html"><span class="nail"></span>The Pines</a>
+            <a class="arm right arm-3" href="areas/creekside.html"><span class="nail"></span>Creekside</a>
+            <a class="arm left arm-4" href="areas/mill-road.html"><span class="nail"></span>Mill Road</a>
+          </div>
+          <div class="crossroads-copy">
+            <h2>Standing at the crossroads</h2>
+            <p>Four ways into town, four kinds of people. The sign's been here longer than anyone admits. Choose where you walk first — you can't be everywhere at once.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="areas">
+        <a class="area-card" href="areas/main-street.html">
+          <img src="assets/bg-main-street.jpg" alt="Main Street at dawn" />
+          <div class="area-body"><strong>Main Street</strong><span>Storefronts, the diner, the post office. First hellos.</span></div>
+        </a>
+        <a class="area-card" href="areas/the-pines.html">
+          <img src="assets/bg-the-pines.jpg" alt="Cabins in The Pines" />
+          <div class="area-body"><strong>The Pines</strong><span>Cabins tucked back in the trees. The quiet ones.</span></div>
+        </a>
+        <a class="area-card" href="areas/creekside.html">
+          <img src="assets/bg-creekside.jpg" alt="Houses along the creek" />
+          <div class="area-body"><strong>Creekside</strong><span>Houses along the water. People who've been here longest.</span></div>
+        </a>
+        <a class="area-card" href="areas/mill-road.html">
+          <img src="assets/bg-mill-road.jpg" alt="The edge of town on Mill Road" />
+          <div class="area-body"><strong>Mill Road</strong><span>The edge of town. The ones still deciding whether to stay.</span></div>
+        </a>
+      </div>
+
+      <p style="margin-top: 30px;"><a class="back" href="index.html">&larr; Back to the front page</a></p>
+    </div>
+  </main>
+</body>
+</html>
