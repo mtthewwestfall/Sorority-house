@@ -412,7 +412,26 @@
       #chat .chat-head img { width: 72px; height: 72px; }
       body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
     }
-  </style>
+  
+    /* ===== Alternating scheme: sandalwood bg -> green surfaces -> sandalwood text ===== */
+    .button { background: #277A3D; color: #F7EEDC; box-shadow: 0 12px 28px rgba(39,122,61,.30); }
+    .button.hero-cta { background: #277A3D; color: #F7EEDC; box-shadow: 0 12px 28px rgba(39,122,61,.35); }
+    .hall-card, .founders-coupon, .step, .plan, .profile-card, .trial-banner,
+    .install-bar, .audit-card, .merch-card, .photo-card, .auth-panel {
+      background: #277A3D; border-color: rgba(247,238,220,.30); color: #F7EEDC;
+      --white: #F7EEDC; --muted: #EBD9B4; --line: rgba(247,238,220,.30);
+      --pink: #F7EEDC; --gold: #EBD9B4;
+    }
+    .hall-card .button, .founders-coupon .button, .step .button, .plan .button,
+    .profile-card .button, .trial-banner .button, .install-bar .button,
+    .audit-card .button, .merch-card .button, .photo-card .button, .auth-panel .button {
+      background: #F7EEDC; color: #277A3D; box-shadow: none;
+    }
+    .founders-coupon .coupon-code { background: #F7EEDC; color: #277A3D; }
+    .auth-panel input, .auth-panel textarea, .auth-panel select,
+    .merch-card select, .merch-card input { color: #2E2417; }
+    .sandalwood-text { color: #277A3D; }
+    </style>
 </head>
 <body>
   <header class="topbar">
@@ -434,7 +453,7 @@
     <section class="hero" style="background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(13,9,24,1) 100%), url('assets/maple_hollow.webp') center/cover;">
       <div class="hero-content wrap">
         <p class="eyebrow">At the end of a dirt road, deep in the pines.</p>
-        <h1 style="font-size: clamp(3.7rem, 11vw, 9rem); line-height: .84; margin: 0 0 30px;"><span class="sandalwood-text">Maple Hollow</span></h1>
+        <h1 style="font-size: clamp(3.7rem, 11vw, 9rem); line-height: .84; margin: 0 0 30px;"><span class="sandalwood-text" style="color:#F7EEDC">Maple Hollow</span></h1>
         <a class="hero-install" href="#" id="hero-install" hidden>Get the app — free, no app store</a>
         <p class="hero-sub">Every one of them a locked door.</p>
         <a class="button hero-cta" href="#town">Come into town ↓</a>

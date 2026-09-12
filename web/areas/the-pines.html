@@ -56,7 +56,16 @@
     }
     nav.areas a.current { border-color: var(--gold); color: var(--gold); }
     nav.areas a:hover { border-color: var(--gold); }
-  </style>
+  
+    /* ===== Alternating scheme: sandalwood bg -> green surfaces -> sandalwood text ===== */
+    .button { background: #277A3D; color: #F7EEDC; box-shadow: 0 12px 28px rgba(39,122,61,.30); }
+    .panel, .resident {
+      background: #277A3D; border-color: rgba(247,238,220,.30); color: #F7EEDC;
+      --white: #F7EEDC; --muted: #EBD9B4; --line: rgba(247,238,220,.30);
+      --pink: #F7EEDC; --gold: #EBD9B4;
+    }
+    .panel .button, .resident .button { background: #F7EEDC; color: #277A3D; box-shadow: none; }
+    </style>
 </head>
 <body>
   <header class="hero">
