@@ -1,8 +1,8 @@
 """
-SORORITY HOUSE — Telegram bot
-================================
+MAPLE HOLLOW — Telegram bot
+===========================
 
-The Telegram "version" of Sorority House. Telegram is just another front-end onto
+The Telegram "version" of Maple Hollow. Telegram is just another front-end onto
 the *same* backend (`main.py`): accounts, the trust engine, the per-girl memory
 stack, the message allowance and the model roles (MOUTH/BRAIN/AUDIT) all live
 there. This bot is a thin chat client over the backend's public API, so whatever
@@ -34,7 +34,7 @@ Commands
 Env vars
 --------
 TELEGRAM_BOT_TOKEN   from @BotFather. Never put the value in any file.
-PUBLIC_URL           the Sorority House backend base URL, e.g. the Railway app.
+PUBLIC_URL           the Maple Hollow backend base URL, e.g. the Railway app.
                      Required (no default), same across web and this bot.
 TELEGRAM_BOT_SECRET  the same random string as on the backend; it unlocks
                      /auth/telegram. Required.
@@ -333,7 +333,7 @@ async def _ensure_session(update, force: bool = False):
               active_girl=(rec or {}).get("active_girl"))
     if created:
         await _txt(update,
-             "🏛️ Welcome to Sorority House — your account is open, no sign-up needed. "
+             "🌲 Welcome to Maple Hollow — your account is open, no sign-up needed. "
              "Your Telegram is your key here.\n\n"
              "Already have an account on the website? /login <email> <password> once "
              "and this chat joins it (same history, same allowance).")
@@ -396,7 +396,7 @@ async def cmd_signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     if out.get("needs_verification"):
         await _txt(update,
-             "Account created. 🎉 Sorority House verifies by email (same as the web) so "
+             "Account created. 🎉 Maple Hollow verifies by email (same as the web) so "
              "I can't hand out a token until the link is clicked.\n\n"
              + ("Check your inbox for the verification link — then come back and "
                 "/login <email> <password>."
@@ -783,7 +783,7 @@ def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     rec = await _ensure_session(update)
     await update.effective_message.reply_text(
-        "Sorority House — where to?\n\n"
+        "Maple Hollow — where to?\n\n"
         "Payments go through Stripe and your tier shows up in this chat and on the site. "
         "The app installs from the site — no app store.",
         reply_markup=_menu_markup(rec is not None))
@@ -801,7 +801,7 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
-         "Sorority House on Telegram — commands:\n"
+         "Maple Hollow on Telegram — commands:\n"
          "/login <email> <password> — join this Telegram to your website account\n"
          "/signup <email> <password> <name> — make an email account (to use the site too)\n"
          "/girls — knock on the doors that are open\n"
@@ -843,7 +843,7 @@ def main():
     app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CallbackQueryHandler(on_button))  # buttons only exist in private chats
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
-    logger.info("Sorority House Telegram bot starting (backend: %s)", _base())
+    logger.info("Maple Hollow Telegram bot starting (backend: %s)", _base())
     app.run_polling()
 
 
