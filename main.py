@@ -318,13 +318,12 @@ TIERS = {
 # (see open_doors). Everyone but Veronica is available on every tier.
 TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
 
-# Doors open in sets, in roster order. The first set is open from day one; the
-# next set unlocks once the user reaches the milestone with ANY girl of the set
-# directly before it. These are the defaults; the admin console (Roster tab) owns
-# the live values in the house_rules table.
+# Doors no longer lock: every resident is talkable from day one. The rules
+# below stay for the admin console, but doors_locked defaults off and any
+# stored lock is flipped off at startup.
 DOOR_PAIR = 2
 UNLOCK_MILESTONE = 4
-DOOR_RULE_DEFAULTS = {"doors_locked": True, "door_set": DOOR_PAIR, "unlock_stage": UNLOCK_MILESTONE}
+DOOR_RULE_DEFAULTS = {"doors_locked": False, "door_set": DOOR_PAIR, "unlock_stage": UNLOCK_MILESTONE}
 
 def tier_rank(tier):
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
@@ -829,6 +828,12 @@ def init_db():
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _repair_dead_portraits(cur)
+            # Doors no longer lock: every resident is talkable from day one.
+            # Flip any stored lock so old databases match the new rule.
+            cur.execute("""
+                INSERT INTO house_rules (key, value) VALUES ('doors_locked', '0')
+                ON CONFLICT (key) DO UPDATE SET value = '0'
+            """)
             # Doors moved from tier-gated to progression-gated. The marker column
             # makes the tier-wall lift run once, so the console owns min_tier after.
             cur.execute("""
