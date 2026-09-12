@@ -1007,7 +1007,7 @@
           '<div class="door-name">' + name + '</div>' +
           '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
           '<p>' + escapeHtml(g.blurb) + '</p>' +
-          '<button class="button door-cta" type="button">Talk to ' + name</button></div>' +
+          '<button class="button door-cta" type="button">Talk to ' + name + '</button></div>' +
           '</article>';
       }).join('');
       // Signed out, only the first pair of doors is open.
@@ -1428,6 +1428,7 @@
     }
 
     // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
+    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
     const SHOPIFY_STOREFRONT_URL = 'https://sororityhouse-zlw64-vet1iva0.myshopify.com/api/2025-07/graphql.json';
     const SHOPIFY_STOREFRONT_TOKEN = '17478e428d0dbb29bf9a6d161c6c6b65';
