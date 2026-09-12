@@ -6,9 +6,10 @@ Built to this spec (verified Sept 2026):
   * ONE provider for everything: Google Gemini, on your existing Google API key.
   * Normal chat replies : Gemini, no thinking budget (fast + cheap).
   * Psychological Audits: Gemini WITH a thinking budget ON (deeper analysis).
-  * AUDITS ARE A PRODUCT: $0.99 each (USD). Everyone pays for them EXCEPT Neighbor
-    subscribers, who get 2 FREE audits per month. Free ones reset monthly alongside
-    the message allowance. Bought credits roll over.
+  * AUDITS ARE A PRODUCT: $0.99 each (USD). Every tier gets free ones per month
+    (Visitor 2 / Community 4 / Resident 8 / Neighbor 2), drawn from a lifetime
+    global promo cap (FREE_AUDIT_PROMO_CAP, default 200). Free ones reset monthly
+    alongside the message allowance. Bought credits roll over.
   * 3-layer memory stack so the payload stays small and flat every turn:
       LAYER 1  A system prompt that is byte-identical every single turn (house lore +
                the girl's full personality). Identical prefix = provider caches it and
@@ -170,7 +171,8 @@ Env vars (Railway -> Variables):
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
-  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 0 / Community 0 / Resident 0 / Neighbor 2 per month
+  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 2 / Community 4 / Resident 8 / Neighbor 2 per month
+  FREE_AUDIT_PROMO_CAP = 200  (lifetime global cap on free audits across all users)
 
 requirements.txt for Railway:
   fastapi
@@ -300,11 +302,15 @@ AUDIT_WINDOW = 80    # audits see up to this many recent messages + the full sum
 # Audit product pricing. $0.99 each for everyone; the listed tiers get N FREE per month.
 AUDIT_PRICE_USD = 0.99
 FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allowance)
-    "visitor":   0,
-    "community": 0,
-    "resident":  0,
+    "visitor":   2,
+    "community": 4,
+    "resident":  8,
     "neighbor":  2,
 }
+# Lifetime global cap on free (promo) audits handed out across ALL users.
+# When the cap is hit, no more free audits are granted and users fall through
+# to $0.99 paid credits. Raise via env when ready to extend the promo.
+FREE_AUDIT_PROMO_CAP = int(os.environ.get("FREE_AUDIT_PROMO_CAP", "200"))
 
 # Message limits per tier (shared across all girls). "remaining" resets monthly.
 TIERS = {
@@ -830,6 +836,13 @@ def init_db():
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+                -- lifetime counter for the free-audit promo (see FREE_AUDIT_PROMO_CAP)
+                CREATE TABLE IF NOT EXISTS promo_counters (
+                    key   TEXT PRIMARY KEY,
+                    used  INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO promo_counters (key, used) VALUES ('free_audits', 0)
+                ON CONFLICT (key) DO NOTHING;
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -3175,20 +3188,37 @@ def audit(body: AuditIn, user=Depends(current_user)):
 
     # --- AUDIT BILLING: free monthly allowance first, then bought credits ---
     # Reserve the entitlement atomically (conditional UPDATEs) so concurrent
-    # requests can't all spend the same credit.
+    # requests can't all spend the same credit. Free audits also draw from a
+    # lifetime global promo cap (FREE_AUDIT_PROMO_CAP); when it's hit, users
+    # fall through to paid credits.
     allowance = FREE_AUDITS.get(user["tier"], 0)
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE users SET free_audits_used = free_audits_used + 1
-                WHERE user_id=%s AND free_audits_used < %s
-                RETURNING free_audits_used, audit_credits
-            """, (user["user_id"], allowance))
-            got = cur.fetchone()
-            if got is not None:
-                spent = "free"
-            else:
+            got = None
+            spent = None
+            if allowance > 0:
+                cur.execute("""
+                    UPDATE promo_counters SET used = used + 1
+                    WHERE key='free_audits' AND used < %s
+                    RETURNING used
+                """, (FREE_AUDIT_PROMO_CAP,))
+                if cur.fetchone() is not None:
+                    cur.execute("""
+                        UPDATE users SET free_audits_used = free_audits_used + 1
+                        WHERE user_id=%s AND free_audits_used < %s
+                        RETURNING free_audits_used, audit_credits
+                    """, (user["user_id"], allowance))
+                    got = cur.fetchone()
+                    if got is not None:
+                        spent = "free"
+                    else:
+                        # user had no free allowance left; hand the promo unit back
+                        cur.execute("""
+                            UPDATE promo_counters SET used = used - 1
+                            WHERE key='free_audits'
+                        """)
+            if got is None:
                 cur.execute("""
                     UPDATE users SET audit_credits = audit_credits - 1
                     WHERE user_id=%s AND audit_credits > 0
@@ -3202,8 +3232,8 @@ def audit(body: AuditIn, user=Depends(current_user)):
     if got is None:
         raise HTTPException(
             status_code=402,
-            detail=("no_audit_credits|Audits cost $%.2f each. Neighbors get 2 free per "
-                    "month. Buy credits to run an audit." % AUDIT_PRICE_USD))
+            detail=("no_audit_credits|Audits cost $%.2f each. Your plan includes %d free "
+                    "per month. Buy credits to run an audit." % (AUDIT_PRICE_USD, allowance)))
     free_left = max(0, allowance - int(got["free_audits_used"]))
     paid_left = int(got["audit_credits"])
 
