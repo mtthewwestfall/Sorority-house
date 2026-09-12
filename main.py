@@ -308,7 +308,7 @@ FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allow
 
 # Message limits per tier (shared across all girls). "remaining" resets monthly.
 TIERS = {
-    "visitor":   {"label": "Visitor",          "limit": 25},
+    "visitor":   {"label": "Visitor",          "limit": 50},
     "community": {"label": "Community Member", "limit": 1500},
     "resident":  {"label": "Resident",         "limit": 2500},
     "neighbor":  {"label": "Neighbor",         "limit": 4000},
@@ -1154,7 +1154,7 @@ def _ensure_user(user_id, display_name="Player"):
                     cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
                     row = cur.fetchone()
             # lazy monthly reset: message allowance AND free audits refill together.
-            # Freshman is a one-time 25-message trial, so it never refills.
+            # Visitor is a one-time 50-message trial, so it never refills.
             if row["tier"] != "visitor" and row["plan_reset_at"] < now:
                 # conditional so two concurrent callers can't both reset (the loser
                 # would wipe usage recorded after the first reset)
