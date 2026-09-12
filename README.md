@@ -20,7 +20,7 @@ cd web && zip -qr /tmp/site.zip . && curl -sS \
   -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
   -H "Content-Type: application/zip" \
   --data-binary @/tmp/site.zip \
-  https://api.netlify.com/api/v1/sites/6ac8a2b7-77a1-447e-ad46-58254b599f45/deploys
+  https://api.netlify.com/api/v1/sites/9dea0cbb-c018-4a04-bcde-1fdd0487ef1f/deploys
 ```
 
 Then verify: `curl https://lockeddoor.ai` and check the new markup is served.
