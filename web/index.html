@@ -294,6 +294,15 @@
     .auth-close { position: absolute; top: 12px; right: 14px; }
     .auth-panel { position: relative; }
     .auth-hidden { display: none !important; }
+    .auth-panel textarea { border-radius: 12px; padding: 12px 14px; font: inherit; color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line); width: 100%; resize: vertical; }
+    .auth-panel textarea:focus { outline: none; border-color: rgba(46,157,75,.6); }
+    #avatar-create-step, #avatar-preview-step { display: flex; flex-direction: column; gap: 10px; }
+    .avatar-preview { width: 100%; max-width: 280px; margin: 0 auto; border-radius: 16px; border: 1px solid var(--line); display: block; }
+    .avatar-disclosure { color: var(--muted); font-size: .78rem; text-align: center; margin: 2px 0 6px; }
+    .nav-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); vertical-align: middle; }
+    .contest-toggle { display: flex; align-items: center; gap: 10px; color: var(--white); font-size: .92rem; cursor: pointer; margin-top: 4px; }
+    .contest-toggle input { width: 18px; height: 18px; accent-color: #2E9D4B; }
+    #profile-avatar-wrap.auth-hidden, #profile-no-avatar.auth-hidden { display: none; }
     /* send arrow lives inside the pill and only shows once there is text */
     .chat-form .button#chat-send {
       position: absolute; right: 5px; bottom: 5px; width: 34px; height: 34px; padding: 0; border-radius: 50%;
@@ -387,6 +396,8 @@
         <a href="#merch">Merch</a>
         <a href="#plans">Membership</a>
         <a class="nav-cta" href="#town">Enter town</a>
+        <img id="nav-avatar" class="nav-avatar" alt="Your portrait" hidden />
+        <a class="nav-cta" href="#" id="nav-profile" hidden>Profile</a>
         <a class="nav-cta" href="#" id="nav-auth">Sign in</a>
       </nav>
     </div>
@@ -504,7 +515,7 @@
   <footer>
     <div class="wrap footer-inner">
       <div>© 2026 Maple Hollow · Exclusive through referrals<br /><span class="ai-note">The people of Maple Hollow are AI characters. Conversations are fiction.</span></div>
-      <div class="footer-links"><a href="#merch">Merch</a><a href="#" id="footer-auth">Sign in</a><a href="#" id="footer-install" hidden>Install the app</a><a href="#top">Back to top ↑</a></div>
+      <div class="footer-links"><a href="#merch">Merch</a><a href="#" id="footer-profile" hidden>Profile</a><a href="#" id="footer-auth">Sign in</a><a href="#" id="footer-install" hidden>Install the app</a><a href="#top">Back to top ↑</a></div>
     </div>
   </footer>
   <div class="install-bar" id="install-bar">
@@ -544,6 +555,42 @@
       </div>
 
       <div class="auth-msg" id="auth-msg" aria-live="polite"></div>
+    </div>
+  </div>
+  <div class="chat-backdrop" id="avatar-setup" role="dialog" aria-modal="true" aria-labelledby="avatar-setup-heading">
+    <div class="chat-panel auth-panel">
+      <h2 id="avatar-setup-heading">Who are you in Maple Hollow?</h2>
+      <p class="auth-sub">Describe your character &mdash; a grizzled fisherman, a retired ballerina, anything. We&rsquo;ll paint your portrait in the town&rsquo;s graphic-novel style. This is how the town sees you.</p>
+      <div id="avatar-create-step">
+        <textarea id="avatar-desc" rows="3" maxlength="300" placeholder="A few words is fine&hellip;"></textarea>
+        <button class="button" type="button" id="avatar-generate-btn">Paint my portrait</button>
+        <p class="auth-switch"><a id="avatar-skip">Skip for now</a></p>
+      </div>
+      <div id="avatar-preview-step" class="auth-hidden">
+        <img id="avatar-preview-img" class="avatar-preview" alt="Your Maple Hollow portrait" />
+        <p class="avatar-disclosure">AI-generated image</p>
+        <button class="button" type="button" id="avatar-keep-btn">Looks right</button>
+        <button class="button dark" type="button" id="avatar-regen-btn">Regenerate</button>
+        <p class="auth-switch"><a id="avatar-skip-2">Skip for now</a></p>
+      </div>
+      <div class="auth-msg" id="avatar-msg" aria-live="polite"></div>
+    </div>
+  </div>
+  <div class="chat-backdrop" id="profile" role="dialog" aria-modal="true" aria-labelledby="profile-heading">
+    <div class="chat-panel auth-panel">
+      <button class="chat-close auth-close" id="profile-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="profile-heading">Your profile</h2>
+      <div id="profile-avatar-wrap">
+        <img id="profile-avatar-img" class="avatar-preview" alt="Your Maple Hollow portrait" />
+        <p class="avatar-disclosure">AI-generated image</p>
+      </div>
+      <div id="profile-no-avatar">
+        <p class="auth-sub">You don&rsquo;t have a portrait yet. Describe your character and we&rsquo;ll paint it.</p>
+      </div>
+      <textarea id="profile-avatar-desc" rows="2" maxlength="300" placeholder="Describe your character&hellip;"></textarea>
+      <button class="button" type="button" id="profile-generate-btn">Paint my portrait</button>
+      <label class="contest-toggle"><input type="checkbox" id="contest-toggle" /> Enter my avatar in this month&rsquo;s contest</label>
+      <div class="auth-msg" id="profile-msg" aria-live="polite"></div>
     </div>
   </div>
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
@@ -655,6 +702,168 @@
     document.getElementById('verify-to-login').addEventListener('click', () => showAuthPane('login'));
     updateAuthLinks();
 
+    // ---------- Player avatars: private graphic-novel portrait per account ----------
+    const avatarSetupBox = document.getElementById('avatar-setup');
+    const profileBox = document.getElementById('profile');
+    const avatarMsg = document.getElementById('avatar-msg');
+    const profileMsg = document.getElementById('profile-msg');
+    let myAvatar = null;      // cached GET /avatar/me result
+    let pendingAvatarEmail = '';
+
+    function setAvatarMsg(text, kind) {
+      avatarMsg.textContent = text || '';
+      avatarMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+    function setProfileMsg(text, kind) {
+      profileMsg.textContent = text || '';
+      profileMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+    function avatarSkipped(email) {
+      try { return localStorage.getItem('avatar_skipped_' + email) === '1'; } catch (_) { return false; }
+    }
+    function markAvatarSkipped(email) {
+      try { localStorage.setItem('avatar_skipped_' + email, '1'); } catch (_) {}
+    }
+    function avatarDataUrl(a) {
+      return a && a.image_b64 ? 'data:' + (a.mime || 'image/png') + ';base64,' + a.image_b64 : '';
+    }
+    async function fetchMyAvatar() {
+      try {
+        const res = await fetch(API_BASE_URL + '/avatar/me', { headers: authHeaders() });
+        if (!res.ok) return null;
+        myAvatar = await res.json();
+        return myAvatar;
+      } catch (_) { return null; }
+    }
+    function refreshAvatarThumb() {
+      const thumb = document.getElementById('nav-avatar');
+      const url = avatarDataUrl(myAvatar);
+      if (url) { thumb.src = url; thumb.hidden = false; }
+      else thumb.hidden = true;
+    }
+    function openAvatarSetup() {
+      document.getElementById('avatar-create-step').classList.remove('auth-hidden');
+      document.getElementById('avatar-preview-step').classList.add('auth-hidden');
+      setAvatarMsg('');
+      avatarSetupBox.classList.add('is-open');
+      const d = document.getElementById('avatar-desc');
+      if (d) d.focus();
+    }
+    function closeAvatarSetup() { avatarSetupBox.classList.remove('is-open'); }
+    function skipAvatarSetup() {
+      if (pendingAvatarEmail) markAvatarSkipped(pendingAvatarEmail);
+      closeAvatarSetup();
+    }
+    // After any successful sign-in: one-time avatar prompt for users without one.
+    async function maybePromptAvatar(email) {
+      if (!isLoggedIn()) return;
+      pendingAvatarEmail = email || '';
+      if (pendingAvatarEmail && avatarSkipped(pendingAvatarEmail)) return;
+      const a = await fetchMyAvatar();
+      refreshAvatarThumb();
+      if (a && !a.has_avatar) openAvatarSetup();
+    }
+    async function generateAvatar(desc, msgFn, btn) {
+      desc = (desc || '').trim();
+      if (!desc) { msgFn('Describe the character you want to be.', 'error'); return null; }
+      btn.disabled = true; msgFn('Painting your portrait\u2026');
+      try {
+        const res = await fetch(API_BASE_URL + '/avatar', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ description: desc }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.image_b64) {
+          msgFn((data && (data.detail || data.error)) || 'Could not paint it. Try again.', 'error');
+          return null;
+        }
+        myAvatar = { has_avatar: true, mime: data.mime, image_b64: data.image_b64, disclosure: data.disclosure };
+        refreshAvatarThumb();
+        msgFn('');
+        return myAvatar;
+      } catch (_) {
+        msgFn('Could not reach the house. Check your connection.', 'error');
+        return null;
+      } finally { btn.disabled = false; }
+    }
+    document.getElementById('avatar-generate-btn').addEventListener('click', async (event) => {
+      const a = await generateAvatar(document.getElementById('avatar-desc').value, setAvatarMsg, event.currentTarget);
+      if (a) {
+        document.getElementById('avatar-preview-img').src = avatarDataUrl(a);
+        document.getElementById('avatar-create-step').classList.add('auth-hidden');
+        document.getElementById('avatar-preview-step').classList.remove('auth-hidden');
+      }
+    });
+    document.getElementById('avatar-regen-btn').addEventListener('click', () => {
+      document.getElementById('avatar-preview-step').classList.add('auth-hidden');
+      document.getElementById('avatar-create-step').classList.remove('auth-hidden');
+      setAvatarMsg('');
+    });
+    document.getElementById('avatar-keep-btn').addEventListener('click', () => {
+      skipAvatarSetup();   // counts as done: they have an avatar now
+    });
+    document.getElementById('avatar-skip').addEventListener('click', skipAvatarSetup);
+    document.getElementById('avatar-skip-2').addEventListener('click', skipAvatarSetup);
+    avatarSetupBox.addEventListener('click', (event) => { if (event.target === avatarSetupBox) skipAvatarSetup(); });
+
+    // ---------- Profile modal ----------
+    function openProfile() {
+      setProfileMsg('');
+      const a = myAvatar;
+      const has = !!(a && a.has_avatar);
+      document.getElementById('profile-avatar-wrap').classList.toggle('auth-hidden', !has);
+      document.getElementById('profile-no-avatar').classList.toggle('auth-hidden', has);
+      if (has) document.getElementById('profile-avatar-img').src = avatarDataUrl(a);
+      profileBox.classList.add('is-open');
+    }
+    function closeProfile() { profileBox.classList.remove('is-open'); }
+    document.getElementById('profile-close').addEventListener('click', closeProfile);
+    profileBox.addEventListener('click', (event) => { if (event.target === profileBox) closeProfile(); });
+    async function openProfileFresh() {
+      await fetchMyAvatar();
+      refreshAvatarThumb();
+      openProfile();
+    }
+    document.getElementById('nav-profile').addEventListener('click', (e) => { e.preventDefault(); openProfileFresh(); });
+    document.getElementById('footer-profile').addEventListener('click', (e) => { e.preventDefault(); openProfileFresh(); });
+    document.getElementById('profile-generate-btn').addEventListener('click', async (event) => {
+      const a = await generateAvatar(document.getElementById('profile-avatar-desc').value, setProfileMsg, event.currentTarget);
+      if (a) {
+        document.getElementById('profile-avatar-img').src = avatarDataUrl(a);
+        document.getElementById('profile-avatar-wrap').classList.remove('auth-hidden');
+        document.getElementById('profile-no-avatar').classList.add('auth-hidden');
+        setProfileMsg('Portrait updated.', 'ok');
+      }
+    });
+    document.getElementById('contest-toggle').addEventListener('change', async (event) => {
+      const enter = event.currentTarget.checked;
+      setProfileMsg(enter ? 'Entering you in this month\u2019s contest\u2026' : 'Leaving the contest\u2026');
+      try {
+        const res = await fetch(API_BASE_URL + '/avatar/contest', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ enter }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.ok) {
+          event.currentTarget.checked = !enter;
+          setProfileMsg((data && (data.detail || data.error)) || 'Could not update the contest entry.', 'error');
+        } else {
+          setProfileMsg(enter ? 'You\u2019re in this month\u2019s contest.' : 'Left the contest.', 'ok');
+        }
+      } catch (_) {
+        event.currentTarget.checked = !enter;
+        setProfileMsg('Could not reach the house. Check your connection.', 'error');
+      }
+    });
+
+    // Show/hide the profile entry points with the auth state.
+    const _updateAuthLinks = updateAuthLinks;
+    updateAuthLinks = function () {
+      _updateAuthLinks();
+      const logged = isLoggedIn();
+      document.getElementById('nav-profile').hidden = !logged;
+      document.getElementById('footer-profile').hidden = !logged;
+      if (!logged) { myAvatar = null; refreshAvatarThumb(); }
+    };
+
     async function postJson(path, body, withAuth) {
       const response = await fetch(API_BASE_URL + path, {
         method: 'POST',
@@ -699,6 +908,7 @@
         } else if (response.ok && data && data.token) {   // older backend: instant login
           localStorage.setItem(TOKEN_KEY, data.token);
           updateAuthLinks(); closeAuth(); refreshState();
+          maybePromptAvatar(email);
         } else if (response.status === 409) {
           setAuthMsg('That email already has an account. Sign in instead.', 'error');
         } else {
@@ -723,6 +933,7 @@
           localStorage.setItem(TOKEN_KEY, data.token);
           updateAuthLinks(); closeAuth(); refreshState();
           if (currentGirl) addMessage('note', 'Signed in. Trust earned — go ahead.');
+          maybePromptAvatar(email);
         } else if (response.status === 403 && String(errText(data, '')).startsWith('email_unverified')) {
           showVerifyPane(email, 'Confirm your email first — check your inbox (and spam).');
         } else if (response.status === 401) {
