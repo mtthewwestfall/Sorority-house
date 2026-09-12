@@ -154,8 +154,8 @@
     .door-art img.is-broken { display: none; }
     .door-card.locked .door-art { filter: grayscale(1) brightness(.5); transform: scale(1.06); }
     .door-card.locked::after { content: "TRUST NOT EARNED"; position: absolute; top: 126px; left: 0; right: 0; text-align: center; color: var(--gold); letter-spacing: .24em; font-size: .78rem; font-weight: 700; }
-    .door-card.senior::after,
-    .door-card.locked[data-min-tier="senior"]::after { content: "SENIOR EXCLUSIVE"; }
+    .door-card.neighbor::after,
+    .door-card.locked[data-min-tier="neighbor"]::after { content: "NEIGHBOR EXCLUSIVE"; }
     .door-copy { padding: 25px 25px 28px; }
     .door-status { color: var(--pink); letter-spacing: .3em; text-transform: uppercase; font-size: .72rem; font-weight: 700; }
     .locked .door-status { color: var(--gold); }
@@ -435,71 +435,71 @@
         <!-- These seven are the fallback: GET /roster replaces them with whatever
              the house holds now, so a new sister needs no deploy. -->
         <div class="doors" id="doors-grid">
-          <article id="door-dakota" class="door-card open" data-girl="dakota" data-min-tier="freshman" data-name="Dakota" data-title="The gatekeeper" data-avatar="assets/dakota.jpg?v=2">
+          <article id="door-dakota" class="door-card open" data-girl="dakota" data-min-tier="visitor" data-name="Dakota" data-title="The gatekeeper" data-avatar="assets/dakota.jpg?v=2">
             <div class="door-art" data-initial="D"><img src="assets/dakota.jpg?v=2" alt="Portrait of Dakota" /></div>
             <div class="door-copy"><div class="door-status">Trust earned</div><div class="door-name">Dakota</div><div class="door-title">The gatekeeper</div><p>Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly.</p><button class="button door-cta" type="button">Talk to Dakota</button></div>
           </article>
-          <article id="door-zoe" class="door-card open" data-girl="zoe" data-min-tier="freshman" data-name="Zoe" data-title="The mirage" data-avatar="assets/zoe.jpg?v=2">
+          <article id="door-zoe" class="door-card open" data-girl="zoe" data-min-tier="visitor" data-name="Zoe" data-title="The mirage" data-avatar="assets/zoe.jpg?v=2">
             <div class="door-art" data-initial="Z"><img src="assets/zoe.jpg?v=2" alt="Portrait of Zoe" /></div>
             <div class="door-copy"><div class="door-status">Trust earned</div><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><button class="button door-cta" type="button">Talk to Zoe</button></div>
           </article>
-          <article id="door-willow" class="door-card locked" data-girl="willow" data-min-tier="freshman" data-name="Willow" data-title="The quiet lock" data-avatar="assets/willow.jpg?v=2">
+          <article id="door-willow" class="door-card locked" data-girl="willow" data-min-tier="visitor" data-name="Willow" data-title="The quiet lock" data-avatar="assets/willow.jpg?v=2">
             <div class="door-art" data-initial="W"><img src="assets/willow.jpg?v=2" alt="Willow's portrait" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p></div>
           </article>
-          <article id="door-brittany" class="door-card locked" data-girl="brittany" data-min-tier="freshman" data-name="Brittany" data-title="The sweet trap" data-avatar="assets/brittany.jpg?v=2">
+          <article id="door-brittany" class="door-card locked" data-girl="brittany" data-min-tier="visitor" data-name="Brittany" data-title="The sweet trap" data-avatar="assets/brittany.jpg?v=2">
             <div class="door-art" data-initial="B"><img src="assets/brittany.jpg?v=2" alt="Brittany's portrait" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p></div>
           </article>
-          <article id="door-sasha" class="door-card locked" data-girl="sasha" data-min-tier="freshman" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp?v=2">
+          <article id="door-sasha" class="door-card locked" data-girl="sasha" data-min-tier="visitor" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp?v=2">
             <div class="door-art" data-initial="S"><img src="assets/sasha.webp?v=2" alt="Sasha's portrait" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p></div>
           </article>
-          <article id="door-piper" class="door-card locked" data-girl="piper" data-min-tier="freshman" data-name="Piper" data-title="The closed book" data-avatar="assets/piper.jpg?v=2">
+          <article id="door-piper" class="door-card locked" data-girl="piper" data-min-tier="visitor" data-name="Piper" data-title="The closed book" data-avatar="assets/piper.jpg?v=2">
             <div class="door-art" data-initial="P"><img src="assets/piper.jpg?v=2" alt="Piper's portrait" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p></div>
           </article>
-          <article id="door-veronica" class="door-card locked" data-girl="veronica" data-min-tier="freshman" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp?v=2">
+          <article id="door-veronica" class="door-card locked" data-girl="veronica" data-min-tier="visitor" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp?v=2">
             <div class="door-art" data-initial="V"><img src="assets/veronica.webp?v=2" alt="Veronica's portrait" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Veronica</div><div class="door-title">The host</div><p>The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted.</p></div>
           </article>
-          <article id="door-matt" class="door-card locked" data-girl="matt" data-min-tier="freshman" data-name="Matt" data-title="The sheriff" data-avatar="assets/matt.jpg">
+          <article id="door-matt" class="door-card locked" data-girl="matt" data-min-tier="visitor" data-name="Matt" data-title="The sheriff" data-avatar="assets/matt.jpg">
             <div class="door-art" data-initial="M"><img src="assets/matt.jpg" alt="Portrait of Matt" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Matt</div><div class="door-title">The sheriff</div><p>Sheriff of Maple Hollow. Fixes your taillight instead of writing the ticket; carries the town's weight quietly.</p><button class="button door-cta" type="button">Talk to Matt</button></div>
           </article>
-          <article id="door-dean" class="door-card locked" data-girl="dean" data-min-tier="freshman" data-name="Dean" data-title="The doctor" data-avatar="assets/dean.jpg">
+          <article id="door-dean" class="door-card locked" data-girl="dean" data-min-tier="visitor" data-name="Dean" data-title="The doctor" data-avatar="assets/dean.jpg">
             <div class="door-art" data-initial="D"><img src="assets/dean.jpg" alt="Portrait of Dean" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Dean</div><div class="door-title">The doctor</div><p>The town doctor. The man Maple Hollow trusts with its worst days &mdash; calm under pressure, kind when it counts.</p><button class="button door-cta" type="button">Talk to Dean</button></div>
           </article>
-          <article id="door-ty" class="door-card locked" data-girl="ty" data-min-tier="freshman" data-name="Ty" data-title="The hardware guy" data-avatar="assets/ty.jpg">
+          <article id="door-ty" class="door-card locked" data-girl="ty" data-min-tier="visitor" data-name="Ty" data-title="The hardware guy" data-avatar="assets/ty.jpg">
             <div class="door-art" data-initial="T"><img src="assets/ty.jpg" alt="Portrait of Ty" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Ty</div><div class="door-title">The hardware guy</div><p>Hardware store owner. The young man who can find anything in the store &mdash; handy, honest, easy to talk to.</p><button class="button door-cta" type="button">Talk to Ty</button></div>
           </article>
-          <article id="door-billy" class="door-card locked" data-girl="billy" data-min-tier="freshman" data-name="Billy" data-title="The grill" data-avatar="assets/billy.jpg">
+          <article id="door-billy" class="door-card locked" data-girl="billy" data-min-tier="visitor" data-name="Billy" data-title="The grill" data-avatar="assets/billy.jpg">
             <div class="door-art" data-initial="B"><img src="assets/billy.jpg" alt="Portrait of Billy" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Billy</div><div class="door-title">The grill</div><p>Diner cook. The man behind the grill who never lets a plate go out wrong &mdash; gruff, loyal, softer than he looks.</p><button class="button door-cta" type="button">Talk to Billy</button></div>
           </article>
-          <article id="door-kristen" class="door-card locked" data-girl="kristen" data-min-tier="freshman" data-name="Kristen" data-title="The gentle hands" data-avatar="assets/kristen.jpg">
+          <article id="door-kristen" class="door-card locked" data-girl="kristen" data-min-tier="visitor" data-name="Kristen" data-title="The gentle hands" data-avatar="assets/kristen.jpg">
             <div class="door-art" data-initial="K"><img src="assets/kristen.jpg" alt="Portrait of Kristen" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Kristen</div><div class="door-title">The gentle hands</div><p>The town veterinarian. The woman the animals trust first &mdash; gentle hands, sharp eyes, quiet confidence.</p><button class="button door-cta" type="button">Talk to Kristen</button></div>
           </article>
-          <article id="door-ryan" class="door-card locked" data-girl="ryan" data-min-tier="freshman" data-name="Ryan" data-title="The truth keeper" data-avatar="assets/ryan.jpg">
+          <article id="door-ryan" class="door-card locked" data-girl="ryan" data-min-tier="visitor" data-name="Ryan" data-title="The truth keeper" data-avatar="assets/ryan.jpg">
             <div class="door-art" data-initial="R"><img src="assets/ryan.jpg" alt="Portrait of Ryan" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Ryan</div><div class="door-title">The truth keeper</div><p>Town lawyer. The man the town tells the truth to &mdash; sharp, discreet, harder to read than he looks.</p><button class="button door-cta" type="button">Talk to Ryan</button></div>
           </article>
-          <article id="door-darwin" class="door-card locked" data-girl="darwin" data-min-tier="freshman" data-name="Darwin" data-title="The quiet room" data-avatar="assets/darwin.jpg">
+          <article id="door-darwin" class="door-card locked" data-girl="darwin" data-min-tier="visitor" data-name="Darwin" data-title="The quiet room" data-avatar="assets/darwin.jpg">
             <div class="door-art" data-initial="D"><img src="assets/darwin.jpg" alt="Portrait of Darwin" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Darwin</div><div class="door-title">The quiet room</div><p>The town librarian. Keeper of the quietest room in Maple Hollow &mdash; remembers every book and every borrower.</p><button class="button door-cta" type="button">Talk to Darwin</button></div>
           </article>
-          <article id="door-jordan" class="door-card locked" data-girl="jordan" data-min-tier="freshman" data-name="Jordan" data-title="The true believer" data-avatar="assets/jordan.jpg">
+          <article id="door-jordan" class="door-card locked" data-girl="jordan" data-min-tier="visitor" data-name="Jordan" data-title="The true believer" data-avatar="assets/jordan.jpg">
             <div class="door-art" data-initial="J"><img src="assets/jordan.jpg" alt="Portrait of Jordan" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Jordan</div><div class="door-title">The true believer</div><p>Deputy sheriff. The law's youngest true believer &mdash; earnest, brave, and still proving herself.</p><button class="button door-cta" type="button">Talk to Jordan</button></div>
           </article>
-          <article id="door-mia" class="door-card locked" data-girl="mia" data-min-tier="freshman" data-name="Mia" data-title="The first to know" data-avatar="assets/mia.jpg">
+          <article id="door-mia" class="door-card locked" data-girl="mia" data-min-tier="visitor" data-name="Mia" data-title="The first to know" data-avatar="assets/mia.jpg">
             <div class="door-art" data-initial="M"><img src="assets/mia.jpg" alt="Portrait of Mia" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Mia</div><div class="door-title">The first to know</div><p>News reporter. The woman who knows everything first &mdash; curious, quick, always chasing the real story.</p><button class="button door-cta" type="button">Talk to Mia</button></div>
           </article>
-          <article id="door-anna" class="door-card locked" data-girl="anna" data-min-tier="freshman" data-name="Anna" data-title="The steady hands" data-avatar="assets/anna.jpg">
+          <article id="door-anna" class="door-card locked" data-girl="anna" data-min-tier="visitor" data-name="Anna" data-title="The steady hands" data-avatar="assets/anna.jpg">
             <div class="door-art" data-initial="A"><img src="assets/anna.jpg" alt="Portrait of Anna" /></div>
             <div class="door-copy"><div class="door-status">Trust not earned</div><div class="door-name">Anna</div><div class="door-title">The steady hands</div><p>EMT and nurse. The woman who doesn't flinch &mdash; steady hands, steady heart, a calm that holds the room together.</p><button class="button door-cta" type="button">Talk to Anna</button></div>
           </article>
@@ -538,10 +538,10 @@
       <div class="wrap">
         <div class="section-head"><p class="eyebrow">Choose your way in</p><h2>You get 25 messages.<br /><span class="gradient-text">They get the last word.</span></h2></div>
         <div class="plan-grid">
-          <article class="plan"><h3>Freshman</h3><div class="price">Free</div><p>Up to 25 messages, total.</p><ul><li>First hellos with some townspeople</li><li>No card required</li><li>Live message counter</li></ul><a class="button" href="#town">Start the trial</a></article>
-          <article class="plan"><h3>Sophomore</h3><div class="price">$7.99 <small>/mo</small></div><p>A light way in—1,500 messages a month.</p><ul><li>1,500 messages a month</li><li>Basic access to townspeople</li><li>They remember what you tell them</li></ul><a class="button" href="https://buy.stripe.com/6oUfZh1jradL0he4098AE00" target="_blank" rel="noopener">Get Starter</a></article>
-          <article class="plan featured"><h3>Junior</h3><div class="price">$14.99 <small>/mo</small></div><p>Work your way through the challenge at your own pace.</p><ul><li>Earn trust the hard way</li><li>2,500 messages a month</li><li>They remember everything you tell them</li></ul><a class="button" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">Take the challenge</a></article>
-          <article class="plan"><h3>Senior</h3><div class="price">$19.99 <small>/mo</small></div><p>Are you the impatient type? Come on in.</p><ul><li>2 free psychological audits to help you improve</li><li>Shared town conversations</li><li>4,000 messages a month</li></ul><a class="button" href="https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02" target="_blank" rel="noopener">Unlock everything</a></article>
+          <article class="plan"><h3>Visitor</h3><div class="price">Free</div><p>Up to 25 messages, total.</p><ul><li>First hellos with some townspeople</li><li>No card required</li><li>Live message counter</li></ul><a class="button" href="#town">Start the trial</a></article>
+          <article class="plan"><h3>Community Member</h3><div class="price">$7.99 <small>/mo</small></div><p>A light way in—1,500 messages a month.</p><ul><li>1,500 messages a month</li><li>Basic access to townspeople</li><li>They remember what you tell them</li></ul><a class="button" href="https://buy.stripe.com/6oUfZh1jradL0he4098AE00" target="_blank" rel="noopener">Get Starter</a></article>
+          <article class="plan featured"><h3>Resident</h3><div class="price">$14.99 <small>/mo</small></div><p>Work your way through the challenge at your own pace.</p><ul><li>Earn trust the hard way</li><li>2,500 messages a month</li><li>They remember everything you tell them</li></ul><a class="button" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">Take the challenge</a></article>
+          <article class="plan"><h3>Neighbor</h3><div class="price">$19.99 <small>/mo</small></div><p>Are you the impatient type? Come on in.</p><ul><li>2 free psychological audits to help you improve</li><li>Shared town conversations</li><li>4,000 messages a month</li></ul><a class="button" href="https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02" target="_blank" rel="noopener">Unlock everything</a></article>
         </div>
         <p class="plans-note">Checkout is by Stripe. Use the same email as your account and access opens on the site, the app and Telegram.</p>
         <div class="extras">
@@ -1229,7 +1229,7 @@
     }
 
     // Every card is clickable; openChat refuses locked ones. Which doors are open
-    // comes from GET /state for the signed-in account (defaults = freshman set).
+    // comes from GET /state for the signed-in account (defaults = visitor set).
     let DEFAULT_OPEN = ['dakota', 'zoe'];
     function setDoors(openList, reasons) {
       document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
@@ -1239,7 +1239,7 @@
         const status = card.querySelector('.door-status');
         if (status) status.textContent = open ? 'Trust earned' :
           ((reasons && reasons[card.dataset.girl]) ||
-           (card.dataset.minTier === 'senior' ? 'Senior exclusive' : 'Trust not earned'));
+           (card.dataset.minTier === 'neighbor' ? 'Neighbor exclusive' : 'Trust not earned'));
       });
     }
 
@@ -1256,7 +1256,7 @@
         const name = escapeHtml(g.name || g.girl);
         const avatar = escapeHtml(g.avatar_url);
         return '<article id="door-' + escapeHtml(g.girl) + '" class="door-card locked" data-girl="' + escapeHtml(g.girl) + '"' +
-          ' data-min-tier="' + escapeHtml(g.min_tier || 'freshman') + '"' +
+          ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
           ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
           ' data-avatar="' + avatar + '">' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +

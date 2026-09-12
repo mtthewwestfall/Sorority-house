@@ -6,7 +6,7 @@ Built to this spec (verified Sept 2026):
   * ONE provider for everything: Google Gemini, on your existing Google API key.
   * Normal chat replies : Gemini, no thinking budget (fast + cheap).
   * Psychological Audits: Gemini WITH a thinking budget ON (deeper analysis).
-  * AUDITS ARE A PRODUCT: $2.99 each (USD). Everyone pays for them EXCEPT Senior
+  * AUDITS ARE A PRODUCT: $0.99 each (USD). Everyone pays for them EXCEPT Neighbor
     subscribers, who get 2 FREE audits per month. Free ones reset monthly alongside
     the message allowance. Bought credits roll over.
   * 3-layer memory stack so the payload stays small and flat every turn:
@@ -60,7 +60,7 @@ API CONTRACT implemented here (point your chat app at these):
   POST /audit       {"girl"}            (bearer)        -> {"audit","audit_count",
                                                             "free_left","paid_left"}
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
-                                                            by hand (tier 'freshman' = cancelled)
+                                                            by hand (tier 'visitor' = cancelled)
   POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
                                                             the account remembered for the customer,
                                                             else the one with the customer's email,
@@ -71,10 +71,10 @@ API CONTRACT implemented here (point your chat app at these):
                                                             binds the customer to that account and,
                                                             once payment_status is paid, upgrades
                                                             it (needs STRIPE_API_KEY);
-                                                            subscription deleted/unpaid -> freshman
+                                                            subscription deleted/unpaid -> visitor
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
-                                                            webhook after a $2.99 charge)
+                                                            webhook after a $0.99 charge)
   POST /admin/link-account {"user_id","email","password","secret"}
                                                          -> give a pre-accounts player a login
                                                             for their existing user_id (migration)
@@ -151,7 +151,7 @@ Env vars (Railway -> Variables):
                     shared secret between this backend and telegram/bot.py; /auth/telegram*
                     refuse with 503 until it is set. Any long random string, same value
                     on both services.
-  STRIPE_PRICE_SOPHOMORE / STRIPE_PRICE_JUNIOR / STRIPE_PRICE_SENIOR
+  STRIPE_PRICE_COMMUNITY / STRIPE_PRICE_RESIDENT / STRIPE_PRICE_NEIGHBOR
                     price ids behind the three Payment Links (defaults are the live ones).
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
@@ -170,7 +170,7 @@ Env vars (Railway -> Variables):
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
-  AUDIT_PRICE_USD = 2.99   ;  FREE_AUDITS = Freshman 0 / Sophomore 0 / Junior 0 / Senior 2 per month
+  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 0 / Community 0 / Resident 0 / Neighbor 2 per month
 
 requirements.txt for Railway:
   fastapi
@@ -284,9 +284,9 @@ WEBHOOK_MAX_BYTES = 1024 * 1024
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_PRICE_TIERS = {
-    os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC"): "sophomore",
-    os.environ.get("STRIPE_PRICE_JUNIOR", "price_1UCVb6EnizOE4dLbBHQNFgpk"): "junior",
-    os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2"): "senior",
+    os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
+    os.environ.get("STRIPE_PRICE_RESIDENT", os.environ.get("STRIPE_PRICE_JUNIOR", "price_1UCVb6EnizOE4dLbBHQNFgpk")): "resident",
+    os.environ.get("STRIPE_PRICE_NEIGHBOR", os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2")): "neighbor",
 }
 STRIPE_SIG_TOLERANCE_S = 300
 AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1082")
@@ -297,26 +297,26 @@ WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
 SUMMARY_EVERY = 8    # Layer 2: refresh the rolling summary every N user messages
 AUDIT_WINDOW = 80    # audits see up to this many recent messages + the full summary
 
-# Audit product pricing. $2.99 each for everyone; the listed tiers get N FREE per month.
-AUDIT_PRICE_USD = 2.99
+# Audit product pricing. $0.99 each for everyone; the listed tiers get N FREE per month.
+AUDIT_PRICE_USD = 0.99
 FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allowance)
-    "freshman":   0,
-    "sophomore":  0,
-    "junior":     0,
-    "senior":     2,
+    "visitor":   0,
+    "community": 0,
+    "resident":  0,
+    "neighbor":  2,
 }
 
 # Message limits per tier (shared across all girls). "remaining" resets monthly.
 TIERS = {
-    "freshman":   {"label": "Freshman",  "limit": 25},
-    "sophomore":  {"label": "Sophomore", "limit": 1500},
-    "junior":     {"label": "Junior",    "limit": 2500},
-    "senior":     {"label": "Senior",    "limit": 4000},
+    "visitor":   {"label": "Visitor",          "limit": 25},
+    "community": {"label": "Community Member", "limit": 1500},
+    "resident":  {"label": "Resident",         "limit": 2500},
+    "neighbor":  {"label": "Neighbor",         "limit": 4000},
 }
 
 # Tier order, low to high. min_tier is a paywall only: a door also has to be earned
 # (see open_doors). Everyone but Veronica is available on every tier.
-TIER_ORDER = ["freshman", "sophomore", "junior", "senior"]
+TIER_ORDER = ["visitor", "community", "resident", "neighbor"]
 
 # Doors no longer lock: every resident is talkable from day one. The rules
 # below stay for the admin console, but doors_locked defaults off and any
@@ -333,39 +333,39 @@ def tier_rank(tier):
 # door text, art and the tier she is sold on, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
-    ("dakota",   "freshman",  10, "assets/dakota.jpg?v=2",
+    ("dakota",   "visitor",  10, "assets/dakota.jpg?v=2",
      "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
-    ("zoe",      "freshman",  20, "assets/zoe.jpg?v=2",
+    ("zoe",      "visitor",  20, "assets/zoe.jpg?v=2",
      "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "freshman",  30, "assets/willow.jpg?v=2",
+    ("willow",   "visitor",  30, "assets/willow.jpg?v=2",
      "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
-    ("brittany", "freshman",  40, "assets/brittany.jpg?v=2",
+    ("brittany", "visitor",  40, "assets/brittany.jpg?v=2",
      "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
-    ("sasha",    "freshman",  50, "assets/sasha.webp?v=2",
+    ("sasha",    "visitor",  50, "assets/sasha.webp?v=2",
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "freshman",  60, "assets/piper.jpg?v=2",
+    ("piper",    "visitor",  60, "assets/piper.jpg?v=2",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
-    ("veronica", "freshman",  70, "assets/veronica.webp?v=2",
+    ("veronica", "visitor",  70, "assets/veronica.webp?v=2",
      "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
-    ("matt",     "freshman",  80, "assets/matt.jpg",
+    ("matt",     "visitor",  80, "assets/matt.jpg",
      "Sheriff of Maple Hollow. Fixes your taillight instead of writing the ticket; carries the town's weight quietly."),
-    ("dean",     "freshman",  90, "assets/dean.jpg",
+    ("dean",     "visitor",  90, "assets/dean.jpg",
      "The town doctor. The man Maple Hollow trusts with its worst days — calm under pressure, kind when it counts."),
-    ("ty",       "freshman", 100, "assets/ty.jpg",
+    ("ty",       "visitor", 100, "assets/ty.jpg",
      "Hardware store owner. The young man who can find anything in the store — handy, honest, easy to talk to."),
-    ("billy",    "freshman", 110, "assets/billy.jpg",
+    ("billy",    "visitor", 110, "assets/billy.jpg",
      "Diner cook. The man behind the grill who never lets a plate go out wrong — gruff, loyal, softer than he looks."),
-    ("kristen",  "freshman", 120, "assets/kristen.jpg",
+    ("kristen",  "visitor", 120, "assets/kristen.jpg",
      "The town veterinarian. The woman the animals trust first — gentle hands, sharp eyes, quiet confidence."),
-    ("ryan",     "freshman", 130, "assets/ryan.jpg",
+    ("ryan",     "visitor", 130, "assets/ryan.jpg",
      "Town lawyer. The man the town tells the truth to — sharp, discreet, harder to read than he looks."),
-    ("darwin",   "freshman", 140, "assets/darwin.jpg",
+    ("darwin",   "visitor", 140, "assets/darwin.jpg",
      "The town librarian. Keeper of the quietest room in Maple Hollow — remembers every book and every borrower."),
-    ("jordan",   "freshman", 150, "assets/jordan.jpg",
+    ("jordan",   "visitor", 150, "assets/jordan.jpg",
      "Deputy sheriff. The law's youngest true believer — earnest, brave, and still proving herself."),
-    ("mia",      "freshman", 160, "assets/mia.jpg",
+    ("mia",      "visitor", 160, "assets/mia.jpg",
      "News reporter. The woman who knows everything first — curious, quick, always chasing the real story."),
-    ("anna",     "freshman", 170, "assets/anna.jpg",
+    ("anna",     "visitor", 170, "assets/anna.jpg",
      "EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together."),
 ]
 
@@ -693,7 +693,7 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS users (
                     user_id          TEXT PRIMARY KEY,
                     display_name     TEXT DEFAULT 'Player',
-                    tier             TEXT NOT NULL DEFAULT 'freshman',
+                    tier             TEXT NOT NULL DEFAULT 'visitor',
                     msg_used         INTEGER NOT NULL DEFAULT 0,
                     audit_credits    INTEGER NOT NULL DEFAULT 0,
                     free_audits_used INTEGER NOT NULL DEFAULT 0,
@@ -849,7 +849,7 @@ def init_db():
             """)
             legacy_rows = cur.fetchone() is None
             cur.execute("""
-                ALTER TABLE personas ADD COLUMN IF NOT EXISTS min_tier TEXT NOT NULL DEFAULT 'freshman';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS min_tier TEXT NOT NULL DEFAULT 'visitor';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 100;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
@@ -865,7 +865,14 @@ def init_db():
                 ON CONFLICT (key) DO UPDATE SET value = '0'
             """)
             # Veronica is free for everyone now: no tier wall.
-            cur.execute("UPDATE personas SET min_tier = 'freshman' WHERE girl = 'veronica'")
+            cur.execute("UPDATE personas SET min_tier = 'visitor' WHERE girl = 'veronica'")
+            # Tier rename (2026-09-11): freshman->visitor, sophomore->community,
+            # junior->resident, senior->neighbor. One-time; re-running is harmless.
+            for _old, _new in (("freshman", "visitor"), ("sophomore", "community"),
+                               ("junior", "resident"), ("senior", "neighbor")):
+                cur.execute("UPDATE users SET tier = %s WHERE tier = %s", (_new, _old))
+                cur.execute("UPDATE personas SET min_tier = %s WHERE min_tier = %s", (_new, _old))
+                cur.execute("UPDATE users SET comp_prev_tier = %s WHERE comp_prev_tier = %s", (_new, _old))
             # Bust portrait caches: point the roster at the versioned image URLs.
             for _girl, _avatar in (("dakota", "assets/dakota.jpg?v=2"),
                                    ("zoe", "assets/zoe.jpg?v=2"),
@@ -907,7 +914,7 @@ def _repair_dead_portraits(cur):
 
 def _lift_tier_walls(cur):
     """Doors used to be sold by tier; now they are earned by progression and only
-    Veronica stays behind the Senior paywall. Drop the old tier walls off the
+    Veronica used to sit behind the old Senior paywall. Drop the old tier walls off the
     seeded sisters so nobody is stuck behind both gates."""
     for girl, min_tier, _order, _avatar, _blurb in ROSTER_SEED:
         cur.execute("UPDATE personas SET min_tier = %s WHERE girl = %s", (min_tier, girl))
@@ -1109,20 +1116,20 @@ def _ensure_user(user_id, display_name="Player"):
             if row is None:
                 cur.execute("""
                     INSERT INTO users (user_id, display_name, tier, plan_reset_at)
-                    VALUES (%s,%s,'freshman', now() + interval '1 month')
+                    VALUES (%s,%s,'visitor', now() + interval '1 month')
                 """, (user_id, display_name))
                 conn.commit()
-                return {"user_id": user_id, "tier": "freshman", "msg_used": 0,
+                return {"user_id": user_id, "tier": "visitor", "msg_used": 0,
                         "audit_credits": 0, "free_audits_used": 0,
                         "total_audits_used": 0, "display_name": display_name}
             now = datetime.now(timezone.utc)
             # comped free time ran out: fall back to whatever tier they had before
             if row.get("comp_until") is not None and row["comp_until"] < now:
-                prev = row.get("comp_prev_tier") or "freshman"
+                prev = row.get("comp_prev_tier") or "visitor"
                 if prev not in TIERS:
-                    prev = "freshman"
-                if prev == "freshman":
-                    used, audits, reset_at = TIERS["freshman"]["limit"], 0, row["plan_reset_at"]
+                    prev = "visitor"
+                if prev == "visitor":
+                    used, audits, reset_at = TIERS["visitor"]["limit"], 0, row["plan_reset_at"]
                 else:   # paid: pick up exactly where the subscription left off
                     used = row.get("comp_prev_msg_used") or 0
                     audits = row.get("comp_prev_free_audits") or 0
@@ -1147,13 +1154,13 @@ def _ensure_user(user_id, display_name="Player"):
                     row = cur.fetchone()
             # lazy monthly reset: message allowance AND free audits refill together.
             # Freshman is a one-time 25-message trial, so it never refills.
-            if row["tier"] != "freshman" and row["plan_reset_at"] < now:
+            if row["tier"] != "visitor" and row["plan_reset_at"] < now:
                 # conditional so two concurrent callers can't both reset (the loser
                 # would wipe usage recorded after the first reset)
                 cur.execute("""
                     UPDATE users SET msg_used=0, free_audits_used=0,
                         plan_reset_at = now() + interval '1 month'
-                    WHERE user_id=%s AND tier <> 'freshman' AND plan_reset_at < now()
+                    WHERE user_id=%s AND tier <> 'visitor' AND plan_reset_at < now()
                     RETURNING msg_used, free_audits_used, plan_reset_at
                 """, (user_id,))
                 fresh = cur.fetchone()
@@ -1186,7 +1193,7 @@ def get_persona(girl):
 
 
 def remaining_for(user):
-    limit = TIERS.get(user["tier"], TIERS["freshman"])["limit"]
+    limit = TIERS.get(user["tier"], TIERS["visitor"])["limit"]
     return max(0, limit - int(user["msg_used"]))
 
 
@@ -1714,7 +1721,7 @@ def chat_preflight(user, girl_raw):
     girl = girl_raw.strip().lower()
     if not girl_open(user["user_id"], girl, user["tier"]):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
-    limit = TIERS.get(user["tier"], TIERS["freshman"])["limit"]
+    limit = TIERS.get(user["tier"], TIERS["visitor"])["limit"]
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -2271,12 +2278,12 @@ async function loadOverview(){try{const s=await api('/admin/overview');const st=
  const days=[];for(let i=13;i>=0;i--){const x=new Date();x.setUTCDate(x.getUTCDate()-i);days.push(x.toISOString().slice(0,10))}const by={};for(const r of s.daily_messages)by[String(r.day).slice(0,10)]=r.n;const mx=Math.max(1,...days.map(k=>by[k]||0));
  $('#daily').innerHTML=days.map(k=>`<div style="height:${Math.round((by[k]||0)/mx*100)}%" title="${k}: ${by[k]||0}"><span>${k.slice(8)}</span></div>`).join('');
  $('#girlRows').innerHTML=s.girls.map(g=>`<tr><td>${esc(g.girl)}</td><td>${g.players}</td><td>${g.deep}</td><td>${g.avg_milestone}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">no chats yet</td></tr>'}catch(e){toast(e.message,true)}}
-let PERS=[],CURP=null;const TIERS=['freshman','sophomore','junior','senior'];
+let PERS=[],CURP=null;const TIERS=['visitor','sophomore','junior','senior'];
 const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:'Hard - slow to trust',ice:'Ice queen - barely thaws'};
 function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
 async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'freshman',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'visitor',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
 function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
  <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
@@ -2321,7 +2328,7 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <div>Email</div><div>${a.verified_at?`verified ${dt(a.verified_at)}`:`<span class="pill open">unverified</span> <button class="s" onclick="markVerified()">Mark verified</button>`}</div></div>
   <h4>Girls</h4><table><thead><tr><th>Girl</th><th>Stage</th><th>Days</th><th>Last</th></tr></thead><tbody>${a.relationships.map(r=>`<tr><td>${esc(r.girl)}</td><td>M${r.milestone}</td><td>${r.active_days}</td><td class="mut">${d(r.last_session)}</td></tr>`).join('')||'<tr><td colspan=4 class="mut">none yet</td></tr>'}</tbody></table>
  </div><div>
-  <h4>Give free time</h4><div class="row2"><select id="gtTier"><option value="senior">Senior</option><option value="junior">Junior</option><option value="sophomore">Sophomore</option></select>
+  <h4>Give free time</h4><div class="row2"><select id="gtTier"><option value="neighbor">Neighbor</option><option value="resident">Resident</option><option value="community">Community Member</option></select>
   <input id="gtDays" type="number" min=1 value=30 style="width:90px"> days <button class="p" onclick="grantTime()">Grant</button></div>
   <div class="mut">Fresh allowance now; falls back to their current tier when it ends. Granting again extends.</div>
   <h4>Set tier (paid subscription)</h4><div class="row2"><select id="stTier"><option>freshman</option><option>sophomore</option><option>junior</option><option>senior</option></select><button class="s" onclick="setTier()">Apply</button></div>
@@ -2417,7 +2424,7 @@ class PersonaIn(BaseModel):
 
 class GrantAuditsIn(BaseModel):
     email: str
-    amount: int          # number of $2.99 audits to credit (call from Stripe webhook)
+    amount: int          # number of $0.99 audits to credit (call from Stripe webhook)
     secret: str = ""
 
 
@@ -2484,7 +2491,7 @@ class AdminGirlIn(BaseModel):
     door_title: str = ""
     blurb: str = ""
     avatar_url: str = ""
-    min_tier: str = "freshman"
+    min_tier: str = "visitor"
     sort_order: int = 100
     difficulty: str = DIFFICULTY_DEFAULT
     active: bool = True
@@ -2515,7 +2522,7 @@ def signup(body: SignupIn):
             try:
                 cur.execute("""
                     INSERT INTO users (user_id, display_name, tier, plan_reset_at, affitor_click_id)
-                    VALUES (%s,%s,'freshman', now() + interval '1 month', NULLIF(%s, ''))
+                    VALUES (%s,%s,'visitor', now() + interval '1 month', NULLIF(%s, ''))
                 """, (user_id, body.display_name.strip()[:40] or "Player",
                       _clean_click_id(body.affitor_click_id)))
                 cur.execute("""
@@ -2667,7 +2674,7 @@ def telegram_auth(body: TelegramAuthIn):
                 user_id = "u_" + secrets.token_hex(12)
                 cur.execute("""
                     INSERT INTO users (user_id, display_name, tier, plan_reset_at)
-                    VALUES (%s,%s,'freshman', now() + interval '1 month')
+                    VALUES (%s,%s,'visitor', now() + interval '1 month')
                 """, (user_id, body.display_name.strip()[:40] or "Player"))
             else:
                 user_id = row["user_id"]
@@ -2983,7 +2990,7 @@ class AvatarPromoteIn(BaseModel):
     door_title: str = ""
     persona: str = ""
     blurb: str = ""
-    min_tier: str = "freshman"
+    min_tier: str = "visitor"
     sort_order: int = 100
 
 
@@ -3176,7 +3183,7 @@ def audit(body: AuditIn, user=Depends(current_user)):
     if got is None:
         raise HTTPException(
             status_code=402,
-            detail=("no_audit_credits|Audits cost $%.2f each. Seniors get 2 free per "
+            detail=("no_audit_credits|Audits cost $%.2f each. Neighbors get 2 free per "
                     "month. Buy credits to run an audit." % AUDIT_PRICE_USD))
     free_left = max(0, allowance - int(got["free_audits_used"]))
     paid_left = int(got["audit_credits"])
@@ -3347,7 +3354,7 @@ def link_account(body: LinkAccountIn):
 @app.post("/admin/set-tier")
 def set_tier(body: SetTierIn):
     """Links a subscription to an account. Call from your Stripe webhook with the
-    customer's email: upgrade on checkout/renewal, set 'freshman' on cancellation.
+    customer's email: upgrade on checkout/renewal, set 'visitor' on cancellation.
     A new paid tier starts a fresh monthly allowance; downgrading to freshman does
     NOT restore the one-time trial."""
     _check_admin(body.secret, strict=True)
@@ -3364,13 +3371,13 @@ def _apply_tier(user, tier):
     try:
         with conn.cursor() as cur:
             # a real subscription change supersedes any comped free time
-            if tier == "freshman":
+            if tier == "visitor":
                 cur.execute("""
-                    UPDATE users SET tier='freshman', msg_used=%s,
+                    UPDATE users SET tier='visitor', msg_used=%s,
                         comp_until=NULL, comp_prev_tier=NULL, comp_prev_msg_used=NULL,
                         comp_prev_free_audits=NULL, comp_prev_reset_at=NULL
                     WHERE user_id=%s
-                """, (TIERS["freshman"]["limit"], user["user_id"]))
+                """, (TIERS["visitor"]["limit"], user["user_id"]))
             elif tier != user["tier"] or user.get("comp_until") is not None:
                 cur.execute("""
                     UPDATE users SET tier=%s, msg_used=0, free_audits_used=0,
@@ -3597,7 +3604,7 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                 if cur.fetchone():
                     conn.rollback()
                     return ""
-                if tier == "freshman":
+                if tier == "visitor":
                     # a cancellation belongs to whoever holds the customer *now* (a
                     # concurrent invoice.paid may have moved it since the caller looked)
                     cur.execute("""
@@ -3611,12 +3618,12 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                             conn.rollback()
                             return ""
                         user_id = holder["user_id"]
-            if tier == "freshman":
+            if tier == "visitor":
                 cur.execute(f"""
-                    UPDATE users SET tier='freshman', msg_used=%s, {clear},
+                    UPDATE users SET tier='visitor', msg_used=%s, {clear},
                         stripe_customer_id=%s, stripe_subscription_id=NULL, stripe_event_at=%s
                     WHERE user_id=%s AND stripe_event_at <= %s
-                """, (TIERS["freshman"]["limit"], customer_id or None, event_at,
+                """, (TIERS["visitor"]["limit"], customer_id or None, event_at,
                       user_id, event_at))
             else:
                 cur.execute(f"""
@@ -3627,12 +3634,12 @@ def _apply_stripe_event(user_id: str, tier: str, customer_id: str, subscription_
                 """, (tier, customer_id or None, subscription_id or None, event_at,
                       user_id, event_at))
             applied = cur.rowcount == 1
-            if applied and customer_id and tier != "freshman":
+            if applied and customer_id and tier != "visitor":
                 cur.execute(f"""
-                    UPDATE users SET tier='freshman', msg_used=%s, {clear},
+                    UPDATE users SET tier='visitor', msg_used=%s, {clear},
                         stripe_customer_id=NULL, stripe_subscription_id=NULL, stripe_event_at=%s
                     WHERE stripe_customer_id=%s AND user_id<>%s
-                """, (TIERS["freshman"]["limit"], event_at, customer_id, user_id))
+                """, (TIERS["visitor"]["limit"], event_at, customer_id, user_id))
             conn.commit()
     finally:
         conn.close()
@@ -3814,11 +3821,11 @@ async def stripe_webhook(request: Request):
         current = user.get("stripe_subscription_id")
         if current and obj.get("id") and obj.get("id") != current:
             return {"ok": True, "ignored": "not the current subscription"}
-        applied = _apply_stripe_event(user["user_id"], "freshman", customer_id,
+        applied = _apply_stripe_event(user["user_id"], "visitor", customer_id,
                                       obj.get("id") or "", event_at)
         if not applied:
             return {"ok": True, "ignored": "stale event"}
-        return {"ok": True, "user_id": applied, "tier": "freshman"}
+        return {"ok": True, "user_id": applied, "tier": "visitor"}
 
     return {"ok": True, "ignored": kind}
 
@@ -3890,7 +3897,7 @@ _ACCOUNT_ANY = "(a.user_id IS NOT NULL OR t.user_id IS NOT NULL)"
 
 def _account_view(row):
     row = dict(row)
-    row["remaining"] = max(0, TIERS.get(row["tier"], TIERS["freshman"])["limit"] - int(row["msg_used"]))
+    row["remaining"] = max(0, TIERS.get(row["tier"], TIERS["visitor"])["limit"] - int(row["msg_used"]))
     return row
 
 
@@ -3952,7 +3959,7 @@ def admin_grant_time(body: GrantTimeIn):
     were (usage + reset date); a comped freshman stays used-up after.
     Granting again while a comp is active extends it and keeps the original prev state."""
     tier = body.tier.strip().lower()
-    if tier not in TIERS or tier == "freshman":
+    if tier not in TIERS or tier == "visitor":
         raise HTTPException(status_code=400, detail="tier must be a paid tier")
     if body.days < 1 or body.days > 3650:
         raise HTTPException(status_code=400, detail="days must be 1..3650")
