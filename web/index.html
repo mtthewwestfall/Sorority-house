@@ -1418,7 +1418,7 @@
     function auditPriceLine() {
       const s = auditStatus;
       if (!s) return 'Runs against your free monthly allowance first, then bought credits.';
-      const price = typeof s.audit_price_usd === 'number' ? '$' + s.audit_price_usd.toFixed(2) : '$2.99';
+      const price = typeof s.audit_price_usd === 'number' ? '$' + s.audit_price_usd.toFixed(2) : '$0.99';
       const free = s.free_audits_left || 0, paid = s.audit_credits || 0;
       if (free > 0) return `Free - ${free} free audit${free === 1 ? '' : 's'} left this month.`;
       if (paid > 0) return `Uses 1 credit - ${paid} credit${paid === 1 ? '' : 's'} left.`;

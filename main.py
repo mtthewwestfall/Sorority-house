@@ -3393,7 +3393,7 @@ def _apply_tier(user, tier):
 
 @app.post("/admin/grant-audits")
 def grant_audits(body: GrantAuditsIn):
-    """Credits audit_credits after a successful $2.99 payment. Wire this to your
+    """Credits audit_credits after a successful $0.99 payment. Wire this to your
     Stripe webhook (or call it from your 'Buy audit' button once Stripe confirms)."""
     _check_admin(body.secret, strict=True)
     if body.amount <= 0 or body.amount > 1000:
