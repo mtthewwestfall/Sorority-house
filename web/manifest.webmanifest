@@ -1,7 +1,7 @@
 {
-  "name": "The Sorority House",
-  "short_name": "The House",
-  "description": "A social experiment. 28 doors. Can you survive or will you thrive?",
+  "name": "Maple Hollow",
+  "short_name": "Maple Hollow",
+  "description": "A small town deep in the pines. Earn trust over real days.",
   "id": "./",
   "start_url": "./?source=pwa",
   "scope": "./",
@@ -16,7 +16,6 @@
     { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "The doors", "url": "./?source=pwa#doors" },
-    { "name": "Scoreboard", "url": "./?source=pwa#scoreboard" }
+    { "name": "The town", "url": "./?source=pwa#town" }
   ]
 }
