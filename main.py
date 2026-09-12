@@ -143,7 +143,7 @@ Env vars (Railway -> Variables):
                     Subscriptions: write and PaymentIntents: write it also stamps the
                     Affitor affiliate metadata (below) on each paid subscription.
   AFFITOR_PROGRAM_ID
-                    Affitor Wingman program id (default 1082). The web tracker's click id
+                    Affitor Wingman program id (default 1083). The web tracker's click id
                     arrives with /auth/signup and /auth/login (affitor_click_id) and is
                     written to the Stripe subscription + payment intent metadata as
                     affitor_click_id / affitor_customer_key / program_id when the
@@ -291,7 +291,7 @@ STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_NEIGHBOR", os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2")): "neighbor",
 }
 STRIPE_SIG_TOLERANCE_S = 300
-AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1082")
+AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
 TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
