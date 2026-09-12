@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>Maple Hollow</title>
   <meta name="description" content="At the end of a dirt road, deep in the pines. Every one of them a locked door." />
   <link rel="manifest" href="manifest.webmanifest" />
@@ -1139,50 +1139,38 @@
       currentGirl = null;
     }
 
-    let fitTimer = 0;
-    let lastViewport = '';
-    let pendingViewport = '';
+    let fitRaf = 0;
     const mobileChat = window.matchMedia('(max-width: 620px)');
-    function viewportKey() {
-      const vv = window.visualViewport;
-      return `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}`;
-    }
+
     function fitChatToViewport() {
-      if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) return;
-      // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
-      // viewport and may scroll the page. Size the panel to the visible area and pull it
-      // back up by however far the page was pushed, so nothing hides behind the keyboard.
-      // Only apply once the viewport has stopped moving: re-laying out during the
-      // keyboard animation makes Safari re-scroll, and the panel shakes.
-      const key = viewportKey();
-      if (key === lastViewport) { clearTimeout(fitTimer); fitTimer = 0; return; }
-      if (key === pendingViewport && fitTimer) return;
-      pendingViewport = key;
-      clearTimeout(fitTimer);
-      fitTimer = setTimeout(() => {
-        fitTimer = 0;
-        if (!chat.classList.contains('is-open')) return;
+      if (!chat.classList.contains('is-open') || !window.visualViewport || !mobileChat.matches) {
         if (!mobileChat.matches) {
           chat.style.transform = '';
           chat.style.removeProperty('--vvh');
-          lastViewport = '';
-          return;
         }
-        const now = viewportKey();
-        if (now !== pendingViewport) { fitChatToViewport(); return; }
-        if (now === lastViewport) return;
-        lastViewport = now;
+        return;
+      }
+      if (fitRaf) return;
+      fitRaf = requestAnimationFrame(() => {
+        fitRaf = 0;
+        if (!chat.classList.contains('is-open') || !mobileChat.matches) return;
         const vv = window.visualViewport;
         const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
-        chat.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
-        chat.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
-        if (window.scrollY) window.scrollTo(0, 0);
+        const vvh = Math.round(vv.height);
+        const offsetTop = Math.round(vv.offsetTop);
+
+        chat.style.setProperty('--vvh', `${vvh}px`);
+        chat.style.transform = offsetTop > 0 ? `translateY(${offsetTop}px)` : '';
+        if (window.scrollY !== 0) window.scrollTo(0, 0);
         if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
-      }, 90);
+      });
     }
-    // Safari fires the viewport events late (or not at all) around focus; poll briefly.
+
     function settleChatViewport() {
-      for (const ms of [50, 150, 300, 600]) setTimeout(fitChatToViewport, ms);
+      fitChatToViewport();
+      requestAnimationFrame(fitChatToViewport);
+      setTimeout(fitChatToViewport, 100);
+      setTimeout(fitChatToViewport, 300);
     }
     chatInput.addEventListener('focus', settleChatViewport);
     chatInput.addEventListener('blur', settleChatViewport);
