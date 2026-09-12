@@ -84,6 +84,26 @@
     }
     .sandalwood-text { color: #D8B894; }
     .button.hero-cta { background: #D8B894; box-shadow: 0 12px 28px rgba(216,184,148,.25); }
+    .founders-coupon {
+      display: block; max-width: 420px; margin: 26px auto 0; padding: 18px 20px 16px;
+      text-decoration: none; color: var(--white); text-align: center;
+      background: rgba(18, 30, 22, .78);
+      border: 2px dashed rgba(216, 184, 148, .65); border-radius: 14px;
+      backdrop-filter: blur(4px);
+      transition: transform .15s, border-color .15s;
+    }
+    .founders-coupon:hover { transform: translateY(-2px); border-color: var(--gold); }
+    .founders-coupon .coupon-kicker {
+      color: var(--gold); font-size: .72rem; font-weight: 800;
+      letter-spacing: .28em; text-transform: uppercase; margin: 0 0 8px;
+    }
+    .founders-coupon .coupon-offer { font-size: 1.12rem; font-weight: 700; margin: 0 0 6px; line-height: 1.4; }
+    .founders-coupon .coupon-code {
+      display: inline-block; margin: 4px 0 8px; padding: 6px 18px;
+      font-weight: 800; letter-spacing: .24em; color: #0b120d;
+      background: #D8B894; border-radius: 8px; font-size: 1rem;
+    }
+    .founders-coupon .coupon-fine { color: var(--muted); font-size: .78rem; margin: 0; line-height: 1.5; }
 
     .topbar {
       position: fixed; z-index: 20; top: 0; left: 0; right: 0;
@@ -418,6 +438,12 @@
         <a class="hero-install" href="#" id="hero-install" hidden>Get the app — free, no app store</a>
         <p class="hero-sub">Every one of them a locked door.</p>
         <a class="button hero-cta" href="#town">Come into town ↓</a>
+        <a class="founders-coupon" href="#plans">
+          <p class="coupon-kicker">Founders Day</p>
+          <p class="coupon-offer">$7 off Resident every month for your first year</p>
+          <span class="coupon-code">FOUNDERS</span>
+          <p class="coupon-fine">Use the code at checkout. Then it's $14.99/mo — the doors stay the same either way.</p>
+        </a>
       </div>
     </section>
 
