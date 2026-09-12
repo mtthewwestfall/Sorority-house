@@ -175,23 +175,6 @@
     .hallway h2 { margin-bottom: 10px; }
     .hallway p { color: var(--muted); font-size: 1.1rem; }
 
-    .scoreboard { display: none !important; }
-    .score-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; max-width: 900px; margin: 0 auto; }
-    .score-row { border: 1px solid var(--line); border-radius: 18px; padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; background: var(--panel-2); }
-    .score-row span:first-child { font-size: 1.2rem; }
-    .score-num { font-family: Impact, sans-serif; font-size: 2.5rem; color: var(--pink); }
-    .score-num small { color: var(--gold); font-size: 1.2rem; }
-    .leaderboard { max-width: 900px; margin: 44px auto 0; }
-    .leaderboard h3 { text-align: center; text-transform: uppercase; letter-spacing: .28em; font-size: .78rem; color: var(--gold); margin-bottom: 18px; }
-    .lb-table { width: 100%; border-collapse: collapse; background: var(--panel-2); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
-    .lb-table th, .lb-table td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--line); }
-    .lb-table th { font-size: .72rem; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); }
-    .lb-table tr:last-child td { border-bottom: 0; }
-    .lb-table td.lb-rank { font-family: Impact, sans-serif; font-size: 1.6rem; color: var(--pink); width: 64px; }
-    .lb-table td.lb-num { text-align: right; font-weight: 700; }
-    .lb-note { text-align: center; opacity: .7; font-size: .85rem; margin-top: 12px; }
-    .all-six { max-width: 900px; margin: 18px auto 0; padding: 30px; border-radius: 18px; text-align: center; border: 1px solid rgba(255,42,145,.5); background: linear-gradient(120deg, rgba(255,42,145,.1), rgba(255,181,44,.08)); }
-    .all-six strong { display: block; font: 4.5rem Impact, sans-serif; color: var(--gold); }
 
     .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
     .step { padding: 30px 26px; border-top: 2px solid var(--pink); background: rgba(27,18,45,.68); border-radius: 0 0 18px 18px; }
@@ -373,7 +356,7 @@
       nav a:not(.nav-cta) { display: none; }
       .hero { min-height: 720px; }
       section { padding: 76px 0; }
-      .doors, .plan-grid, .score-grid, .extras, .merch-grid { grid-template-columns: 1fr; }
+      .doors, .plan-grid, .extras, .merch-grid { grid-template-columns: 1fr; }
       .door-card { min-height: auto; }
       .door-art { height: 300px; }
       .hallway { min-height: 330px; }
@@ -481,25 +464,6 @@
       </div>
     </section>
 
-    <section id="scoreboard" class="scoreboard" style="display:none;">
-      <div class="wrap">
-        <div class="section-head"><p class="eyebrow">The scoreboard</p><h2>How far have you made it?</h2></div>
-        <div class="score-grid">
-          <div class="score-row"><span>Dakota reached</span><span class="score-num">0<small>/4</small></span></div>
-          <div class="score-row"><span>Zoe reached</span><span class="score-num">0<small>/4</small></span></div>
-          <div class="score-row"><span>Willow reached</span><span class="score-num">0<small>/4</small></span></div>
-          <div class="score-row"><span>Brittany reached</span><span class="score-num">0<small>/4</small></span></div>
-          <div class="score-row"><span>Sasha reached</span><span class="score-num">0<small>/4</small></span></div>
-          <div class="score-row"><span>Piper reached</span><span class="score-num">0<small>/4</small></span></div>
-          <div class="score-row"><span>Veronica reached</span><span class="score-num">0<small>/4</small></span></div>
-        </div>
-        <div class="all-six">Players who reached all 28<strong id="all-six-count">0</strong></div>
-        <div class="leaderboard">
-          <h3>Top players</h3>
-          <div id="leaderboard"><p class="lb-note">Loading the rankings…</p></div>
-        </div>
-      </div>
-    </section>
 
     <section id="how-it-works">
       <div class="wrap">
@@ -1464,34 +1428,6 @@
     }
 
     // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
-    // Leaderboard: the API only returns a shortened display name + progress.
-    function lbName(raw) {
-      const name = String(raw || '').trim();
-      if (!name || name.toLowerCase() === 'guest' || name.toLowerCase() === 'player') return 'Anonymous';
-      const parts = name.split(/\s+/);
-      return parts.length > 1 ? parts[0] + ' ' + parts[1][0].toUpperCase() + '.' : parts[0];
-    }
-    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-    function renderLeaderboard(rows) {
-      const box = document.getElementById('leaderboard');
-      const ranked = rows.filter(r => r.milestone);
-      if (!ranked.length) {
-        box.innerHTML = '<p class="lb-note">No one has earned trust yet. Be the first.</p>';
-        return;
-      }
-      const top = ranked.slice(0, 10);
-      box.innerHTML = '<table class="lb-table"><thead><tr><th>#</th><th>Player</th><th style="text-align:right">Milestone</th><th style="text-align:right">Doors</th></tr></thead><tbody>' +
-        top.map((r, i) => '<tr><td class="lb-rank">' + (i + 1) + '</td><td>' + esc(lbName(r.display_name)) + (r.starred ? ' *' : '') + '</td><td class="lb-num">' + esc(r.milestone) + '</td><td class="lb-num">' + esc(r.girls_reached || 0) + '</td></tr>').join('') +
-        '</tbody></table><p class="lb-note">Ranked by furthest milestone reached. Only first names are shown.</p>';
-      const allSix = rows.filter(r => (r.girls_reached || 0) >= 28).length;
-      document.getElementById('all-six-count').textContent = allSix;
-    }
-    fetch(API_BASE_URL + '/leaderboard')
-      .then(r => r.json())
-      .then(d => renderLeaderboard(d.leaderboard || []))
-      .catch(() => {
-        document.getElementById('leaderboard').innerHTML = '<p class="lb-note">Rankings are taking a nap. Check back soon.</p>';
-      });
 
     const SHOPIFY_STOREFRONT_URL = 'https://sororityhouse-zlw64-vet1iva0.myshopify.com/api/2025-07/graphql.json';
     const SHOPIFY_STOREFRONT_TOKEN = '17478e428d0dbb29bf9a6d161c6c6b65';
