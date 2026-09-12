@@ -1682,8 +1682,9 @@
         if (auditBtn) auditBtn.hidden = false;
         if (actionsBar) actionsBar.hidden = false;
 
+        const compMilestone = (typeof comp.milestone === 'number') ? comp.milestone : 0;
         if (proposeBtn) {
-          proposeBtn.hidden = (comp.milestone < 4 || comp.is_married);
+          proposeBtn.hidden = (compMilestone < 4 || comp.is_married);
           proposeBtn.onclick = async () => {
             if (!confirm('Propose marriage to ' + comp.first_name + '?')) return;
             try {
@@ -1698,7 +1699,7 @@
         }
 
         if (rememberBtn) {
-          rememberBtn.hidden = (comp.milestone < 5);
+          rememberBtn.hidden = (compMilestone < 5);
           rememberBtn.onclick = async () => {
             const name = prompt('Enter a person\'s name for ' + comp.first_name + ' to remember (e.g. Matt):');
             if (!name) return;
