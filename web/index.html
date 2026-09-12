@@ -141,6 +141,68 @@
     .section-head p { color: var(--muted); font-size: 1.1rem; }
 
     .doors-section { background: linear-gradient(180deg, rgba(20, 9, 29, .2), rgba(21, 13, 39, .7)); }
+
+    /* Crossroads signpost: enter town, pick your way. */
+    #town { scroll-margin-top: 90px; }
+    .crossroads {
+      margin-top: 30px; border-radius: 18px; overflow: hidden;
+      border: 1px solid rgba(216, 184, 148, .24);
+      background: linear-gradient(180deg, rgba(8,14,10,.55) 0%, rgba(8,14,10,.88) 100%), url('assets/bg-the-pines.jpg') center/cover;
+    }
+    .crossroads-inner { display: flex; gap: 28px; align-items: center; padding: 34px 30px; }
+    .crossroads-copy { flex: 1 1 55%; min-width: 0; }
+    .crossroads-copy h3 { color: var(--gold); font-size: 1.25rem; margin: 0 0 14px; }
+    .crossroads-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .crossroads-legend a {
+      display: block; text-decoration: none; color: var(--white);
+      background: rgba(18, 30, 22, .78); border: 1px solid rgba(216, 184, 148, .22);
+      border-radius: 12px; padding: 12px 16px; transition: border-color .15s, transform .15s;
+    }
+    .crossroads-legend a:hover { border-color: rgba(46,157,75,.65); transform: translateY(-2px); }
+    .crossroads-legend strong { color: var(--gold); display: block; font-size: 1.02rem; margin-bottom: 2px; }
+    .crossroads-legend span { color: var(--muted); font-size: .92rem; line-height: 1.5; }
+    .signpost { position: relative; flex: 0 0 240px; height: 400px; margin: 0 auto; }
+    .signpost .post {
+      position: absolute; left: 50%; top: 0; bottom: 0; width: 26px; transform: translateX(-50%);
+      background: linear-gradient(90deg, #4a3220 0%, #6b4a2f 30%, #7d5a38 50%, #5a3d26 75%, #3a2617 100%);
+      border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    }
+    .signpost .post::after {
+      content: ""; position: absolute; left: 50%; top: -14px; transform: translateX(-50%);
+      width: 44px; height: 22px; background: #2e1f12; border-radius: 50% 50% 8px 8px;
+    }
+    .signpost .arm {
+      position: absolute; top: 0; height: 52px; width: 196px;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(180deg, #8a653c 0%, #6f4e2d 45%, #5c3f24 100%);
+      border: 1px solid rgba(30,18,8,.6);
+      color: #f7ead0; font-weight: 800; font-size: .98rem; letter-spacing: .04em;
+      text-decoration: none; text-shadow: 0 1px 0 rgba(0,0,0,.55), 0 -1px 0 rgba(255,240,210,.15);
+      box-shadow: 0 4px 10px rgba(0,0,0,.45);
+      transition: transform .15s, filter .15s;
+    }
+    .signpost .arm:hover { filter: brightness(1.12); }
+    .signpost .arm .nail {
+      position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #d8c9a8, #6b5a3e 70%);
+      transform: translateY(-50%); box-shadow: inset 0 1px 2px rgba(0,0,0,.6);
+    }
+    .signpost .arm.right { left: 50%; clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 0 100%); }
+    .signpost .arm.right .nail { left: 14px; }
+    .signpost .arm.left { right: 50%; clip-path: polygon(26px 0, 100% 0, 100% 100%, 26px 100%, 0 50%); }
+    .signpost .arm.left .nail { right: 14px; }
+    .signpost .arm-1 { top: 28px; transform: rotate(-2deg); }
+    .signpost .arm-2 { top: 118px; transform: rotate(1.6deg); }
+    .signpost .arm-3 { top: 208px; transform: rotate(-1.4deg); }
+    .signpost .arm-4 { top: 298px; transform: rotate(2deg); }
+    .signpost .arm-1:hover { transform: rotate(-2deg) scale(1.03); }
+    .signpost .arm-2:hover { transform: rotate(1.6deg) scale(1.03); }
+    .signpost .arm-3:hover { transform: rotate(-1.4deg) scale(1.03); }
+    .signpost .arm-4:hover { transform: rotate(2deg) scale(1.03); }
+    @media (max-width: 760px) {
+      .crossroads-inner { flex-direction: column; padding: 26px 20px; }
+      .signpost { flex-basis: auto; transform: scale(.86); margin: -18px 0; }
+    }
     .doors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
     .door-card {
       position: relative; overflow: hidden; min-height: 530px; border-radius: 24px; border: 1px solid var(--line);
@@ -429,14 +491,25 @@
           <p>That's where Maple Hollow is — a town nobody passes through on purpose.<br><br>
           The people there — guys and girls — each have their own walls. You can't rush them. You can't buy them. You earn them — over real days, the way trust actually works.</p>
 
-          <div style="text-align: left; background: rgba(18, 30, 22, .82); padding: 25px; border-radius: 18px; border: 1px solid rgba(216, 184, 148, .24); margin-top: 30px;">
-            <h3 style="color: var(--gold); font-size: 1.2rem; margin-bottom: 15px;">Four corners of town. Every one of them has a reason their walls are up.</h3>
-            <ul style="color: var(--muted); line-height: 1.8; padding-left: 20px; font-size: 1rem;">
-              <li><a href="areas/main-street.html" style="color: var(--white);"><strong>Main Street</strong></a> — Storefronts, the diner, the post office. First hellos.</li>
-              <li><a href="areas/the-pines.html" style="color: var(--white);"><strong>The Pines</strong></a> — Cabins tucked back in the trees. The quiet ones.</li>
-              <li><a href="areas/creekside.html" style="color: var(--white);"><strong>Creekside</strong></a> — Houses along the water. People who've been here longest.</li>
-              <li><a href="areas/mill-road.html" style="color: var(--white);"><strong>Mill Road</strong></a> — The edge of town. The ones still deciding whether to stay.</li>
-            </ul>
+          <div class="crossroads">
+            <div class="crossroads-inner">
+              <div class="signpost" aria-label="Town crossroads signpost">
+                <div class="post"></div>
+                <a class="arm right arm-1" href="areas/main-street.html"><span class="nail"></span>Main Street</a>
+                <a class="arm left arm-2" href="areas/the-pines.html"><span class="nail"></span>The Pines</a>
+                <a class="arm right arm-3" href="areas/creekside.html"><span class="nail"></span>Creekside</a>
+                <a class="arm left arm-4" href="areas/mill-road.html"><span class="nail"></span>Mill Road</a>
+              </div>
+              <div class="crossroads-copy">
+                <h3>Four corners of town. Every one of them has a reason their walls are up.</h3>
+                <ul class="crossroads-legend">
+                  <li><a href="areas/main-street.html"><strong>Main Street</strong><span>Storefronts, the diner, the post office. First hellos.</span></a></li>
+                  <li><a href="areas/the-pines.html"><strong>The Pines</strong><span>Cabins tucked back in the trees. The quiet ones.</span></a></li>
+                  <li><a href="areas/creekside.html"><strong>Creekside</strong><span>Houses along the water. People who've been here longest.</span></a></li>
+                  <li><a href="areas/mill-road.html"><strong>Mill Road</strong><span>The edge of town. The ones still deciding whether to stay.</span></a></li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
         <!-- Custom Companion Banner & Container -->
@@ -987,6 +1060,7 @@
       document.getElementById('footer-profile').hidden = !logged;
       if (!logged) { myAvatar = null; refreshAvatarThumb(); }
     };
+    updateAuthLinks();
 
     async function postJson(path, body, withAuth) {
       const response = await fetch(API_BASE_URL + path, {
@@ -2295,4 +2369,5 @@
   </script>
 </body>
 </html>
+
 
