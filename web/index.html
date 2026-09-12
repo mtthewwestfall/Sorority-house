@@ -1283,15 +1283,16 @@
       doorsGrid.innerHTML = girls.map((g) => {
         const name = escapeHtml(g.name || g.girl);
         const avatar = escapeHtml(g.avatar_url);
+        const doorTitle = escapeHtml(g.door_title || g.role_title || '');
         return '<article id="door-' + escapeHtml(g.girl) + '" class="door-card open" data-girl="' + escapeHtml(g.girl) + '"' +
           ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
-          ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
+          ' data-name="' + name + '" data-title="' + doorTitle + '"' +
           ' data-avatar="' + avatar + '">' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
           (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
           '<div class="door-copy"><div class="door-status">Trust earned</div>' +
           '<div class="door-name">' + name + '</div>' +
-          '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
+          '<div class="door-title">' + doorTitle + '</div>' +
           '<p>' + escapeHtml(g.blurb) + '</p>' +
           '<button class="button door-cta" type="button">Talk to ' + name + '</button></div>' +
           '</article>';
