@@ -22,8 +22,8 @@
       --line: rgba(218, 188, 255, .24);
       --white: #fff9ff;
       --muted: #c7b9ca;
-      --gold: #ffb52c;
-      --pink: #ff2a91;
+      --gold: #2E9D4B;
+      --pink: #D8B894;
       --violet: #bc51dd;
       --blue: #273b79;
       --shadow: 0 22px 70px rgba(0,0,0,.45);
@@ -79,7 +79,7 @@
     h1, h2, h3, p { margin-top: 0; }
     h2 { font-size: clamp(2.6rem, 7vw, 5.8rem); line-height: .98; margin-bottom: 22px; }
     .gradient-text {
-      background: linear-gradient(100deg, #ff2894 5%, #c74edc 55%, #ffc14e 100%);
+      background: linear-gradient(100deg, #D8B894 5%, #c74edc 55%, #2E9D4B 100%);
       -webkit-background-clip: text; background-clip: text; color: transparent;
     }
 
@@ -94,7 +94,7 @@
     nav { display: flex; gap: 22px; align-items: center; }
     nav a { text-decoration: none; color: var(--muted); font-size: .86rem; }
     nav a:hover { color: var(--white); }
-    .nav-cta { border: 1px solid rgba(255,181,44,.5); border-radius: 999px; padding: 8px 14px; color: var(--gold); }
+    .nav-cta { border: 1px solid rgba(46,157,75,.5); border-radius: 999px; padding: 8px 14px; color: var(--gold); }
 
     /* Install invitation: only ever shown to a browser that can actually install. */
     .install-bar {
@@ -117,7 +117,7 @@
 
     .hero {
       min-height: 820px; display: grid; place-items: center; text-align: center; position: relative; overflow: hidden;
-      background: radial-gradient(circle at 50% 30%, rgba(255,42,145,.35), rgba(21,14,35,0) 60%), linear-gradient(160deg, #2a1440, #0b0611);
+      background: radial-gradient(circle at 50% 30%, rgba(216,184,148,.35), rgba(21,14,35,0) 60%), linear-gradient(160deg, #2a1440, #0b0611);
     }
     .hero::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 15%, rgba(11,5,20,.55) 78%); }
     .hero-content { position: relative; max-width: 900px; padding: 140px 0 90px; }
@@ -144,10 +144,10 @@
       position: relative; overflow: hidden; min-height: 530px; border-radius: 24px; border: 1px solid var(--line);
       background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease;
     }
-    .door-card:hover { transform: translateY(-6px); border-color: rgba(255,181,44,.66); }
+    .door-card:hover { transform: translateY(-6px); border-color: rgba(46,157,75,.66); }
     .door-art {
       position: relative; height: 285px; overflow: hidden; display: grid; place-items: center;
-      background: radial-gradient(circle at 50% 35%, rgba(255,42,145,.55), rgba(21,14,35,0) 60%), linear-gradient(160deg, #2a1440, #120b1f);
+      background: radial-gradient(circle at 50% 35%, rgba(216,184,148,.55), rgba(21,14,35,0) 60%), linear-gradient(160deg, #2a1440, #120b1f);
     }
     .door-art::before { content: attr(data-initial); font-family: Impact, sans-serif; font-size: 7rem; color: rgba(255,255,255,.14); letter-spacing: .04em; }
     .door-art img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -163,10 +163,10 @@
     .door-title { color: var(--gold); text-transform: uppercase; letter-spacing: .28em; font-size: .72rem; margin-bottom: 14px; }
     .door-copy p { color: var(--muted); margin-bottom: 0; }
 
-    .trial-banner { margin-top: 42px; text-align: center; padding: 42px 25px; border: 1px solid rgba(255,42,145,.45); border-radius: 22px; background: linear-gradient(110deg, rgba(255,37,143,.92), rgba(189,75,221,.9), rgba(255,181,44,.92)); color: #16091c; }
+    .trial-banner { margin-top: 42px; text-align: center; padding: 42px 25px; border: 1px solid rgba(216,184,148,.45); border-radius: 22px; background: linear-gradient(110deg, rgba(255,37,143,.92), rgba(189,75,221,.9), rgba(46,157,75,.92)); color: #16091c; }
     .trial-banner h3 { font-size: clamp(2rem, 5vw, 3.6rem); margin-bottom: 8px; }
     .trial-banner p { margin: 0; font-weight: 650; }
-    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 0; cursor: pointer; text-decoration: none; border-radius: 999px; padding: 14px 23px; font-weight: 800; color: #170817; background: linear-gradient(100deg, #ff2894, #ffb52c); box-shadow: 0 12px 28px rgba(255,42,145,.2); }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 0; cursor: pointer; text-decoration: none; border-radius: 999px; padding: 14px 23px; font-weight: 800; color: #170817; background: linear-gradient(100deg, #D8B894, #2E9D4B); box-shadow: 0 12px 28px rgba(216,184,148,.2); }
     .button:hover { filter: brightness(1.1); }
     .button.dark { background: #171021; color: var(--white); border: 1px solid var(--line); box-shadow: none; }
     .trial-banner .button { margin-top: 20px; background: #170817; color: white; }
@@ -188,7 +188,7 @@
     .plans { background: linear-gradient(180deg, rgba(11,7,19,.5), rgba(35,12,43,.55)); }
     .plan-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: stretch; }
     .plan { display: flex; flex-direction: column; padding: 28px 23px; border: 1px solid var(--line); border-radius: 21px; background: rgba(26,17,42,.82); }
-    .plan.featured { border-color: var(--pink); box-shadow: 0 0 0 1px rgba(255,42,145,.15), 0 22px 60px rgba(255,42,145,.1); }
+    .plan.featured { border-color: var(--pink); box-shadow: 0 0 0 1px rgba(216,184,148,.15), 0 22px 60px rgba(216,184,148,.1); }
     .plan h3 { font-size: 1.5rem; margin-bottom: 10px; }
     .price { font-size: 2.2rem; font-weight: 850; margin-bottom: 18px; }
     .price small { color: var(--muted); font-size: .85rem; font-weight: 500; }
@@ -204,7 +204,7 @@
     .merch { background: rgba(12, 8, 24, .74); }
     .merch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 900px; margin: 0 auto; }
     .merch-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease; }
-    .merch-card:hover { transform: translateY(-6px); border-color: rgba(255,181,44,.66); }
+    .merch-card:hover { transform: translateY(-6px); border-color: rgba(46,157,75,.66); }
     .merch-card img { width: 100%; aspect-ratio: 1 / 1; display: block; object-fit: cover; background: rgba(9,7,17,.6); }
     .merch-body { display: flex; flex-direction: column; gap: 10px; padding: 24px 24px 28px; flex: 1; }
     .merch-body h3 { font-size: 1.7rem; margin: 0; }
@@ -212,7 +212,7 @@
     .merch-body p { color: var(--muted); margin: 0; flex: 1; }
     .merch-row { display: flex; gap: 10px; margin-top: 8px; }
     .merch-row select { flex: 1; min-width: 0; border-radius: 999px; padding: 12px 16px; font: inherit; color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line); }
-    .merch-row select:focus { outline: none; border-color: rgba(255,181,44,.6); }
+    .merch-row select:focus { outline: none; border-color: rgba(46,157,75,.6); }
     .merch-row .button[disabled] { opacity: .5; cursor: not-allowed; }
     .merch-note { text-align: center; color: var(--muted); margin: 0; }
 
@@ -241,7 +241,7 @@
     /* iMessage-style layout: avatar + name header, tailed bubbles, pill composer. */
     .chat-panel { --bubble-her: #2a1d40; --bubble-me: var(--pink); --panel: #150e23; }
     .chat-head { position: relative; display: flex; align-items: center; gap: 18px; padding: 18px 22px 8px 72px; }
-    .chat-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex: none; background: linear-gradient(160deg, #ff2894, #bd4bdd); color: transparent; border: 2px solid rgba(255,255,255,.08); }
+    .chat-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex: none; background: linear-gradient(160deg, #D8B894, #bd4bdd); color: transparent; border: 2px solid rgba(255,255,255,.08); }
     .chat-head .who { flex: 1; min-width: 0; }
     .chat-head .who strong { display: block; font-size: 1.55rem; font-weight: 700; letter-spacing: -.01em; }
     .chat-head .who div { color: var(--muted); font-size: .78rem; margin-top: 2px; }
@@ -266,7 +266,7 @@
     .msg.stamp b { font-weight: 600; }
     .msg.receipt { align-self: flex-end; max-width: 100%; color: var(--muted); font-size: .72rem; background: none; padding: 0 4px; margin: -2px 0 8px; }
     .msg.receipt b { font-weight: 600; }
-    .msg.error { align-self: center; max-width: 100%; text-align: center; color: #ffb0c9; border: 1px solid rgba(255,42,145,.4); background: rgba(255,42,145,.08); font-size: .84rem; }
+    .msg.error { align-self: center; max-width: 100%; text-align: center; color: #e9d3b8; border: 1px solid rgba(216,184,148,.4); background: rgba(216,184,148,.08); font-size: .84rem; }
     .typing { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; margin: 4px 0 8px; }
     .chat-foot { padding: 10px 12px 14px; }
     .chat-form { display: flex; align-items: flex-end; gap: 10px; }
@@ -284,12 +284,12 @@
     .auth-panel .auth-sub { color: var(--muted); font-size: .9rem; margin: 0 0 8px; }
     .auth-panel form { display: flex; flex-direction: column; gap: 10px; }
     .auth-panel input { border-radius: 12px; padding: 12px 14px; font: inherit; color: var(--white); background: rgba(9,7,17,.85); border: 1px solid var(--line); }
-    .auth-panel input:focus { outline: none; border-color: rgba(255,181,44,.6); }
+    .auth-panel input:focus { outline: none; border-color: rgba(46,157,75,.6); }
     .auth-panel .button { justify-content: center; }
     .auth-switch { color: var(--muted); font-size: .84rem; text-align: center; margin: 6px 0 0; }
     .auth-switch a, .auth-msg a { color: var(--gold); cursor: pointer; text-decoration: underline; }
     .auth-msg { min-height: 1.2em; font-size: .86rem; text-align: center; color: var(--muted); }
-    .auth-msg.error { color: #ffb0c9; }
+    .auth-msg.error { color: #e9d3b8; }
     .auth-msg.ok { color: #b8f5c9; }
     .auth-close { position: absolute; top: 12px; right: 14px; }
     .auth-panel { position: relative; }
@@ -332,7 +332,7 @@
     .chat-close { background: rgba(0,0,0,.05); color: var(--chat-ink); }
     .chat-close:hover { background: rgba(0,0,0,.1); }
     .msg.her { color: var(--chat-ink); }
-    .msg.error { color: #b3123f; border-color: rgba(255,42,145,.35); background: rgba(255,42,145,.06); }
+    .msg.error { color: #b3123f; border-color: rgba(216,184,148,.35); background: rgba(216,184,148,.06); }
     .chat-form textarea { color: var(--chat-ink); background: #fff; border-color: var(--chat-line); }
     .chat-form textarea::placeholder { color: var(--chat-muted); }
     .chat-form textarea:focus { border-color: rgba(0,0,0,.3); }
