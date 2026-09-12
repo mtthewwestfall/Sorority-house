@@ -1283,31 +1283,20 @@ def door_pairs(house, size=DOOR_PAIR):
 
 
 def open_doors(user_id, tier, house=None, milestones=None, rules=None):
-    """girl -> door state for this user. A door is open when it has been EARNED
-    (first set free; each later set once the user hit the unlock stage with one
-    of the set before it - unless the admin turned door locking off) AND the
-    user's tier covers her min_tier. A shut door carries the reason so the
-    frontend can say what would open it."""
+    """girl -> door state for this user. PRODUCT LAW: every resident is
+    immediately accessible — a door is open whenever the user's tier covers
+    her min_tier. Trust is earned emotionally through real days and conduct,
+    never via an access lock, so the old earned/unlock-stage gating is gone."""
     house = house if house is not None else roster()
-    rules = rules if rules is not None else door_rules()
-    reached = milestones if milestones is not None else milestones_for(user_id)
     rank = tier_rank(tier)
-    stage = rules["unlock_stage"]
-    doors, earned, previous = {}, True, []
-    for pair in door_pairs(house, rules["door_set"]):
-        if previous and rules["doors_locked"]:
-            earned = any(reached.get(g["girl"], 0) >= stage for g in previous)
-        for r in pair:
-            paid = tier_rank(r["min_tier"]) <= rank
-            if earned and paid:
-                reason = ""
-            elif not earned:
-                reason = "Reach stage %d with %s to open this door" % (
-                    stage, " or ".join(g["name"] for g in previous))
-            else:
-                reason = TIERS.get(r["min_tier"], {}).get("label", r["min_tier"].title()) + " exclusive"
-            doors[r["girl"]] = {"open": not reason, "earned": earned, "paid": paid, "reason": reason}
-        previous = pair
+    doors = {}
+    for r in house:
+        if not r["active"]:
+            continue
+        paid = tier_rank(r["min_tier"]) <= rank
+        reason = "" if paid else (
+            TIERS.get(r["min_tier"], {}).get("label", r["min_tier"].title()) + " exclusive")
+        doors[r["girl"]] = {"open": not reason, "earned": True, "paid": paid, "reason": reason}
     return doors
 
 
