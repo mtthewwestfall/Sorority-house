@@ -1886,15 +1886,6 @@ const PRESET_FACES = {
       if (!companionMsg) return;
       companionMsg.textContent = text || '';
       companionMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
-      if (kind === 'error') {
-        companionMsg.style.color = '#ff4d4f';
-      } else if (kind === 'ok') {
-        companionMsg.style.color = '#7fbf7f';
-      } else if (text) {
-        companionMsg.style.color = 'var(--gold)';
-      } else {
-        companionMsg.style.color = '';
-      }
     }
 
     if (companionForm) {
