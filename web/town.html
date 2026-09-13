@@ -65,6 +65,32 @@
       .signpost-photo { flex-basis: auto; width: 260px; height: 330px; }
     }
 
+    /* Caught in the act + winter row */
+    .kiss-feature {
+      display: flex; gap: 28px; align-items: center;
+      margin: 34px 0 22px; padding: 30px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    }
+    .kiss-feature img {
+      flex: 0 0 320px; width: 320px; border-radius: 14px;
+      border: 1px solid var(--line); display: block;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    }
+    .kiss-feature h2 { color: var(--gold); font-size: 1.35rem; margin: 0 0 8px; }
+    .kiss-feature p { color: var(--muted); margin: 0; line-height: 1.65; }
+    .winter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 8px; }
+    .winter-row figure {
+      margin: 0; background: var(--panel);
+      border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+    }
+    .winter-row img { width: 100%; height: 250px; object-fit: cover; display: block; }
+    .winter-row figcaption { padding: 12px 16px 14px; color: var(--muted); font-size: .92rem; line-height: 1.55; }
+    @media (max-width: 760px) {
+      .kiss-feature { flex-direction: column; padding: 22px 18px; }
+      .kiss-feature img { flex-basis: auto; width: 100%; }
+      .winter-row { grid-template-columns: 1fr; }
+    }
+
     .area-card .button { background: #556357; color: #E9E2D7; box-shadow: none; }
     
     /* ===== Dark scheme: #151715 bg -> #1E211E sections -> #E9E2D7 text ===== */
@@ -116,6 +142,25 @@
           <img src="assets/bg-mill-road.jpg" alt="The edge of town on Mill Road" />
           <div class="area-body"><strong>Mill Road</strong><span>The edge of town. The ones still deciding whether to stay.</span></div>
         </a>
+      </div>
+
+      <div class="kiss-feature">
+        <img src="assets/darwin-kissed.webp" alt="Dakota and Zoe kissing Darwin on the cheeks in the pines" />
+        <div>
+          <h2>Caught in the act</h2>
+          <p>Dakota and Zoe welcoming Darwin to town. Some doors open faster than others.</p>
+        </div>
+      </div>
+
+      <div class="winter-row">
+        <figure>
+          <img src="assets/group-ski-lodge.jpg" alt="Five Maple Hollow women smiling together at the ski lodge" />
+          <figcaption>The lodge crowd, all smiles. Winter brings everybody out of the woodwork.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/group-snow-walk.jpg" alt="Five Maple Hollow women walking together through fresh snow" />
+          <figcaption>Main Street after a fresh snow. Nobody walks alone in this town.</figcaption>
+        </figure>
       </div>
 
       <p style="margin-top: 30px;"><a class="back" href="index.html">&larr; Back to the front page</a></p>
