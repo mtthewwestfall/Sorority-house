@@ -359,6 +359,8 @@
     #chat-photo-btn:hover:not([disabled]), #chat-audit-btn:hover:not([disabled]) { background: rgba(255,255,255,.14); }
     #chat-photo-btn[disabled], #chat-audit-btn[disabled] { opacity: .5; cursor: not-allowed; }
     #chat-photo-btn[hidden], #chat-audit-btn[hidden] { display: none; }
+    #companion-actions-bar { display: flex; }
+    #companion-actions-bar[hidden], #comp-propose-btn[hidden], #comp-remember-btn[hidden] { display: none; }
     .msg.audit { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.05); border: 1px solid var(--line); font-size: .92rem; line-height: 1.45; padding: 14px 16px; margin: 6px 0 10px; }
     .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 0 6px; }
     /* picture request sheet, opened from the + button */
@@ -1008,7 +1010,7 @@
           <strong id="chat-name"></strong>
           <div id="chat-title"></div>
         </div>
-        <div id="companion-actions-bar" style="margin-left: auto; display: flex; gap: 6px;" hidden>
+        <div id="companion-actions-bar" style="margin-left: auto; gap: 6px;" hidden>
           <button class="button dark" id="comp-propose-btn" type="button" style="font-size: 0.75rem; padding: 4px 8px;" hidden>Propose Marriage</button>
           <button class="button dark" id="comp-remember-btn" type="button" style="font-size: 0.75rem; padding: 4px 8px;" hidden>Remember Person</button>
         </div>
@@ -2036,7 +2038,7 @@ const PRESET_FACES = {
 
         if (photoBtn) photoBtn.hidden = false;
         if (auditBtn) auditBtn.hidden = false;
-        if (actionsBar) actionsBar.hidden = false;
+
 
         const compMilestone = (typeof comp.milestone === 'number') ? comp.milestone : 0;
         if (proposeBtn) {
@@ -2073,6 +2075,8 @@ const PRESET_FACES = {
             } catch (err) { alert('Failed to save memory'); }
           };
         }
+
+        if (actionsBar) actionsBar.hidden = (proposeBtn ? proposeBtn.hidden : true) && (rememberBtn ? rememberBtn.hidden : true);
 
         chatLog.innerHTML = '';
         receipt = null;
@@ -2734,6 +2738,7 @@ const PRESET_FACES = {
 </script>
 </body>
 </html>
+
 
 
 
