@@ -120,24 +120,7 @@
     nav a:hover { color: var(--white); }
     .nav-cta { border: 1px solid rgba(85,99,87,.6); border-radius: 999px; padding: 8px 14px; color: #E9E2D7; background: #556357; }
 
-    /* Install invitation: only ever shown to a browser that can actually install. */
-    .install-bar {
-      display: none; position: fixed; z-index: 25; left: 50%; transform: translateX(-50%);
-      bottom: 18px; width: calc(100% - 32px); max-width: 460px; gap: 14px; align-items: center;
-      padding: 12px 14px; border: 1px solid var(--line); border-radius: 18px;
-      background: var(--panel); backdrop-filter: blur(12px); box-shadow: var(--shadow);
-    }
-    .install-bar.show { display: flex; }
-    .install-bar img { width: 42px; height: 42px; border-radius: 12px; flex: none; }
-    .install-bar .install-copy { flex: 1; min-width: 0; font-size: .84rem; line-height: 1.35; }
-    .install-bar .install-copy strong { display: block; font-size: .9rem; }
-    .install-bar .install-copy span { color: var(--muted); }
-    .install-bar .button { padding: 9px 15px; font-size: .82rem; white-space: nowrap; }
-    .install-bar .button[hidden] { display: none; }
-    .install-bar .install-dismiss {
-      background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1;
-      padding: 0 2px; cursor: pointer; flex: none;
-    }
+
 
     .hero {
       min-height: 820px; display: grid; place-items: center; text-align: center; position: relative; overflow: hidden;
@@ -148,13 +131,6 @@
     .hero h1 { font-size: clamp(3.7rem, 11vw, 9rem); line-height: .84; margin: 0 0 30px; }
     .hero h1 span { display: block; }
     .hero-sub { font-size: clamp(1.25rem, 3vw, 2rem); color: #E9E2D7; margin-bottom: 32px; }
-    .hero-install {
-      display: inline-flex; align-items: center; gap: 8px; margin: -12px 0 26px; padding: 9px 16px;
-      border: 1px solid rgba(233,226,215,.22); border-radius: 999px; color: #E9E2D7; text-decoration: none;
-      font-size: .86rem; font-weight: 600; letter-spacing: .04em; background: rgba(30,33,30,.55);
-    }
-    .hero-install:hover { border-color: rgba(233,226,215,.4); background: rgba(30,33,30,.9); }
-    .hero-install[hidden] { display: none; }
     .challenge { color: var(--muted); font-size: clamp(1rem, 2vw, 1.3rem); margin-bottom: 50px; }
     .scroll-cue { color: var(--gold); text-transform: uppercase; letter-spacing: .33em; font-size: .75rem; }
 
@@ -430,7 +406,6 @@
   
     }
     .hall-card .button, .founders-coupon .button, .step .button, .plan .button,
-    .profile-card .button, .trial-banner .button, .install-bar .button,
     .audit-card .button, .merch-card .button, .photo-card .button, .auth-panel .button {
       background: #E9E2D7; color: #556357; box-shadow: none;
     }
@@ -443,13 +418,12 @@
     .button { background: #556357; color: #E9E2D7; box-shadow: 0 12px 28px rgba(0,0,0,.30); }
     .button.hero-cta { background: #556357; color: #E9E2D7; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
     .door-card, .founders-coupon, .step, .plan, .profile-card, .trial-banner,
-    .install-bar, .audit-card, .merch-card, .auth-panel {
+, .merch-card, .auth-panel {
       background: #1E211E; border-color: rgba(233,226,215,.14); color: #E9E2D7;
       --white: #E9E2D7; --muted: #8A7D6B; --line: rgba(233,226,215,.14);
       --pink: #8A7D6B; --gold: #8A7D6B;
     }
     .door-card .button, .founders-coupon .button, .step .button, .plan .button,
-    .profile-card .button, .trial-banner .button, .install-bar .button,
     .audit-card .button, .merch-card .button, .auth-panel .button {
       background: #556357; color: #E9E2D7; box-shadow: none;
     }
@@ -610,7 +584,6 @@
           <a class="rl-btn rl-btn-primary" href="#town">Start free trial</a>
           <a class="rl-btn rl-btn-ghost" href="town.html">Come into town ↓</a>
         </div>
-        <a class="hero-install" href="#" id="hero-install" hidden>Get the app — free, no app store</a>
       </div>
     </section>
 
@@ -841,7 +814,6 @@
           <h4>Account</h4>
           <a href="#" id="footer-profile" hidden>Profile</a>
           <a href="#" id="footer-auth">Sign in</a>
-          <a href="#" id="footer-install" hidden>Install the app</a>
           <a href="#top">Back to top ↑</a>
         </nav>
       </div>
@@ -851,15 +823,7 @@
     </div>
   </footer>
 
-  <div class="install-bar" id="install-bar">
-    <img src="assets/icon-192.png" alt="" />
-    <div class="install-copy">
-      <strong>Keep Maple Hollow on your phone</strong>
-      <span id="install-how">Install it and access the town straight from your home screen.</span>
-    </div>
-    <button class="button" type="button" id="install-go">Install</button>
-    <button class="install-dismiss" type="button" id="install-no" aria-label="Not now">&times;</button>
-  </div>
+
   <div class="chat-backdrop" id="auth" role="dialog" aria-modal="true" aria-labelledby="auth-heading">
     <div class="chat-panel auth-panel">
       <button class="chat-close auth-close" id="auth-close" type="button" aria-label="Close">&times;</button>
@@ -2643,87 +2607,12 @@ const PRESET_FACES = {
       });
     });
 
-    /* Maple Hollow as an installed app.
-       The service worker only caches the shipped shell, so an installed copy is the
-       same site in a standalone window: same API, same account, same conversations.
-       The invitation to install is shown once and only where installing is possible
-       — Chromium hands us a prompt, iOS Safari only has the Share sheet, and a copy
-       that is already installed is asked nothing. */
-    const INSTALL_DISMISSED = 'sorority_install_dismissed';
-
     if ('serviceWorker' in navigator && window.isSecureContext) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       });
     }
 
-    (function installInvite() {
-      const bar = document.getElementById('install-bar');
-      const how = document.getElementById('install-how');
-      const go = document.getElementById('install-go');
-      const footerLink = document.getElementById('footer-install');
-      const heroLink = document.getElementById('hero-install');
-      if (window.matchMedia('(display-mode: standalone)').matches
-          || window.navigator.standalone === true) return;
-
-      const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      const shareSheet = 'Tap the Share button, then "Add to Home Screen".';
-      let installEvent = null;
-
-      const show = () => bar.classList.add('show');
-      const offer = () => {
-        footerLink.hidden = false;
-        heroLink.hidden = false;
-        if (!localStorage.getItem(INSTALL_DISMISSED)) show();
-      };
-
-      window.addEventListener('beforeinstallprompt', (event) => {
-        event.preventDefault();
-        installEvent = event;
-        offer();
-      });
-
-      if (ios) {
-        how.textContent = shareSheet;
-        go.hidden = true;
-        offer();
-      }
-
-      go.addEventListener('click', () => {
-        if (!installEvent) { how.textContent = shareSheet; return; }
-        const chosen = installEvent;
-        installEvent = null;
-        // Handing over to the browser's own dialog is the end of our invitation: the
-        // event is spent whether it is taken or refused, and `userChoice` cannot be
-        // relied on to settle, so the bar closes now and only a fresh
-        // `beforeinstallprompt` brings the offer back.
-        bar.classList.remove('show');
-        footerLink.hidden = true;
-        heroLink.hidden = true;
-        chosen.prompt();
-      });
-
-      document.getElementById('install-no').addEventListener('click', () => {
-        bar.classList.remove('show');
-        localStorage.setItem(INSTALL_DISMISSED, '1');
-      });
-
-      for (const link of [footerLink, heroLink]) {
-        link.addEventListener('click', (event) => {
-          event.preventDefault();
-          localStorage.removeItem(INSTALL_DISMISSED);
-          if (installEvent) go.click();
-          else show();
-        });
-      }
-
-      window.addEventListener('appinstalled', () => {
-        bar.classList.remove('show');
-        footerLink.hidden = true;
-        heroLink.hidden = true;
-      });
-    })();
   </script>
 <script>
 (function(){
