@@ -311,8 +311,11 @@
     #profile-avatar-wrap.auth-hidden, #profile-no-avatar.auth-hidden { display: none; }
     /* Preset face picker (companion creation + avatar setup) */
     .face-picker-label { font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px; }
-    .face-picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-height: 300px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.18); }
-    .face-pick { border: 2px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; padding: 0; background: none; }
+    .face-picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-height: 280px; overflow-y: auto; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.18); box-sizing: border-box; }
+    @media (max-width: 480px) {
+      .face-picker { grid-template-columns: repeat(3, 1fr); }
+    }
+    .face-pick { border: 2px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; padding: 0; background: none; box-sizing: border-box; }
     .face-pick img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; border-radius: 8px; }
     .face-pick.selected { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
     .face-seg { display: flex; gap: 6px; margin-bottom: 8px; }
@@ -1710,6 +1713,7 @@ const PRESET_FACES = {
       const createBtn = document.getElementById('open-companion-create-btn');
       if (createBtn) {
         createBtn.addEventListener('click', () => {
+          setCompanionMsg('');
           document.getElementById('companion-modal').classList.add('is-open');
         });
       }
@@ -1842,6 +1846,12 @@ const PRESET_FACES = {
       });
     }
 
+    function setCompanionMsg(text, kind) {
+      if (!companionMsg) return;
+      companionMsg.textContent = text || '';
+      companionMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+
     if (companionForm) {
       const compGender = document.getElementById('comp-gender');
       renderFacePicker('comp-face-picker', 'comp-face-preset', compGender.value);
@@ -1856,17 +1866,14 @@ const PRESET_FACES = {
         }
         const preset = document.getElementById('comp-face-preset').value;
         if (!preset) {
-          companionMsg.textContent = 'Pick a face for your companion first.';
-          companionMsg.style.color = '#ff4d4f';
+          setCompanionMsg('Pick a face for your companion first.', 'error');
           return;
         }
         if (!document.getElementById('comp-consent').checked) {
-          companionMsg.textContent = 'Please confirm the portrait note to continue.';
-          companionMsg.style.color = '#ff4d4f';
+          setCompanionMsg('Please confirm the portrait note to continue.', 'error');
           return;
         }
-        companionMsg.textContent = 'Creating companion...';
-        companionMsg.style.color = 'var(--gold)';
+        setCompanionMsg('Creating companion...');
 
         try {
           const fd = new FormData();
@@ -1888,22 +1895,19 @@ const PRESET_FACES = {
           });
           const data = await res.json();
           if (res.ok) {
-            companionMsg.textContent = 'Companion created successfully!';
-            companionMsg.style.color = '#7fbf7f';
+            setCompanionMsg('Companion created successfully!', 'ok');
             companionForm.reset();
             renderFacePicker('comp-face-picker', 'comp-face-preset', compGender.value);
             setTimeout(() => {
               companionModal.classList.remove('is-open');
-              companionMsg.textContent = '';
+              setCompanionMsg('');
               loadCompanions();
             }, 1000);
           } else {
-            companionMsg.textContent = data.detail || 'Could not create companion.';
-            companionMsg.style.color = '#ff4d4f';
+            setCompanionMsg(errText(data, 'Could not create companion.'), 'error');
           }
         } catch (err) {
-          companionMsg.textContent = 'Creation failed. Please try again.';
-          companionMsg.style.color = '#ff4d4f';
+          setCompanionMsg('Creation failed. Please try again.', 'error');
         }
       });
     }
