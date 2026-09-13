@@ -50,11 +50,12 @@ self.addEventListener('fetch', (event) => {
           // passed through but never becomes the copy we open offline.
           if (response.ok) {
             const copy = response.clone();
-            caches.open(SHELL).then((cache) => cache.put('./index.html', copy)).catch(() => {});
+            caches.open(SHELL).then((cache) => cache.put(request, copy)).catch(() => {});
           }
           return response;
         })
-        .catch(() => caches.match('./index.html', { ignoreSearch: true })
+        .catch(() => caches.match(request, { ignoreSearch: true })
+          .then((hit) => hit || caches.match('./index.html', { ignoreSearch: true }))
           .then((hit) => hit || Response.error()))
     );
     return;
