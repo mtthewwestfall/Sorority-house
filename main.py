@@ -844,6 +844,7 @@ def init_db():
                     user_id TEXT PRIMARY KEY REFERENCES users(user_id),
                     max_slots INTEGER NOT NULL DEFAULT 1
                 );
+                ALTER TABLE user_companion_slots ADD COLUMN IF NOT EXISTS deleted_count INTEGER NOT NULL DEFAULT 0;
 
                 CREATE TABLE IF NOT EXISTS companions (
                     id SERIAL PRIMARY KEY,
@@ -3148,14 +3149,192 @@ Relationship & Intimacy Laws:
 - Post-Couple Conduct: After becoming a couple/married, STAY YOURSELF. Still tease, joke around, and keep your distinct personality."""
 
 
+# ---------------------------------------------------------------------------
+# COMPANION PHOTO UPLOAD + MODERATION ("the machine")
+# Uploaded photos are used ONCE as a portrait reference, moderated by a
+# two-judge stack (DeepSeek first, Gemini double-checks yellows), then
+# discarded -- never stored, never shown to anyone, never sent to the owner.
+# ---------------------------------------------------------------------------
+MAX_COMPANION_DELETES = 2             # "a couple" per account; change here, not in logic
+PHOTO_MAX_BYTES = 10 * 1024 * 1024    # 10MB cap on uploads
+
+_MODERATION_CRITERIA = (
+    "You are a photo moderator. Classify the photo with exactly one word: RED, YELLOW, or GREEN.\n"
+    "RED = any nudity (partial or full) OR anyone in the photo looks under 18.\n"
+    "YELLOW = borderline: the age is hard to tell, or the photo is suggestive but not nude.\n"
+    "GREEN = clearly an adult (18+) and the photo is non-sexual.\n"
+    "Reply with exactly one word: RED, YELLOW, or GREEN. No other text."
+)
+
+_PHOTO_DESCRIBE_PROMPT = (
+    "Describe exactly what you see in this photo, neutrally and factually: how many "
+    "people, the estimated age range of each person, what each person is wearing, "
+    "the setting. Visual facts only -- no judgments, no extra commentary."
+)
+
+_COMPANION_PORTRAIT_STYLE = (
+    "Redraw the person from the reference photo as a detailed digital illustration "
+    "portrait in a clean, high-quality stylized comic art / webtoon cover style -- "
+    "the Maple Hollow house style. Medium close-up portrait from the chest up, "
+    "subject looking directly at the viewer. Background: a dense, detailed coniferous "
+    "forest of pine and fir trees on rolling mountain slopes, soft natural daylight. "
+    "Fully clothed, tasteful, natural expression. Use the photo ONLY as a likeness "
+    "reference for the face. Never reproduce the photo itself. No text, no watermarks."
+)
+
+
+def _moderation_log(user_id, reason):
+    """Metadata-only moderation log. The image is never logged or retained."""
+    print(f"[photo-moderation] {datetime.now(timezone.utc).isoformat()} user={user_id} reason={reason}", flush=True)
+
+
+def _gemini_image_text(image_bytes, mime, text_prompt, model=None, max_tokens=400, temperature=0.2):
+    """One Gemini call with an inline image + text prompt; returns the text reply."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    payload = {"contents": [{"role": "user", "parts": [
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode()}},
+        {"text": text_prompt},
+    ]}], "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens}}
+    r = requests.post(f"{GEMINI_BASE}/{model or CHAT_MODEL}:generateContent", json=payload,
+                      params={"key": GEMINI_API_KEY},
+                      headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Model call failed ({r.status_code}): {r.text[:300]}")
+    try:
+        parts = r.json()["candidates"][0]["content"]["parts"]
+        text = "".join(p.get("text", "") for p in parts if p.get("text"))
+        if not text:
+            raise ValueError("no text")
+        return text.strip()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected model response")
+
+
+def _gemini_image_edit(image_bytes, mime, prompt):
+    """Image-to-image via Gemini: returns (mime, base64) of the generated image."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    payload = {"contents": [{"role": "user", "parts": [
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode()}},
+        {"text": prompt},
+    ]}], "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
+    r = requests.post(f"{GEMINI_BASE}/{IMAGE_MODEL}:generateContent", json=payload,
+                      params={"key": GEMINI_API_KEY},
+                      headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Image model failed ({r.status_code}): {r.text[:300]}")
+    try:
+        for part in r.json()["candidates"][0]["content"]["parts"]:
+            blob = part.get("inlineData") or part.get("inline_data")
+            if blob and blob.get("data"):
+                return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
+    except Exception:
+        pass
+    raise HTTPException(status_code=502, detail="Avatar generation failed")
+
+
+def _classify_verdict(text):
+    word = (text or "").strip().upper().split()
+    word = word[0] if word else ""
+    return word if word in ("RED", "YELLOW", "GREEN") else None
+
+
+def _deepseek_classify(description):
+    """Judge 1: DeepSeek (BRAIN role) classifies a neutral visual description.
+    DeepSeek's API is text-only, so Gemini first renders the photo into words.
+    Returns RED/YELLOW/GREEN, or None when DeepSeek isn't configured or fails."""
+    try:
+        if BRAIN.get("provider") != "openai" or not BRAIN.get("api_key"):
+            return None
+        text = _openai(BRAIN, [
+            {"role": "system", "content": _MODERATION_CRITERIA},
+            {"role": "user", "content": "Photo description:\n" + description},
+        ], max_tokens=10, temperature=0.0)
+        return _classify_verdict(text)
+    except Exception:
+        return None
+
+
+def moderate_companion_photo(image_bytes, mime, user_id):
+    """Three-tier photo moderation. Returns 'allow'; raises 400 on RED.
+
+    Judge 1 (DeepSeek) reads a neutral Gemini description of the photo.
+    YELLOW goes to Judge 2 (Gemini looks at the image itself).
+    RED from either judge = instant block, metadata-only log.
+    Anything else falls back to the user's required 18+ attestation = allow.
+    """
+    description = _gemini_image_text(image_bytes, mime, _PHOTO_DESCRIBE_PROMPT)
+    verdict = _deepseek_classify(description)
+    if verdict is None:
+        # DeepSeek not configured -- single-judge fallback on Gemini.
+        verdict = _classify_verdict(_gemini_image_text(image_bytes, mime, _MODERATION_CRITERIA))
+        if verdict == "RED":
+            _moderation_log(user_id, "RED (gemini-only)")
+            raise HTTPException(status_code=400, detail="Photo not allowed.")
+        return "allow"
+    if verdict == "RED":
+        _moderation_log(user_id, "RED (deepseek)")
+        raise HTTPException(status_code=400, detail="Photo not allowed.")
+    if verdict == "GREEN":
+        return "allow"
+    # YELLOW: Gemini double-checks the image directly.
+    second = _classify_verdict(_gemini_image_text(image_bytes, mime, _MODERATION_CRITERIA))
+    if second == "RED":
+        _moderation_log(user_id, "RED (gemini double-check)")
+        raise HTTPException(status_code=400, detail="Photo not allowed.")
+    return "allow"
+
+
+def generate_avatar_from_photo(image_bytes, mime, first_name, gender):
+    """Maple Hollow illustrated portrait from an upload -- likeness reference only."""
+    who = "man" if (gender or "female").strip().lower() == "male" else "woman"
+    prompt = (_COMPANION_PORTRAIT_STYLE +
+              f" The person depicted is {first_name.strip()[:40]}, a {who}.")
+    return _gemini_image_edit(image_bytes, mime, prompt)
+
+
 @app.post("/companions/create")
-def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
-    """Creates a custom companion in slot 1 or an unlocked extra slot."""
+async def create_companion(request: Request, user=Depends(current_user)):
+    """Creates a custom companion in slot 1 or an unlocked extra slot.
+
+    The live client sends multipart/form-data with a required photo and an
+    18+/rights consent checkbox. A legacy JSON body (no photo) is still
+    accepted so older clients keep working.
+    """
+    ctype = request.headers.get("content-type", "")
+    photo_bytes, photo_mime = None, None
+    if "application/json" in ctype:
+        data = await request.json()
+        fields = {k: (data.get(k) or "").strip() for k in
+                  ("first_name", "looks", "personality", "backstory",
+                   "pet_peeves", "non_negotiables", "defense")}
+        gender = data.get("gender") or "female"
+    else:
+        form = await request.form()
+        if form.get("consent") != "true":
+            raise HTTPException(status_code=400, detail="Upload consent is required.")
+        photo = form.get("photo")
+        if photo is None or not getattr(photo, "filename", None):
+            raise HTTPException(status_code=400, detail="A photo is required.")
+        photo_bytes = await photo.read()
+        photo_mime = photo.content_type or ""
+        if not photo_mime.startswith("image/") or not photo_bytes or len(photo_bytes) > PHOTO_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="A photo is required.")
+        fields = {k: ((form.get(k) or "").strip() if isinstance(form.get(k), str) else "") for k in
+                  ("first_name", "looks", "personality", "backstory",
+                   "pet_peeves", "non_negotiables", "defense")}
+        gender = form.get("gender") or "female"
+
+    first_name = fields["first_name"]
+    if not first_name:
+        raise HTTPException(status_code=400, detail="First name is required.")
     check_companion_content_safety(
-        body.first_name, body.looks, body.personality,
-        body.backstory, body.pet_peeves, body.non_negotiables, body.defense
+        first_name, fields["looks"], fields["personality"],
+        fields["backstory"], fields["pet_peeves"],
+        fields["non_negotiables"], fields["defense"]
     )
-    gender = (body.gender or "female").strip().lower()
+    gender = gender.strip().lower()
     if gender not in ("female", "male"):
         gender = "female"
     uid = user["user_id"]
@@ -3176,23 +3355,33 @@ def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
 
             next_slot = existing_count + 1
 
-        # Generate portrait using Gemini image generator
+        # The machine: moderate the photo BEFORE anything is stored.
+        if photo_bytes:
+            moderate_companion_photo(photo_bytes, photo_mime, uid)
+
+        # Portrait: from the photo when present, else the legacy text prompt.
         portrait_b64 = ""
-        portrait_mime = "image/png"
-        if GEMINI_API_KEY:
+        if photo_bytes:
             try:
-                portrait_mime, portrait_b64 = generate_avatar(f"Portrait of {body.first_name} ({"man" if gender == "male" else "woman"}): {body.looks}")
+                _, portrait_b64 = generate_avatar_from_photo(photo_bytes, photo_mime, first_name, gender)
+            except Exception:
+                pass
+            # The original upload was used once as a reference and is never stored.
+            photo_bytes = None
+        elif GEMINI_API_KEY:
+            try:
+                _, portrait_b64 = generate_avatar(f"Portrait of {first_name} ({'man' if gender == 'male' else 'woman'}): {fields['looks']}")
             except Exception:
                 pass
 
         # Generate hidden server-side trauma
-        trauma = _generate_companion_trauma(body.first_name, body.backstory, body.personality, gender)
+        trauma = _generate_companion_trauma(first_name, fields["backstory"], fields["personality"], gender)
 
         # Build distilled persona file
         persona_file = _build_companion_persona_file(
-            body.first_name, body.looks, body.personality,
-            body.backstory, body.pet_peeves, body.non_negotiables,
-            body.defense, trauma, gender
+            first_name, fields["looks"], fields["personality"],
+            fields["backstory"], fields["pet_peeves"], fields["non_negotiables"],
+            fields["defense"], trauma, gender
         )
 
         with conn.cursor() as cur:
@@ -3204,9 +3393,9 @@ def create_companion(body: CompanionCreateIn, user=Depends(current_user)):
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
                 RETURNING id, slot_number, first_name, looks_desc, personality, backstory, pet_peeves, non_negotiables, defense, gender, is_married, milestone, created_at
             """, (
-                uid, next_slot, body.first_name.strip(), body.looks.strip(), portrait_b64,
-                body.personality.strip(), body.backstory.strip(), body.pet_peeves.strip(),
-                body.non_negotiables.strip(), body.defense.strip(), trauma, persona_file, gender
+                uid, next_slot, first_name, fields["looks"], portrait_b64,
+                fields["personality"], fields["backstory"], fields["pet_peeves"],
+                fields["non_negotiables"], fields["defense"], trauma, persona_file, gender
             ))
             comp = cur.fetchone()
         conn.commit()
@@ -3654,9 +3843,11 @@ def get_user_companions(user=Depends(current_user)):
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT max_slots FROM user_companion_slots WHERE user_id=%s", (uid,))
+            cur.execute("SELECT max_slots, deleted_count FROM user_companion_slots WHERE user_id=%s", (uid,))
             slot_row = cur.fetchone()
             max_slots = slot_row["max_slots"] if slot_row else 1
+            deleted_used = slot_row["deleted_count"] if slot_row and slot_row["deleted_count"] else 0
+            deletes_remaining = max(0, MAX_COMPANION_DELETES - deleted_used)
 
             cur.execute("""
                 SELECT id, slot_number, first_name, looks_desc, portrait_url,
@@ -3665,10 +3856,13 @@ def get_user_companions(user=Depends(current_user)):
                 FROM companions WHERE user_id=%s ORDER BY slot_number ASC
             """, (uid,))
             comps = cur.fetchall() or []
+            for c in comps:
+                c["deletes_remaining"] = deletes_remaining
 
         return {
             "max_slots": max_slots,
             "used_slots": len(comps),
+            "deletes_remaining": deletes_remaining,
             "companions": comps
         }
     finally:
@@ -3692,6 +3886,82 @@ def get_companion_detail(companion_id: int, user=Depends(current_user)):
             if not comp:
                 raise HTTPException(status_code=404, detail="Companion not found")
         return {"ok": True, "companion": comp}
+    finally:
+        conn.close()
+
+
+class HairstyleIn(BaseModel):
+    style_id: str = ""
+    style_label: str = ""
+
+
+@app.delete("/companions/{companion_id}")
+def delete_companion(companion_id: int, user=Depends(current_user)):
+    """Hard-deletes a companion so a new one can start clean (no data mixing).
+    Limited to MAX_COMPANION_DELETES per account."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Companion not found.")
+            cur.execute("""
+                INSERT INTO user_companion_slots (user_id, max_slots, deleted_count)
+                VALUES (%s, 1, 0)
+                ON CONFLICT (user_id) DO NOTHING
+            """, (uid,))
+            cur.execute("SELECT deleted_count FROM user_companion_slots WHERE user_id=%s", (uid,))
+            row = cur.fetchone()
+            used = row["deleted_count"] if row and row["deleted_count"] else 0
+            remaining = MAX_COMPANION_DELETES - used
+            if remaining <= 0:
+                raise HTTPException(status_code=400, detail=f"Delete limit reached ({MAX_COMPANION_DELETES} per account).")
+            cur.execute("DELETE FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            cur.execute("UPDATE user_companion_slots SET deleted_count = deleted_count + 1 WHERE user_id=%s", (uid,))
+        conn.commit()
+        return {"ok": True, "deletes_remaining": remaining - 1}
+    finally:
+        conn.close()
+
+
+@app.post("/companions/{companion_id}/hairstyle")
+def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_user)):
+    """Repaints the companion portrait with a new hairstyle -- same face, same art style."""
+    uid = user["user_id"]
+    style_label = (body.style_label or body.style_id or "").strip()
+    if not style_label:
+        raise HTTPException(status_code=400, detail="Choose a hairstyle.")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT portrait_url FROM companions WHERE id=%s AND user_id=%s", (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found.")
+        b64 = comp["portrait_url"] or ""
+        if b64.startswith("data:"):
+            b64 = b64.split(",", 1)[1] if "," in b64 else ""
+        try:
+            image_bytes = base64.b64decode(b64)
+        except Exception:
+            image_bytes = b""
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="No portrait to restyle yet.")
+        prompt = (_COMPANION_PORTRAIT_STYLE +
+                  f" Keep the exact same face, expression, colors, and art style -- "
+                  f"change ONLY the hairstyle to: {style_label[:120]}.")
+        try:
+            _, new_b64 = _gemini_image_edit(image_bytes, "image/png", prompt)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=502, detail="Hairstyle switch failed.")
+        with conn.cursor() as cur:
+            cur.execute("UPDATE companions SET portrait_url=%s WHERE id=%s AND user_id=%s",
+                        (new_b64, companion_id, uid))
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()
 
@@ -5078,3 +5348,4 @@ def admin_page():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
