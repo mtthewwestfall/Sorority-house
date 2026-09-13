@@ -4047,6 +4047,49 @@ def create_avatar(body: AvatarIn, user=Depends(current_user)):
     return {"ok": True, "mime": mime, "image_b64": b64, "disclosure": "AI-generated image"}
 
 
+class AvatarPresetIn(BaseModel):
+    image_b64: str
+    mime: str = "image/jpeg"
+
+
+@app.post("/avatar/preset")
+def set_avatar_from_preset(body: AvatarPresetIn, user=Depends(current_user)):
+    """Set the player's avatar from a preset face illustration.
+
+    The client sends one of the bundled artist preset faces (base64). The
+    image is safety-checked like companion photos, then repainted in the
+    Maple Hollow portrait style (pines background) before storing.
+    """
+    raw = (body.image_b64 or "").strip()
+    if "," in raw:  # allow data URLs
+        raw = raw.split(",", 1)[1]
+    try:
+        img_bytes = base64.b64decode(raw, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image data.")
+    if not img_bytes or len(img_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Invalid image data.")
+    mime = (body.mime or "image/jpeg").strip() or "image/jpeg"
+    if not mime.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Invalid image data.")
+    # Same safety bar as companion photos: never paint from a flagged image.
+    moderate_companion_photo(img_bytes, mime, user["user_id"])
+    prompt = (AVATAR_STYLE +
+              "Keep the same face, face shape, hairstyle, and likeness as the "
+              "reference illustration. Redraw it fully in the Maple Hollow portrait style.")
+    out_mime, b64 = _gemini_image_edit(img_bytes, mime, prompt)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""UPDATE users SET avatar_b64=%s, avatar_mime=%s, avatar_prompt=%s,
+                           avatar_updated_at=now() WHERE user_id=%s""",
+                        (b64, out_mime, "preset face", user["user_id"]))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "mime": out_mime, "image_b64": b64, "disclosure": "AI-generated image"}
+
+
 @app.get("/avatar/me")
 def my_avatar(user=Depends(current_user)):
     """The player's own avatar. Private: only the owner can see it."""
@@ -5348,4 +5391,5 @@ def admin_page():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
 
