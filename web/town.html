@@ -31,7 +31,7 @@
     main { padding: 40px 24px 70px; }
     .back { display: inline-block; margin-bottom: 26px; color: var(--gold); text-decoration: none; font-weight: 600; }
 
-    /* Crossroads street signs — real municipal blades, same four streets */
+    /* Crossroads sign photo */
     .crossroads {
       border-radius: 18px; overflow: hidden;
       border: 1px solid var(--line);
@@ -42,38 +42,11 @@
     .crossroads-copy { flex: 1 1 55%; min-width: 0; }
     .crossroads-copy h2 { color: var(--gold); font-size: 1.25rem; margin: 0 0 6px; }
     .crossroads-copy p { color: var(--muted); margin: 0 0 16px; line-height: 1.6; }
-    .signpost { position: relative; flex: 0 0 250px; height: 430px; margin: 0 auto; }
-    .signpost .post {
-      position: absolute; left: 50%; top: 0; bottom: 0; width: 20px; transform: translateX(-50%);
-      background: linear-gradient(90deg, #5d6165 0%, #a8adb3 35%, #c3c8cd 50%, #878c92 70%, #54585c 100%);
-      border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    .signpost-photo {
+      flex: 0 0 300px; width: 300px; height: 380px; object-fit: cover; object-position: center 30%;
+      border-radius: 14px; border: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(0,0,0,.45); margin: 0 auto; display: block;
     }
-    .signpost .post::after {
-      content: ""; position: absolute; left: 50%; top: -10px; transform: translateX(-50%);
-      width: 30px; height: 16px; background: #3c3f43; border-radius: 8px 8px 4px 4px;
-    }
-    .signpost .blade {
-      position: absolute; left: 50%; transform: translateX(-50%);
-      width: 236px; height: 58px; display: flex; align-items: center; justify-content: center;
-      background: linear-gradient(180deg, #0d7a37 0%, #0a5c2a 60%, #084e23 100%);
-      border: 3px solid #f2f2ee; border-radius: 8px;
-      color: #ffffff; font-weight: 700; font-size: 1.05rem; letter-spacing: .06em;
-      text-decoration: none; text-shadow: 0 1px 2px rgba(0,0,0,.5);
-      box-shadow: 0 5px 14px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.25);
-      transition: filter .15s ease;
-    }
-    .signpost .blade:hover { filter: brightness(1.15); }
-    .signpost .blade::before, .signpost .blade::after {
-      content: ""; position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%;
-      background: radial-gradient(circle at 35% 35%, #e8eaec, #6d7276 70%);
-      transform: translateY(-50%);
-    }
-    .signpost .blade::before { left: 10px; }
-    .signpost .blade::after { right: 10px; }
-    .signpost .blade-1 { top: 30px; }
-    .signpost .blade-2 { top: 128px; }
-    .signpost .blade-3 { top: 226px; }
-    .signpost .blade-4 { top: 324px; }
 
     /* Area picture cards */
     .areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
@@ -89,7 +62,7 @@
     .area-card span { color: var(--muted); font-size: .94rem; line-height: 1.55; }
     @media (max-width: 760px) {
       .crossroads-inner { flex-direction: column; padding: 26px 20px; }
-      .signpost { flex-basis: auto; transform: scale(.86); margin: -18px 0; }
+      .signpost-photo { flex-basis: auto; width: 260px; height: 330px; }
     }
 
     .area-card .button { background: #556357; color: #E9E2D7; box-shadow: none; }
@@ -118,13 +91,7 @@
 
       <div class="crossroads">
         <div class="crossroads-inner">
-          <div class="signpost" aria-label="Town crossroads street signs">
-            <div class="post"></div>
-            <a class="blade blade-1" href="areas/main-street.html">Main Street</a>
-            <a class="blade blade-2" href="areas/the-pines.html">The Pines</a>
-            <a class="blade blade-3" href="areas/creekside.html">Creekside</a>
-            <a class="blade blade-4" href="areas/mill-road.html">Mill Road</a>
-          </div>
+          <img class="signpost-photo" src="assets/signpost.jpg" alt="Street sign post at the Maple Hollow crossroads: Main Street, The Pines, Mill Road, Creekside" />
           <div class="crossroads-copy">
             <h2>Standing at the crossroads</h2>
             <p>Four ways into town, four kinds of people. The sign's been here longer than anyone admits. Choose where you walk first — you can't be everywhere at once.</p>
