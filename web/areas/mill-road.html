@@ -7,67 +7,57 @@
   <meta name="description" content="Mill Road, Maple Hollow. The edge of town. The ones still deciding whether to stay." />
   <style>
     :root {
-      --ink: #1E4B2D;
-      --panel: rgba(217, 190, 147, .96);
-      --line: rgba(217, 190, 147, .30);
-      --white: #F7EEDC;
-      --muted: #C9B48C;
-      --gold: #D9BE93;
+      --bg: #151715;
+      --panel: #1E211E;
+      --text: #E9E2D7;
+      --muted: #8A7D6B;
+      --line: rgba(233,226,215,.14);
+      --primary: #556357;
+      --gold: #8A7D6B;
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; color: var(--white); background: var(--ink);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0; color: var(--text); background: var(--bg);
+      font-family: Georgia, 'Times New Roman', serif; line-height: 1.7;
     }
     .hero {
       min-height: 52vh; display: flex; align-items: flex-end;
-      background: linear-gradient(180deg, rgba(0,0,0,.15) 0%, rgba(11,18,13,.92) 100%), url('../assets/bg-mill-road.jpg') center/cover;
+      background: linear-gradient(180deg, rgba(21,23,21,.25) 0%, rgba(21,23,21,.55) 55%, rgba(21,23,21,1) 100%), url('../assets/bg-mill-road.jpg') center/cover;
       padding: 90px 24px 48px;
     }
     .wrap { max-width: 900px; margin: 0 auto; width: 100%; }
-    .eyebrow { color: var(--gold); letter-spacing: .22em; text-transform: uppercase; font-size: .8rem; font-weight: 700; margin: 0 0 12px; }
-    h1 { font-size: clamp(2.6rem, 8vw, 5rem); line-height: 1; margin: 0 0 12px; }
-    .tagline { color: var(--muted); font-size: 1.15rem; margin: 0; }
+    .eyebrow { color: var(--muted); letter-spacing: .22em; text-transform: uppercase; font-size: .72rem; margin: 0 0 12px; }
+    h1 { font-size: clamp(2.4rem, 8vw, 4rem); line-height: 1.05; margin: 0 0 12px; font-weight: 400; }
+    h1 em { font-style: italic; color: var(--gold); }
+    .tagline { color: var(--muted); font-size: 1.15rem; margin: 0; font-style: italic; }
     main { padding: 40px 24px 70px; }
     .panel {
       background: var(--panel); border: 1px solid var(--line);
       border-radius: 18px; padding: 28px; margin-bottom: 26px;
     }
-    .panel p { color: var(--muted); line-height: 1.75; margin: 0; font-size: 1.02rem; }
-    h2 { font-size: 1.35rem; margin: 0 0 16px; color: var(--gold); }
+    .panel p { color: var(--text); line-height: 1.75; margin: 0; font-size: 1.02rem; }
+    h2 { font-size: 1.35rem; margin: 0 0 16px; color: var(--gold); font-weight: 400; }
     .residents { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
     .resident {
       display: block; padding: 16px 18px; border: 1px solid var(--line);
-      border-radius: 14px; text-decoration: none; color: var(--white);
-      background: rgba(24, 38, 28, .6); transition: transform .15s, border-color .15s;
+      border-radius: 14px; text-decoration: none; color: var(--text);
+      background: rgba(30,33,30,.6); transition: transform .15s, border-color .15s;
     }
-    .resident:hover { transform: translateY(-3px); border-color: rgba(46,157,75,.6); }
-    .resident strong { display: block; font-size: 1.05rem; }
+    .resident:hover { transform: translateY(-3px); border-color: rgba(85,99,87,.6); }
+    .resident strong { display: block; font-size: 1.05rem; font-weight: 400; }
     .resident span { color: var(--muted); font-size: .92rem; }
     .hangout img { width: 100%; border-radius: 14px; display: block; margin-bottom: 16px; }
-    .hangout h3 { margin: 0 0 8px; font-size: 1.15rem; }
+    .hangout h3 { margin: 0 0 8px; font-size: 1.15rem; font-weight: 400; }
     .hangout p { color: var(--muted); line-height: 1.7; margin: 0; }
-    .back { display: inline-block; margin-top: 8px; color: var(--gold); text-decoration: none; font-weight: 600; }
-    .back:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-top: 8px; color: var(--muted); text-decoration: none; }
+    .back:hover { color: var(--text); }
     nav.areas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 26px; }
     nav.areas a {
       padding: 10px 18px; border: 1px solid var(--line); border-radius: 999px;
-      color: var(--white); text-decoration: none; font-size: .92rem;
+      color: var(--text); text-decoration: none; font-size: .92rem;
     }
     nav.areas a.current { border-color: var(--gold); color: var(--gold); }
     nav.areas a:hover { border-color: var(--gold); }
-  
-    }
-    .panel .button, .resident .button { background: #F7EEDC; color: #277A3D; box-shadow: none; }
-    
-    /* ===== Forest scheme: green bg -> sandalwood surfaces -> dark green text ===== */
-    .button { background: #D9BE93; color: #17452A; box-shadow: 0 12px 28px rgba(8,28,16,.30); }
-    .panel, .resident {
-      background: #D9BE93; border-color: rgba(23,69,42,.32); color: #17452A;
-      --white: #17452A; --muted: #2E5A3A; --line: rgba(23,69,42,.32);
-      --pink: #17452A; --gold: #17452A;
-    }
-    .panel .button, .resident .button { background: #17452A; color: #D9BE93; box-shadow: none; }
     </style>
 </head>
 <body>
