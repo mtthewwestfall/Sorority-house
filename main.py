@@ -2262,6 +2262,69 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
             _BRAIN_POOL.submit(refund_message, user_id)
 
 
+async def _type_out_companion(request, user_id, companion_id, comp, msgs, user_message, remaining, picture_due=False):
+    """Paced real-time mouth streaming for custom companions, identical to standard character streaming."""
+    box = queue.Queue(maxsize=2)
+    stop = threading.Event()
+    threading.Thread(target=_mouth_thread, args=(msgs, box, stop), daemon=True).start()
+
+    typed = []
+    backlog = ""
+    finished = False
+    credit = 0.0
+    logged = False
+
+    try:
+        yield _sse("open", {"companion_id": companion_id})
+        while True:
+            if await request.is_disconnected():
+                break
+
+            while len(backlog) < CHAT_LEAD_CHARS:
+                try:
+                    item = box.get_nowait()
+                except queue.Empty:
+                    break
+                if item is _EOF:
+                    finished = True
+                    break
+                backlog += item
+
+            if finished and not backlog:
+                break
+
+            credit += CHAT_CPS * EMIT_TICK_S
+            take = min(int(credit), len(backlog))
+            if take:
+                credit -= take
+                typed_now, backlog = backlog[:take], backlog[take:]
+                typed.append(typed_now)
+                yield _sse("delta", {"t": typed_now})
+                await asyncio.sleep(_pause_after(typed_now))
+            else:
+                await asyncio.sleep(EMIT_TICK_S)
+
+        reply = "".join(typed).strip()
+        if not reply:
+            yield _sse("error", {"detail": "she_did_not_answer"})
+            return
+        await asyncio.to_thread(_persist_companion_turn, user_id, companion_id, user_message, reply)
+        logged = True
+        _BRAIN_POOL.submit(_refresh_companion_brain, user_id, companion_id)
+        done_payload = {"remaining": remaining, "milestone": int(comp.get("milestone", 1))}
+        if picture_due:
+            done_payload["picture_due"] = True
+        yield _sse("done", done_payload)
+    finally:
+        stop.set()
+        reply = "".join(typed).strip()
+        if reply and not logged:
+            _BRAIN_POOL.submit(_persist_companion_turn, user_id, companion_id, user_message, reply)
+            _BRAIN_POOL.submit(_refresh_companion_brain, user_id, companion_id)
+        elif not reply:
+            _BRAIN_POOL.submit(refund_message, user_id)
+
+
 # ---------------------------------------------------------------------------
 # ADMIN CONSOLE PAGE — single file, no build step. Served at GET /admin.
 # The secret you type is kept in sessionStorage and sent as X-Admin-Secret.
@@ -3812,11 +3875,11 @@ async def companion_chat_stream(companion_id: int, body: CompanionChatIn, reques
     used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
     if await asyncio.to_thread(pic_tease_due, user["user_id"], user["tier"], used):
         async def _tease_only():
-            yield f"event: open\ndata: {json.dumps({'companion_id': companion_id})}\n\n"
-            yield f"event: delta\ndata: {json.dumps({'t': PIC_TEASE_LINE})}\n\n"
+            yield _sse("open", {"companion_id": companion_id})
+            yield _sse("delta", {"t": PIC_TEASE_LINE})
             await asyncio.to_thread(_persist_companion_turn, user["user_id"], companion_id,
                                     body.message, PIC_TEASE_LINE)
-            yield f"event: done\ndata: {json.dumps({'remaining': remaining, 'milestone': int(comp.get('milestone', 1))})}\n\n"
+            yield _sse("done", {"remaining": remaining, "milestone": int(comp.get("milestone", 1))})
         return StreamingResponse(_tease_only(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
                                           "X-Accel-Buffering": "no"})
@@ -3827,30 +3890,10 @@ async def companion_chat_stream(companion_id: int, body: CompanionChatIn, reques
         raise
     picture_due = await asyncio.to_thread(pic_deliver_due, user["user_id"], user["tier"])
 
-    async def _stream_companion():
-        full_reply = []
-        try:
-            yield f"event: open\ndata: {json.dumps({'companion_id': companion_id})}\n\n"
-            reply_text = await asyncio.to_thread(llm, MOUTH, msgs)
-            full_reply.append(reply_text)
-            # chunking stream simulate
-            for chunk in [reply_text[i:i+6] for i in range(0, len(reply_text), 6)]:
-                if await request.is_disconnected():
-                    break
-                yield f"event: delta\ndata: {json.dumps({'t': chunk})}\n\n"
-                await asyncio.sleep(0.04)
-        finally:
-            complete_text = "".join(full_reply)
-            if complete_text:
-                await asyncio.to_thread(_persist_companion_turn, user["user_id"], companion_id, body.message, complete_text)
-                _BRAIN_POOL.submit(_refresh_companion_brain, user["user_id"], companion_id)
-            done_payload = {'remaining': remaining, 'milestone': int(comp.get('milestone', 1))}
-            if picture_due:
-                done_payload['picture_due'] = True
-            yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
-
-    return StreamingResponse(_stream_companion(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        _type_out_companion(request, user["user_id"], companion_id, comp, msgs, body.message, remaining, picture_due=picture_due),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
 
 
 @app.post("/companions/{companion_id}/propose")
