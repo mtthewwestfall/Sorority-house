@@ -278,6 +278,12 @@ PICTURE_FREE = int(os.environ.get("PICTURE_FREE", "0"))
 PICTURE_FREE_START = int(os.environ.get("PICTURE_FREE_START", "10"))
 PICTURE_PACK_SIZE = int(os.environ.get("PICTURE_PACK_SIZE", "5"))
 PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
+
+# Picture signup ploy: free-tier visitors get the tease line as the reply to
+# their 48th message, and the picture itself only goes out after they sign up
+# (paid tier). Once per account.
+PIC_TEASE_AT = 48
+PIC_TEASE_LINE = "I usually never ask this but there might be something about you, can I send you a pic soon?"
 PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
@@ -798,6 +804,8 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_prev_reset_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT '';
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pics_free_used INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_tease_sent BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_tease_delivered BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pic_credits INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
@@ -2166,7 +2174,8 @@ def _mouth_thread(msgs, box, stop):
                 continue
 
 
-async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, brain):
+async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, brain,
+                  picture_due=False):
     box = queue.Queue(maxsize=2)
     stop = threading.Event()
     threading.Thread(target=_mouth_thread, args=(msgs, box, stop), daemon=True).start()
@@ -2236,8 +2245,11 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
             return
         await asyncio.to_thread(persist_turn, user_id, girl, rel, user_message, reply)
         logged = True
-        yield _sse("done", {"remaining": remaining,
-                            "milestone": brain_milestone(brain, rel["milestone"])})
+        done_payload = {"remaining": remaining,
+                        "milestone": brain_milestone(brain, rel["milestone"])}
+        if picture_due:
+            done_payload["picture_due"] = True
+        yield _sse("done", done_payload)
     finally:
         stop.set()
         reply = "".join(typed).strip()
@@ -2873,6 +2885,11 @@ def chat(body: ChatIn, user=Depends(current_user)):
     """Whole reply in one response. The brain runs behind it, so "milestone" here
     is the stage as of this turn; /state has it once the refresh lands."""
     girl, rel, remaining = chat_preflight(user, body.girl)
+    used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    if pic_tease_due(user["user_id"], user["tier"], used):
+        persist_turn(user["user_id"], girl, rel, body.message, PIC_TEASE_LINE)
+        return {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
+                "milestone": int(rel["milestone"])}
     try:
         msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
         reply = llm(MOUTH, msgs)   # no thinking budget for chat
@@ -2882,8 +2899,11 @@ def chat(body: ChatIn, user=Depends(current_user)):
         raise
     kick_brain(user["user_id"], girl, rel)
 
-    return {"ok": True, "reply": reply, "remaining": remaining,
+    resp = {"ok": True, "reply": reply, "remaining": remaining,
             "milestone": int(rel["milestone"])}
+    if pic_deliver_due(user["user_id"], user["tier"]):
+        resp["picture_due"] = True
+    return resp
 
 
 @app.post("/chat/stream")
@@ -2899,6 +2919,20 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
     What the user has SEEN is the transcript: on a mid-reply disconnect the typed
     part is what gets logged, so her memory and the screen never disagree."""
     girl, rel, remaining = await asyncio.to_thread(chat_preflight, user, body.girl)
+    used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    if await asyncio.to_thread(pic_tease_due, user["user_id"], user["tier"], used):
+        async def _tease_only():
+            yield _sse("open", {"girl": girl})
+            yield _sse("delta", {"t": PIC_TEASE_LINE})
+            await asyncio.to_thread(persist_turn, user["user_id"], girl, rel,
+                                    body.message, PIC_TEASE_LINE)
+            yield _sse("done", {"remaining": remaining,
+                                "milestone": int(rel["milestone"])})
+        return StreamingResponse(
+            _tease_only(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                     "X-Accel-Buffering": "no"})
     try:
         msgs = await asyncio.to_thread(build_chat_messages,
                                       user["user_id"], girl, rel, body.message)
@@ -2906,9 +2940,10 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
         await asyncio.to_thread(refund_message, user["user_id"])
         raise
     brain = kick_brain(user["user_id"], girl, rel)
+    picture_due = await asyncio.to_thread(pic_deliver_due, user["user_id"], user["tier"])
     return StreamingResponse(
         _type_out(request, user["user_id"], girl, rel, msgs, body.message,
-                  remaining, brain),
+                  remaining, brain, picture_due=picture_due),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
                  "X-Accel-Buffering": "no"})
@@ -2924,14 +2959,16 @@ class ImageIn(BaseModel):
 def picture_status(cur, user_id):
     cur.execute("SELECT count(*) AS n FROM chat_logs WHERE user_id=%s AND sender='user'", (user_id,))
     total = int(cur.fetchone()["n"])
-    cur.execute("SELECT pics_free_used, pic_credits FROM users WHERE user_id=%s", (user_id,))
-    row = cur.fetchone() or {"pics_free_used": 0, "pic_credits": 0}
-    earned = PICTURE_FREE_START + (total // PICTURE_EVERY) * PICTURE_FREE
+    cur.execute("SELECT pics_free_used, pic_credits, tier FROM users WHERE user_id=%s", (user_id,))
+    row = cur.fetchone() or {"pics_free_used": 0, "pic_credits": 0, "tier": "visitor"}
+    # Free tier gets NO free pictures -- pictures are the signup ploy.
+    free_start = 0 if (row.get("tier") or "visitor") == "visitor" else PICTURE_FREE_START
+    earned = free_start + (total // PICTURE_EVERY) * PICTURE_FREE
     free_left = max(0, earned - int(row["pics_free_used"]))
     return {
         "every": PICTURE_EVERY,
         "free_per": PICTURE_FREE,
-        "free_start": PICTURE_FREE_START,
+        "free_start": free_start,
         "messages": total,
         "earned": earned,
         "free_left": free_left,
@@ -2945,6 +2982,105 @@ def picture_status(cur, user_id):
         "pack_ready": bool(SHOPIFY_WEBHOOK_SECRET),
         "pack_ref": _pack_ref(user_id) if SHOPIFY_WEBHOOK_SECRET else None,
     }
+
+
+def _pic_ploy_state(cur, user_id):
+    cur.execute("SELECT pic_tease_sent, pic_tease_delivered FROM users WHERE user_id=%s", (user_id,))
+    row = cur.fetchone() or {}
+    return bool(row.get("pic_tease_sent")), bool(row.get("pic_tease_delivered"))
+
+
+def pic_tease_due(user_id, tier, used):
+    """True exactly once: a free-tier visitor hitting message PIC_TEASE_AT gets
+    the tease line as this reply. Marks it sent so it never repeats."""
+    if (tier or "visitor") != "visitor" or used < PIC_TEASE_AT:
+        return False
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            sent, _ = _pic_ploy_state(cur, user_id)
+            if sent:
+                return False
+            cur.execute("UPDATE users SET pic_tease_sent=TRUE WHERE user_id=%s", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return True
+
+
+def pic_deliver_due(user_id, tier):
+    """True when the account got the tease, hasn't received the picture yet, and
+    is now on a paid tier: this reply carries the picture."""
+    if (tier or "visitor") == "visitor":
+        return False
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            sent, delivered = _pic_ploy_state(cur, user_id)
+            return bool(sent and not delivered)
+    finally:
+        conn.close()
+
+
+def _reserve_picture_entitlement(cur, uid, earned):
+    """Reserve one picture: earned free first, then bought credits.
+    Returns 'free' / 'credit' / None."""
+    cur.execute("""UPDATE users SET pics_free_used = pics_free_used + 1
+                   WHERE user_id=%s AND pics_free_used < %s RETURNING 1""", (uid, earned))
+    if cur.fetchone():
+        return "free"
+    cur.execute("""UPDATE users SET pic_credits = pic_credits - 1
+                   WHERE user_id=%s AND pic_credits > 0 RETURNING 1""", (uid,))
+    if cur.fetchone():
+        return "credit"
+    return None
+
+
+def _refund_picture_entitlement(cur, uid, spent):
+    if spent == "free":
+        cur.execute("UPDATE users SET pics_free_used = GREATEST(0, pics_free_used - 1) WHERE user_id=%s", (uid,))
+    elif spent == "credit":
+        cur.execute("UPDATE users SET pic_credits = pic_credits + 1 WHERE user_id=%s", (uid,))
+
+
+def _mark_ploy_delivered(cur, uid):
+    """Any successful picture settles the ploy for a teased account."""
+    cur.execute("""UPDATE users SET pic_tease_delivered=TRUE
+                   WHERE user_id=%s AND pic_tease_sent=TRUE AND pic_tease_delivered=FALSE""", (uid,))
+
+
+def companion_portrait_bytes(portrait_url):
+    """Decode a companion portrait (data: URL or raw base64) to (mime, bytes)."""
+    if not portrait_url:
+        return None
+    s = portrait_url.strip()
+    try:
+        if s.startswith("data:"):
+            header, _, b64data = s.partition(",")
+            mime = (header[5:].split(";")[0] or "image/png").strip()
+        else:
+            mime, b64data = "image/png", s
+        return mime, base64.b64decode(b64data)
+    except Exception:
+        return None
+
+
+COMPANION_PIC_SCENES = {
+    "male": [
+        "a casual mirror selfie in his room",
+        "a sunny selfie on the town porch",
+        "a relaxed selfie at the local diner",
+        "a quick selfie on main street",
+        "an evening selfie on the couch, easy smile",
+    ],
+    "female": [
+        "a casual mirror selfie in her bedroom",
+        "a sunny selfie on the town porch",
+        "a cozy evening selfie on the couch",
+        "a quick selfie on main street",
+        "a coffee-shop selfie, laughing at something off camera",
+    ],
+}
 
 
 def _pack_ref(user_id):
@@ -2988,11 +3124,13 @@ def _portrait_bytes(avatar_url):
         return None
 
 
-def generate_picture(girl, name, avatar_url):
-    """A fresh selfie of her in the style of her portrait. Returns (mime, base64)."""
+def generate_picture(girl, name, avatar_url, portrait=None, scenes=None):
+    """A fresh selfie of her in the style of her portrait. Returns (mime, base64).
+    portrait: optional (mime, bytes) used directly instead of fetching avatar_url.
+    scenes: optional scene list (used for companions / male subjects)."""
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    scene = random.choice([
+    scene = random.choice(scenes or [
         "a casual mirror selfie in her bedroom",
         "a sunny selfie on the town porch",
         "a cozy evening selfie on the couch",
@@ -3004,7 +3142,8 @@ def generate_picture(girl, name, avatar_url):
               "Fully clothed, tasteful, natural expression, phone-camera framing. "
               "No text or watermarks.")
     parts = [{"text": prompt}]
-    portrait = _portrait_bytes(avatar_url)
+    if portrait is None:
+        portrait = _portrait_bytes(avatar_url)
     if portrait:
         parts.append({"inline_data": {"mime_type": portrait[0],
                                        "data": base64.b64encode(portrait[1]).decode()}})
@@ -3046,17 +3185,7 @@ def image(body: ImageIn, user=Depends(current_user)):
         with conn.cursor() as cur:
             status = picture_status(cur, uid)
             # reserve one entitlement atomically: earned first, then bought credits
-            cur.execute("""
-                UPDATE users SET pics_free_used = pics_free_used + 1
-                WHERE user_id=%s AND pics_free_used < %s RETURNING 1
-            """, (uid, status["earned"]))
-            spent = "free" if cur.fetchone() else None
-            if spent is None:
-                cur.execute("""
-                    UPDATE users SET pic_credits = pic_credits - 1
-                    WHERE user_id=%s AND pic_credits > 0 RETURNING 1
-                """, (uid,))
-                spent = "credit" if cur.fetchone() else None
+            spent = _reserve_picture_entitlement(cur, uid, status["earned"])
             if spent is None:
                 conn.rollback()
                 return {"ok": False, "locked": True, "status": status,
@@ -3073,12 +3202,57 @@ def image(body: ImageIn, user=Depends(current_user)):
         except Exception:
             # refund: a failed generation must not eat the entitlement
             with conn.cursor() as cur:
-                if spent == "free":
-                    cur.execute("UPDATE users SET pics_free_used = GREATEST(0, pics_free_used - 1) WHERE user_id=%s", (uid,))
-                else:
-                    cur.execute("UPDATE users SET pic_credits = pic_credits + 1 WHERE user_id=%s", (uid,))
+                _refund_picture_entitlement(cur, uid, spent)
                 conn.commit()
             raise
+        with conn.cursor() as cur:
+            _mark_ploy_delivered(cur, uid)
+            conn.commit()
+        with conn.cursor() as cur:
+            status = picture_status(cur, uid)
+        return {"ok": True, "mime": mime, "image_b64": b64,
+                "disclosure": "AI-generated image", "status": status}
+    finally:
+        conn.close()
+
+
+@app.post("/companions/{companion_id}/image")
+def companion_image(companion_id: int, user=Depends(current_user)):
+    """Picture request for a custom companion: same entitlement pool as the
+    residents, generated from the companion's own portrait."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT first_name, gender, portrait_url FROM companions WHERE id=%s AND user_id=%s",
+                        (companion_id, uid))
+            comp = cur.fetchone()
+            if not comp:
+                raise HTTPException(status_code=404, detail="Companion not found")
+            first_name = comp["first_name"] or "them"
+            gender = (comp.get("gender") or "female").lower()
+            portrait = companion_portrait_bytes(comp.get("portrait_url"))
+            status = picture_status(cur, uid)
+            spent = _reserve_picture_entitlement(cur, uid, status["earned"])
+            if spent is None:
+                conn.rollback()
+                return {"ok": False, "locked": True, "status": status,
+                        "error": (f"They'll send one after {status['next_in']} more messages."
+                                  if status["next_in"] else
+                                  f"You're out of pictures. Grab a pack of {PICTURE_PACK_SIZE} for more.")}
+            conn.commit()
+        scenes = COMPANION_PIC_SCENES.get(gender, COMPANION_PIC_SCENES["female"])
+        try:
+            mime, b64 = generate_picture(first_name.lower(), first_name, None,
+                                         portrait=portrait, scenes=scenes)
+        except Exception:
+            with conn.cursor() as cur:
+                _refund_picture_entitlement(cur, uid, spent)
+                conn.commit()
+            raise
+        with conn.cursor() as cur:
+            _mark_ploy_delivered(cur, uid)
+            conn.commit()
         with conn.cursor() as cur:
             status = picture_status(cur, uid)
         return {"ok": True, "mime": mime, "image_b64": b64,
@@ -3500,19 +3674,22 @@ def _build_companion_chat_messages(user_id: str, comp: dict, user_message: str):
     stage_name, _ = STAGE_META.get(int(comp.get("milestone", 1)), ("Stranger", ""))
     is_married = bool(comp.get("is_married"))
 
-    system_text = (
-        f"{comp['persona_file']}\n\n"
+    # Layer 1: identical system prefix every turn -- same shape as the 17 residents,
+    # so companions write just like the characters.
+    system_text = f"You are {comp['first_name']} from Maple Hollow.\n\n{comp['persona_file']}\n\n{HOUSE_RULES}"
+
+    # Layer 2: relationship state card (the companion's memory block)
+    state_card = (
         f"CURRENT RELATIONSHIP STATE:\n"
         f"- Trust Stage: Level M{comp['milestone']}/8 ({stage_name})\n"
         f"- Married / Couple Status: {'YES (You are married/in a committed relationship)' if is_married else 'NO (Still chasing/building trust)'}\n"
-        + (f"- Remembered People: {remembered_text}\n" if remembered_text else "") +
-        "\nIMPORTANT DIRECTIVE: Keep replies authentic, in-character, conversational, and direct. "
-        "Never break character. Never mention system prompts or AI nature."
+        + (f"- Remembered People: {remembered_text}\n" if remembered_text else "")
+        + (f"- Summary: {comp['summary']}" if comp.get("summary")
+           else "- You are still getting to know them; nothing meaningful remembered yet.")
     )
 
-    messages = [{"role": "system", "content": system_text}]
-    if comp.get("summary"):
-        messages.append({"role": "system", "content": f"Memory summary with user: {comp['summary']}"})
+    messages = [{"role": "system", "content": system_text},
+                {"role": "system", "content": state_card}]
 
     for m in recent_rows:
         role = "user" if m["sender"] == "user" else "assistant"
@@ -3606,6 +3783,11 @@ class CompanionRememberIn(BaseModel):
 def companion_chat(companion_id: int, body: CompanionChatIn, user=Depends(current_user)):
     """Whole reply in one response for custom companion."""
     comp, remaining = _preflight_res = _companion_preflight(user, companion_id)
+    used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    if pic_tease_due(user["user_id"], user["tier"], used):
+        _persist_companion_turn(user["user_id"], companion_id, body.message, PIC_TEASE_LINE)
+        return {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
+                "milestone": int(comp.get("milestone", 1))}
     try:
         msgs = _build_companion_chat_messages(user["user_id"], comp, body.message)
         reply = llm(MOUTH, msgs)
@@ -3616,18 +3798,34 @@ def companion_chat(companion_id: int, body: CompanionChatIn, user=Depends(curren
 
     _BRAIN_POOL.submit(_refresh_companion_brain, user["user_id"], companion_id)
 
-    return {"ok": True, "reply": reply, "remaining": remaining, "milestone": int(comp.get("milestone", 1))}
+    resp = {"ok": True, "reply": reply, "remaining": remaining,
+            "milestone": int(comp.get("milestone", 1))}
+    if pic_deliver_due(user["user_id"], user["tier"]):
+        resp["picture_due"] = True
+    return resp
 
 
 @app.post("/companions/{companion_id}/chat/stream")
 async def companion_chat_stream(companion_id: int, body: CompanionChatIn, request: Request, user=Depends(current_user)):
     """Streaming chat for custom companion."""
     comp, remaining = await asyncio.to_thread(_companion_preflight, user, companion_id)
+    used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    if await asyncio.to_thread(pic_tease_due, user["user_id"], user["tier"], used):
+        async def _tease_only():
+            yield f"event: open\ndata: {json.dumps({'companion_id': companion_id})}\n\n"
+            yield f"event: delta\ndata: {json.dumps({'t': PIC_TEASE_LINE})}\n\n"
+            await asyncio.to_thread(_persist_companion_turn, user["user_id"], companion_id,
+                                    body.message, PIC_TEASE_LINE)
+            yield f"event: done\ndata: {json.dumps({'remaining': remaining, 'milestone': int(comp.get('milestone', 1))})}\n\n"
+        return StreamingResponse(_tease_only(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                                          "X-Accel-Buffering": "no"})
     try:
         msgs = await asyncio.to_thread(_build_companion_chat_messages, user["user_id"], comp, body.message)
     except Exception:
         await asyncio.to_thread(refund_message, user["user_id"])
         raise
+    picture_due = await asyncio.to_thread(pic_deliver_due, user["user_id"], user["tier"])
 
     async def _stream_companion():
         full_reply = []
@@ -3646,7 +3844,10 @@ async def companion_chat_stream(companion_id: int, body: CompanionChatIn, reques
             if complete_text:
                 await asyncio.to_thread(_persist_companion_turn, user["user_id"], companion_id, body.message, complete_text)
                 _BRAIN_POOL.submit(_refresh_companion_brain, user["user_id"], companion_id)
-            yield f"event: done\ndata: {json.dumps({'remaining': remaining, 'milestone': int(comp.get('milestone', 1))})}\n\n"
+            done_payload = {'remaining': remaining, 'milestone': int(comp.get('milestone', 1))}
+            if picture_due:
+                done_payload['picture_due'] = True
+            yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
     return StreamingResponse(_stream_companion(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
