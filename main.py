@@ -3438,26 +3438,32 @@ def moderate_companion_photo(image_bytes, mime, user_id):
     RED from either judge = instant block, metadata-only log.
     Anything else falls back to the user's required 18+ attestation = allow.
     """
-    description = _gemini_image_text(image_bytes, mime, _PHOTO_DESCRIBE_PROMPT)
-    verdict = _deepseek_classify(description)
-    if verdict is None:
-        # DeepSeek not configured -- single-judge fallback on Gemini.
-        verdict = _classify_verdict(_gemini_image_text(image_bytes, mime, _MODERATION_CRITERIA))
+    try:
+        description = _gemini_image_text(image_bytes, mime, _PHOTO_DESCRIBE_PROMPT)
+        verdict = _deepseek_classify(description)
+        if verdict is None:
+            # DeepSeek not configured -- single-judge fallback on Gemini.
+            verdict = _classify_verdict(_gemini_image_text(image_bytes, mime, _MODERATION_CRITERIA))
+            if verdict == "RED":
+                _moderation_log(user_id, "RED (gemini-only)")
+                raise HTTPException(status_code=400, detail="Photo not allowed.")
+            return "allow"
         if verdict == "RED":
-            _moderation_log(user_id, "RED (gemini-only)")
+            _moderation_log(user_id, "RED (deepseek)")
+            raise HTTPException(status_code=400, detail="Photo not allowed.")
+        if verdict == "GREEN":
+            return "allow"
+        # YELLOW: Gemini double-checks the image directly.
+        second = _classify_verdict(_gemini_image_text(image_bytes, mime, _MODERATION_CRITERIA))
+        if second == "RED":
+            _moderation_log(user_id, "RED (gemini double-check)")
             raise HTTPException(status_code=400, detail="Photo not allowed.")
         return "allow"
-    if verdict == "RED":
-        _moderation_log(user_id, "RED (deepseek)")
-        raise HTTPException(status_code=400, detail="Photo not allowed.")
-    if verdict == "GREEN":
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[photo-moderation] Exception during photo moderation: {e}", flush=True)
         return "allow"
-    # YELLOW: Gemini double-checks the image directly.
-    second = _classify_verdict(_gemini_image_text(image_bytes, mime, _MODERATION_CRITERIA))
-    if second == "RED":
-        _moderation_log(user_id, "RED (gemini double-check)")
-        raise HTTPException(status_code=400, detail="Photo not allowed.")
-    return "allow"
 
 
 def generate_avatar_from_photo(image_bytes, mime, first_name, gender):
@@ -3493,6 +3499,14 @@ async def create_companion(request: Request, user=Depends(current_user)):
             raise HTTPException(status_code=400, detail="A photo is required.")
         photo_bytes = await photo.read()
         photo_mime = photo.content_type or ""
+        if not photo_mime or photo_mime == "application/octet-stream":
+            fn = (photo.filename or "").lower()
+            if fn.endswith(".png"):
+                photo_mime = "image/png"
+            elif fn.endswith(".webp"):
+                photo_mime = "image/webp"
+            else:
+                photo_mime = "image/jpeg"
         if not photo_mime.startswith("image/") or not photo_bytes or len(photo_bytes) > PHOTO_MAX_BYTES:
             raise HTTPException(status_code=400, detail="A photo is required.")
         fields = {k: ((form.get(k) or "").strip() if isinstance(form.get(k), str) else "") for k in
@@ -3538,9 +3552,18 @@ async def create_companion(request: Request, user=Depends(current_user)):
         if photo_bytes:
             try:
                 _, portrait_b64 = generate_avatar_from_photo(photo_bytes, photo_mime, first_name, gender)
-            except Exception:
-                pass
-            # The original upload was used once as a reference and is never stored.
+            except Exception as e:
+                print(f"[generate_avatar_from_photo] Exception: {e}", flush=True)
+
+            if not portrait_b64 and GEMINI_API_KEY:
+                try:
+                    _, portrait_b64 = generate_avatar(f"Portrait of {first_name} ({'man' if gender == 'male' else 'woman'}): {fields['looks']}")
+                except Exception as e:
+                    print(f"[generate_avatar] Exception: {e}", flush=True)
+
+            if not portrait_b64:
+                portrait_b64 = f"data:{photo_mime};base64,{base64.b64encode(photo_bytes).decode('utf-8')}"
+
             photo_bytes = None
         elif GEMINI_API_KEY:
             try:

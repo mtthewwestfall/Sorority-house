@@ -1550,6 +1550,9 @@ const PRESET_FACES = {
         window.scrollTo(0, lockedScrollY);
       }
       currentGirl = null;
+      currentCompanionId = null;
+      const actionsBar = document.getElementById('companion-actions-bar');
+      if (actionsBar) actionsBar.hidden = true;
     }
 
     // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
@@ -1706,6 +1709,7 @@ const PRESET_FACES = {
             const name = escapeHtml(c.first_name);
             const title = (c.is_married ? 'Married / Spouse' : 'Your Custom Companion') + (c.gender === 'male' ? ' \u00B7 Him' : ' \u00B7 Her');
             const avatar = c.portrait_url ? (c.portrait_url.startsWith('data:') ? c.portrait_url : 'data:image/png;base64,' + c.portrait_url) : '';
+            const deletesRem = c.deletes_remaining !== undefined ? c.deletes_remaining : 1;
 
             html += '<article class="door-card open companion-card" style="border: 2px solid var(--gold); background: rgba(30, 33, 30, .96); margin-bottom: 20px;">' +
               '<div class="door-art" data-initial="' + escapeHtml(name.charAt(0).toUpperCase()) + '">' +
@@ -1715,7 +1719,10 @@ const PRESET_FACES = {
               '<div class="door-name">' + name + '</div>' +
               '<div class="door-title" style="color: var(--gold);">' + escapeHtml(title) + '</div>' +
               '<p>' + escapeHtml(c.personality) + '</p>' +
-              '<button class="button door-cta open-companion-chat-btn" type="button" data-companion-id="' + c.id + '">Talk to ' + name + '</button>' +
+              '<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">' +
+              '<button class="button door-cta open-companion-chat-btn" type="button" data-companion-id="' + c.id + '" style="flex: 1;">Talk to ' + name + '</button>' +
+              (deletesRem > 0 ? '<button class="button dark delete-companion-btn" type="button" data-companion-id="' + c.id + '" data-companion-name="' + name + '" style="background: #3a1c1c; border-color: #8b3a3a; color: #ff8888;">Delete</button>' : '') +
+              '</div>' +
               '</div></article>';
           });
         }
@@ -1769,6 +1776,30 @@ const PRESET_FACES = {
           } catch (err) { alert('Purchase failed'); }
         });
       }
+      const container = document.getElementById('companion-card-container');
+      if (container) {
+        container.querySelectorAll('.delete-companion-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const compId = btn.dataset.companionId;
+            const compName = btn.dataset.companionName;
+            if (!confirm('Are you sure you want to delete ' + compName + '? This action cannot be undone.')) return;
+            try {
+              const res = await fetch(API_BASE_URL + '/companions/' + compId, {
+                method: 'DELETE',
+                headers: authHeaders()
+              });
+              const data = await res.json();
+              if (res.ok) {
+                alert(data.message || 'Companion deleted.');
+                loadCompanions();
+              } else {
+                alert(data.detail || 'Could not delete companion.');
+              }
+            } catch (err) { alert('Delete failed.'); }
+          });
+        });
+      }
     }
 
     async function loadRoster() {
@@ -1796,10 +1827,11 @@ const PRESET_FACES = {
       if (!picker || !hidden) return;
       picker.innerHTML = '';
       hidden.value = '';
-      faceList(gender).forEach((src) => {
+      const list = faceList(gender);
+      list.forEach((src, idx) => {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'face-pick';
+        b.className = 'face-pick' + (idx === 0 ? ' selected' : '');
         const img = document.createElement('img');
         img.src = src; img.alt = 'Preset face'; img.loading = 'lazy';
         b.appendChild(img);
@@ -1810,6 +1842,7 @@ const PRESET_FACES = {
         });
         picker.appendChild(b);
       });
+      if (list.length > 0) hidden.value = list[0];
     }
     function authHeadersNoCT() {
       const t = getToken();
@@ -1914,7 +1947,8 @@ const PRESET_FACES = {
           fd.append('defense', document.getElementById('comp-defense').value.trim());
           fd.append('consent', 'true');
           const photoBlob = await (await fetch(preset)).blob();
-          fd.append('photo', photoBlob, 'preset-face.jpg');
+          const imageBlob = (photoBlob.type && photoBlob.type.startsWith('image/')) ? photoBlob : new Blob([photoBlob], { type: 'image/jpeg' });
+          fd.append('photo', imageBlob, 'preset-face.jpg');
           const res = await fetch(API_BASE_URL + '/companions/create', {
             method: 'POST',
             headers: authHeadersNoCT(),
@@ -1972,6 +2006,7 @@ const PRESET_FACES = {
       const seq = ++stateSeq;
       turnSeq++;
       setDoors(); chatRemaining.textContent = '';
+      loadCompanions();
       if (!isLoggedIn()) return;
       try {
         const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
