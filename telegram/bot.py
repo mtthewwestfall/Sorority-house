@@ -732,7 +732,9 @@ async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _txt(update, f"Could not compile audit right now: {exc}")
         return
     report = out.get("audit") or ""
-    await _txt(update, f"📋 Psychological Audit — {girl_name}\n\n{report}"[:4000])
+    message = f"📋 Psychological Audit — {girl_name}\n\n{report}"
+    for offset in range(0, len(message), 4000):
+        await _txt(update, message[offset:offset + 4000])
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
