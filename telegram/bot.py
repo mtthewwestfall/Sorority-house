@@ -26,6 +26,7 @@ Commands
 /girls   — the doors: which sisters are open to you right now; tap one to talk
 /girl    — /girl <slug> (e.g. /girl dakota) to switch who you are talking to
 /house   — leave her room and go back to the doors (also the keyboard button)
+/audit   — run a psychological audit for the sister you are currently talking to
 /state   — your tier, messages left, and every girl's trust stage
 /history — the last messages with the girl you are talking to
 /logout  — forget this chat's session (the next message reopens the same account)
@@ -261,6 +262,21 @@ def _send_chat(token, girl, message):
     return r.json()
 
 
+def _send_audit(token, girl):
+    r = _post("/audit", {"girl": girl}, token=token, timeout=150)
+    if r.status_code != 200:
+        try:
+            detail = r.json().get("detail", "")
+        except Exception:
+            detail = ""
+        detail_msg = detail.split("|")[-1] if "|" in detail else detail
+        raise BackendError(str(detail_msg) or f"audit failed (HTTP {r.status_code})")
+    data = r.json()
+    if not data or not data.get("ok") or not data.get("audit"):
+        raise BackendError("No audit right now. Try again in a moment.")
+    return data
+
+
 async def login(*args):
     return await asyncio.to_thread(_login, *args)
 
@@ -281,6 +297,9 @@ async def fetch_history(*args):
 
 async def send_chat(*args):
     return await asyncio.to_thread(_send_chat, *args)
+
+async def send_audit(*args):
+    return await asyncio.to_thread(_send_audit, *args)
 
 
 # Roster presentation helpers --------------------------------------------------
@@ -373,6 +392,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
           "asking.\n\n")
          + "• /girls — knock on the doors that are open to you\n"
          "• just type a message to talk to whoever you're with\n"
+         "• /audit — run a psychological audit for who you're talking to\n"
          "• /state — your allowance + where you stand with each sister\n"
          "• /menu — upgrade, the website, get the app\n"
          "• /help — everything")
@@ -689,6 +709,32 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _txt(update, "\n\n".join(parts)[:4000])
 
 
+async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_login(update):
+        return
+    rec = _rec(update)
+    slug = rec.get("active_girl")
+    if not slug:
+        await _txt(update, "Pick someone first: /girls or /girl <slug>")
+        return
+    try:
+        rosters = (await _call(update, fetch_roster))["girls"]
+    except Exception:
+        rosters = []
+    girl_name = _girl_name(rosters, slug) if rosters else slug.replace("-", " ").title()
+    await _txt(update, f"Compiling psychological audit for {girl_name}…")
+    try:
+        out = await _call(update, send_audit, slug)
+    except BackendError as exc:
+        await _txt(update, str(exc))
+        return
+    except (RuntimeError, NetError) as exc:
+        await _txt(update, f"Could not compile audit right now: {exc}")
+        return
+    report = out.get("audit") or ""
+    await _txt(update, f"📋 Psychological Audit — {girl_name}\n\n{report}"[:4000])
+
+
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     if not q:
@@ -807,6 +853,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
          "/girls — knock on the doors that are open\n"
          "/girl <slug> — switch who you're talking to\n"
          "/house — leave her room and go back to the doors\n"
+         "/audit — run a psychological audit for her\n"
          "/state — tier, messages left, where you stand\n"
          "/history — the recent thread with her\n"
          "/menu — upgrade, open the website, get the app\n"
@@ -837,6 +884,7 @@ def main():
     app.add_handler(CommandHandler("girls", cmd_girls))
     app.add_handler(CommandHandler("girl", cmd_girl))
     app.add_handler(CommandHandler("house", cmd_house))
+    app.add_handler(CommandHandler("audit", cmd_audit))
     app.add_handler(CommandHandler("state", cmd_state))
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CommandHandler("menu", cmd_menu))
