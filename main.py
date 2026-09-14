@@ -784,6 +784,11 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_chat_user_girl
                     ON chat_logs (user_id, girl, id);
+                -- Optimization: picture_status() and account queries count user messages
+                -- with WHERE user_id=%s AND sender='user'. Index on (user_id, sender) speeds up
+                -- picture entitlement checks and admin user message counting.
+                CREATE INDEX IF NOT EXISTS idx_chat_user_sender
+                    ON chat_logs (user_id, sender);
                 CREATE TABLE IF NOT EXISTS accounts (
                     email         TEXT PRIMARY KEY,
                     user_id       TEXT NOT NULL UNIQUE REFERENCES users(user_id),
