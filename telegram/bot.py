@@ -75,6 +75,7 @@ logger = logging.getLogger("sorority_tg")
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
 SECRET_ENV = "TELEGRAM_BOT_SECRET"   # shared with the backend; unlocks /auth/telegram
+ALLOWED_IDS_ENV = "TELEGRAM_ALLOWED_IDS"  # comma-separated Telegram user ids; empty = open to all
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 # Stripe Payment Links, one per paid tier (public URLs; checkout happens on Stripe).
 PLAN_LINKS = [
@@ -197,6 +198,17 @@ def _bot_secret() -> str:
     if not secret:
         raise RuntimeError(f"{SECRET_ENV} is not set (same value as on the backend).")
     return secret
+
+
+def _allowed_ids() -> set:
+    """Telegram user ids allowed to use this bot; empty set means no restriction."""
+    raw = os.environ.get(ALLOWED_IDS_ENV, "")
+    return {int(part) for part in raw.replace(",", " ").split() if part.strip().isdigit()}
+
+
+def _is_allowed(telegram_id) -> bool:
+    allowed = _allowed_ids()
+    return not allowed or telegram_id in allowed
 
 
 def _telegram_auth(telegram_id, display_name):
@@ -338,10 +350,13 @@ async def _ensure_session(update, force: bool = False):
     """The session for this chat, opening one from the Telegram id when there is none
     (first time: a fresh account, no email asked). Returns the record or None after
     telling the user why."""
+    user = update.effective_user
+    if not _is_allowed(user.id):
+        await _txt(update, "This bot is private. You don't have access.")
+        return None
     rec = _rec(update)
     if rec and rec.get("token") and not force:
         return rec
-    user = update.effective_user
     try:
         sess = await telegram_auth(user.id, (user.first_name or "Player")[:40])
     except (BackendError, RuntimeError, NetError) as exc:
