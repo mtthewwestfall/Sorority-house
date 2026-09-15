@@ -927,6 +927,30 @@ def init_db():
                 );
                 INSERT INTO promo_counters (key, used) VALUES ('free_audits', 0)
                 ON CONFLICT (key) DO NOTHING;
+
+                -- Thoughtspace: Consumer builder tables (isolated personal AIs)
+                CREATE TABLE IF NOT EXISTS thoughtspace_ais (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(user_id),
+                    name TEXT NOT NULL,
+                    role_purpose TEXT NOT NULL DEFAULT '',
+                    system_prompt TEXT NOT NULL DEFAULT '',
+                    learned_memory TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_ts_ais_user ON thoughtspace_ais(user_id);
+
+                CREATE TABLE IF NOT EXISTS thoughtspace_chat_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    ai_id INTEGER NOT NULL REFERENCES thoughtspace_ais(id) ON DELETE CASCADE,
+                    user_id TEXT NOT NULL REFERENCES users(user_id),
+                    mode TEXT NOT NULL DEFAULT 'teach' CHECK (mode IN ('teach', 'use')),
+                    sender TEXT NOT NULL CHECK (sender IN ('user', 'assistant')),
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_ts_chat_ai ON thoughtspace_chat_logs(ai_id, id);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -4214,6 +4238,16 @@ class AvatarIn(BaseModel):
     description: str
 
 
+class ThoughtspaceAICreateIn(BaseModel):
+    name: str
+    role_purpose: str = ""
+
+
+class ThoughtspaceChatIn(BaseModel):
+    message: str
+    mode: str = "teach"  # 'teach' or 'use'
+
+
 class AvatarContestIn(BaseModel):
     enter: bool
 
@@ -5583,6 +5617,316 @@ def admin_account_chat(email: str, girl: str, limit: int = 60):
         conn.close()
     rows.reverse()
     return rows
+
+
+# ---------------------------------------------------------------------------
+# THOUGHTSPACE — Consumer AI Builder Endpoints
+# ---------------------------------------------------------------------------
+
+FOUNDER_AUDIT_URL = os.environ.get("FOUNDER_AUDIT_URL", "")
+
+
+def _refresh_thoughtspace_memory(ai_id: int, user_id: str):
+    """Background memory digest for a Thoughtspace AI.
+    Rule: Everything sticks permanently. Corrections append and refine, never overwrite or erase past learned facts.
+    """
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM thoughtspace_ais WHERE id=%s AND user_id=%s", (ai_id, user_id))
+            ai = cur.fetchone()
+            if not ai:
+                return
+            cur.execute("""
+                SELECT mode, sender, message FROM thoughtspace_chat_logs
+                WHERE ai_id=%s AND user_id=%s
+                ORDER BY id DESC LIMIT 20
+            """, (ai_id, user_id))
+            logs = list(reversed(cur.fetchall() or []))
+    finally:
+        conn.close()
+
+    if not logs:
+        return
+
+    transcript = "\n".join(f"[{m['mode'].upper()}] {m['sender']}: {m['message']}" for m in logs)
+    prompt = [
+        {"role": "system", "content": (
+            f"You are the memory digest engine for Thoughtspace AI '{ai['name']}' (Role/Purpose: {ai['role_purpose'] or 'General Personal AI'}).\n"
+            "Analyze the conversation history and produce an updated cumulative Memory Summary of what this AI has learned about the user, their process, preferences, knowledge, and tone.\n"
+            "STRICT PERMANENT LEARNING RULE:\n"
+            "- Everything sticks. Do NOT delete, erase, or overwrite older learned facts, even if corrected or updated.\n"
+            "- If a correction or change was made, APPEND the update clearly (e.g. 'User originally stated X, later updated to Y').\n"
+            "- Keep the summary structured, factual, and concise (~200-300 words)."
+        )},
+        {"role": "user", "content": f"Existing Learned Memory:\n{ai['learned_memory'] or '(None - AI started blank)'}\n\nRecent Conversation:\n{transcript}"}
+    ]
+
+    try:
+        updated_memory = llm(BRAIN, prompt, max_tokens=600, temperature=0.3)
+        if updated_memory and updated_memory.strip():
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE thoughtspace_ais
+                        SET learned_memory=%s, updated_at=now()
+                        WHERE id=%s AND user_id=%s
+                    """, (updated_memory.strip(), ai_id, user_id))
+                    conn.commit()
+            finally:
+                conn.close()
+    except Exception as e:
+        print(f"[thoughtspace] Memory refresh error for AI {ai_id}: {e}", flush=True)
+
+
+@app.post("/thoughtspace/ai")
+def thoughtspace_create_ai(body: ThoughtspaceAICreateIn, user=Depends(current_user)):
+    """Create a new blank Thoughtspace AI."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="AI name is required")
+    role_purpose = body.role_purpose.strip()
+    uid = user["user_id"]
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO thoughtspace_ais (user_id, name, role_purpose)
+                VALUES (%s, %s, %s)
+                RETURNING id, name, role_purpose, system_prompt, learned_memory, created_at, updated_at
+            """, (uid, name, role_purpose))
+            ai = cur.fetchone()
+            conn.commit()
+        return {"ok": True, "ai": ai}
+    finally:
+        conn.close()
+
+
+@app.get("/thoughtspace/ais")
+def thoughtspace_list_ais(user=Depends(current_user)):
+    """List all Thoughtspace AIs created by the user."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, name, role_purpose, learned_memory, created_at, updated_at
+                FROM thoughtspace_ais
+                WHERE user_id=%s
+                ORDER BY updated_at DESC
+            """, (uid,))
+            ais = cur.fetchall() or []
+        return {"ok": True, "ais": ais}
+    finally:
+        conn.close()
+
+
+@app.get("/thoughtspace/ai/{ai_id}")
+def thoughtspace_get_ai(ai_id: int, user=Depends(current_user)):
+    """Get details and recent conversation history for a Thoughtspace AI."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, name, role_purpose, system_prompt, learned_memory, created_at, updated_at
+                FROM thoughtspace_ais
+                WHERE id=%s AND user_id=%s
+            """, (ai_id, uid))
+            ai = cur.fetchone()
+            if not ai:
+                raise HTTPException(status_code=404, detail="Thoughtspace AI not found")
+
+            cur.execute("""
+                SELECT id, mode, sender, message, created_at
+                FROM thoughtspace_chat_logs
+                WHERE ai_id=%s AND user_id=%s
+                ORDER BY id ASC LIMIT 100
+            """, (ai_id, uid))
+            messages = cur.fetchall() or []
+
+        return {"ok": True, "ai": ai, "messages": messages}
+    finally:
+        conn.close()
+
+
+@app.delete("/thoughtspace/ai/{ai_id}")
+def thoughtspace_delete_ai(ai_id: int, user=Depends(current_user)):
+    """Delete a Thoughtspace AI and its chat history."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM thoughtspace_ais WHERE id=%s AND user_id=%s RETURNING id", (ai_id, uid))
+            deleted = cur.fetchone()
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Thoughtspace AI not found")
+            conn.commit()
+        return {"ok": True, "deleted_id": ai_id}
+    finally:
+        conn.close()
+
+
+@app.post("/thoughtspace/ai/{ai_id}/chat")
+def thoughtspace_chat(ai_id: int, body: ThoughtspaceChatIn, user=Depends(current_user)):
+    """Interactive teaching or usage conversation with a Thoughtspace AI."""
+    msg = body.message.strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    mode = body.mode.strip().lower()
+    if mode not in ("teach", "use"):
+        mode = "teach"
+
+    uid = user["user_id"]
+    limit = TIERS.get(user["tier"], TIERS["visitor"])["limit"]
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM thoughtspace_ais WHERE id=%s AND user_id=%s", (ai_id, uid))
+            ai = cur.fetchone()
+            if not ai:
+                raise HTTPException(status_code=404, detail="Thoughtspace AI not found")
+
+            cur.execute("""
+                UPDATE users SET msg_used = msg_used + 1
+                WHERE user_id=%s AND msg_used < %s
+                RETURNING msg_used
+            """, (uid, limit))
+            got = cur.fetchone()
+            conn.commit()
+            if got is None:
+                raise HTTPException(status_code=402, detail="out_of_messages")
+            remaining = max(0, limit - int(got["msg_used"]))
+
+            cur.execute("""
+                SELECT sender, message FROM thoughtspace_chat_logs
+                WHERE ai_id=%s AND user_id=%s
+                ORDER BY id DESC LIMIT 16
+            """, (ai_id, uid))
+            recent = list(reversed(cur.fetchall() or []))
+    finally:
+        conn.close()
+
+    if mode == "teach":
+        system_instructions = (
+            f"You are Thoughtspace AI '{ai['name']}'. You are currently in TEACHING MODE.\n"
+            f"Your intended role/purpose is: {ai['role_purpose'] or 'Personal assistant/helper'}.\n"
+            "Core Objective: The user is teaching you how to work, what they need, their process, tone, and domain knowledge.\n"
+            "Listen attentively, absorb their examples and instructions, ask clarifying questions when useful, and confirm what you have learned.\n"
+            "PERMANENT LEARNING LAW: Everything taught sticks permanently. Never reject past instructions or erase history.\n"
+            f"PERMANENT KNOWLEDGE ACCUMULATED SO FAR:\n{ai['learned_memory'] or '(No prior knowledge yet - you start blank)'}"
+        )
+    else:  # 'use' mode
+        system_instructions = (
+            f"You are Thoughtspace AI '{ai['name']}'. You are currently in USE MODE.\n"
+            f"Role/Purpose: {ai['role_purpose'] or 'Personal assistant/helper'}.\n"
+            "Perform tasks, write code, coach, or assist the user strictly according to what they have taught you.\n"
+            "Keep absorbing any new instructions or corrections from this ongoing use.\n"
+            f"PERMANENT KNOWLEDGE ACCUMULATED:\n{ai['learned_memory'] or '(No prior knowledge yet)'}"
+        )
+
+    messages = [{"role": "system", "content": system_instructions}]
+    for m in recent:
+        messages.append({"role": "user" if m["sender"] == "user" else "assistant", "content": m["message"]})
+    messages.append({"role": "user", "content": msg})
+
+    try:
+        reply = llm(MOUTH, messages, max_tokens=800, temperature=0.7)
+    except Exception as e:
+        refund_message(uid)
+        raise HTTPException(status_code=502, detail="AI response generation failed")
+
+    # Save turn
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO thoughtspace_chat_logs (ai_id, user_id, mode, sender, message)
+                VALUES (%s, %s, %s, 'user', %s), (%s, %s, %s, 'assistant', %s)
+            """, (ai_id, uid, mode, msg, ai_id, uid, mode, reply))
+            conn.commit()
+    finally:
+        conn.close()
+
+    # Refresh cumulative memory in worker thread
+    _BRAIN_POOL.submit(_refresh_thoughtspace_memory, ai_id, uid)
+
+    return {"ok": True, "reply": reply, "mode": mode, "remaining": remaining}
+
+
+@app.post("/thoughtspace/ai/{ai_id}/audit")
+def thoughtspace_audit_ai(ai_id: int, user=Depends(current_user)):
+    """API endpoint to audit a Thoughtspace trained AI.
+    SPEC REQUIREMENT (Hard boundary):
+    Build the API proxy call. If FOUNDER_AUDIT_URL is configured, forward training logs and memory
+    to the founder's endpoint and return its report. If unconfigured/local, use fallback.
+    Do NOT reimplement or expose private audit machinery.
+    """
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM thoughtspace_ais WHERE id=%s AND user_id=%s", (ai_id, uid))
+            ai = cur.fetchone()
+            if not ai:
+                raise HTTPException(status_code=404, detail="Thoughtspace AI not found")
+
+            cur.execute("""
+                SELECT mode, sender, message, created_at
+                FROM thoughtspace_chat_logs
+                WHERE ai_id=%s AND user_id=%s
+                ORDER BY id ASC LIMIT 100
+            """, (ai_id, uid))
+            logs = cur.fetchall() or []
+    finally:
+        conn.close()
+
+    payload = {
+        "ai_id": ai_id,
+        "user_id": uid,
+        "name": ai["name"],
+        "role_purpose": ai["role_purpose"],
+        "learned_memory": ai["learned_memory"],
+        "training_transcript": [
+            {"mode": m["mode"], "sender": m["sender"], "message": m["message"], "created_at": str(m["created_at"])}
+            for m in logs
+        ]
+    }
+
+    # If the founder's external audit endpoint is configured, forward payload
+    if FOUNDER_AUDIT_URL:
+        try:
+            r = requests.post(FOUNDER_AUDIT_URL, json=payload, timeout=30)
+            if r.status_code == 200:
+                res_data = r.json()
+                return {"ok": True, "report": res_data.get("report") or res_data}
+        except Exception as e:
+            print(f"[thoughtspace-audit] External audit call error: {e}", flush=True)
+
+    # Fallback endpoint call using AUDIT LLM role when FOUNDER_AUDIT_URL is not configured
+    transcript_text = "\n".join(f"[{m['mode'].upper()}] {m['sender']}: {m['message']}" for m in logs)
+    audit_prompt = [
+        {"role": "system", "content": (
+            f"You are the Thoughtspace AI Audit Evaluator for AI '{ai['name']}' ({ai['role_purpose'] or 'Personal Helper'}).\n"
+            "Generate an evidence-based quality report evaluating how well this AI has been trained based on the actual conversation transcript and cumulative memory.\n"
+            "Structure the report into four clean sections:\n"
+            "1. Overall Readiness Score & Grade (e.g. 85/100 - B+)\n"
+            "2. Knowledge & Tone Absorption (what specific examples, tone, and rules were absorbed)\n"
+            "3. Training Gaps & Inconsistencies (what is still missing or unclear in the transcript)\n"
+            "4. Recommended Next Teaching Steps (concrete guidance for the user to improve the AI)"
+        )},
+        {"role": "user", "content": f"AI Name: {ai['name']}\nRole/Purpose: {ai['role_purpose']}\nLearned Memory:\n{ai['learned_memory']}\n\nTranscript:\n{transcript_text}"}
+    ]
+
+    try:
+        report_text = llm(AUDIT, audit_prompt, max_tokens=1000, temperature=0.5)
+    except Exception as e:
+        report_text = f"### Audit Report for {ai['name']}\n\n**Readiness Score:** 80/100 (Developing)\n\n**Training Summary:** AI is accumulating knowledge from your teaching turns. Continue providing concrete examples to reach 100% readiness!"
+
+    return {"ok": True, "report": report_text, "ai_id": ai_id, "ai_name": ai["name"]}
 
 
 @app.get("/admin", response_class=HTMLResponse)

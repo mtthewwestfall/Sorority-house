@@ -565,6 +565,7 @@
         <span>MAPLE HOLLOW</span>
       </a>
       <nav class="rl-nav">
+        <a href="#thoughtspace" style="color: #D8B894; font-weight: 600;">Thoughtspace AI</a>
         <a href="#town">Residents</a>
         <a href="#why">Why it works</a>
         <a href="#plans">Membership</a>
@@ -581,12 +582,32 @@
   <main id="top">
     <section class="rl-hero" style="background: linear-gradient(180deg, rgba(21,23,21,.25) 0%, rgba(21,23,21,.55) 55%, rgba(21,23,21,1) 100%), url('assets/hero-water-tower.jpg') center/cover;">
       <div class="wrap rl-hero-inner">
-        <p class="rl-eyebrow">At the end of a dirt road, deep in the pines.</p>
-        <h1>Where small towns hold <em>big mysteries</em>.</h1>
-        <p class="rl-hero-sub">Seventeen AI townspeople. Talk to all of them free — trust takes real days, and there's no pay-to-skip.</p>
+        <p class="rl-eyebrow">Teach what you need &middot; It learns permanently</p>
+        <h1>Build your own <em>Personal AI</em>.</h1>
+        <p class="rl-hero-sub">Not a game. Not companion AI. Teach it a personal assistant, a coding helper, or a sales coach — and it learns permanently across every session.</p>
         <div class="rl-hero-ctas">
-          <a class="rl-btn rl-btn-primary" href="#town">Start free trial</a>
-          <a class="rl-btn rl-btn-ghost" href="town.html">Come into town ↓</a>
+          <a class="rl-btn rl-btn-primary" href="#thoughtspace" style="background: #2F4A3C; border-color: #D8B894;">Build Your AI Now &rarr;</a>
+          <a class="rl-btn rl-btn-ghost" href="#town">Explore Town Residents &darr;</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- THOUGHTSPACE CONSUMER AI BUILDER SECTION -->
+    <section id="thoughtspace" class="rl-section" style="background: #151816; border-bottom: 1px solid rgba(216,184,148,0.15);">
+      <div class="wrap">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; margin-bottom: 30px;">
+          <div>
+            <p class="rl-eyebrow" style="color: #D8B894;">Thoughtspace Builder</p>
+            <h2 style="font-family: var(--serif); font-weight: 600; font-size: clamp(2rem, 4vw, 3rem); margin: 0; color: #E9E2D7;">Your Custom AIs</h2>
+            <p style="color: #a9a294; margin: 8px 0 0; font-size: 1.05rem;">Start blank, teach through conversation, audit evidence, and use daily.</p>
+          </div>
+          <button class="rl-btn rl-btn-primary" id="open-ts-create-modal" type="button" style="background: #2F4A3C; color: #E9E2D7; border: 1px solid #D8B894;">+ Create New AI</button>
+        </div>
+
+        <div id="thoughtspace-ai-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
+          <div style="background: #1E211E; border: 1px dashed rgba(216,184,148,0.3); border-radius: 16px; padding: 30px; text-align: center;">
+            <p style="color: #a9a294;">Sign in to build and manage your personal AIs.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -884,6 +905,86 @@
       <div class="auth-msg" id="avatar-msg" aria-live="polite"></div>
     </div>
   </div>
+  <!-- Thoughtspace Workspace View Modal -->
+  <div class="chat-backdrop" id="ts-workspace-modal" role="dialog" aria-modal="true" aria-labelledby="ts-ws-title">
+    <div class="chat-panel" style="width: min(800px, 100%); height: min(780px, 94vh); border-color: #D8B894;">
+      <div class="chat-head" style="padding-left: 20px;">
+        <button class="chat-close" id="ts-ws-close" type="button" aria-label="Close" style="position: relative; left: 0; top: 0; margin-right: 12px;">&lsaquo;</button>
+        <div class="who" style="flex: 1;">
+          <strong id="ts-ws-title" style="color: #E9E2D7; font-size: 1.4rem;">AI Workspace</strong>
+          <div id="ts-ws-sub" style="color: #D8B894;">Role: Personal Assistant</div>
+        </div>
+        <!-- Mode Switcher -->
+        <div style="display: flex; background: #1E211E; padding: 3px; border-radius: 999px; border: 1px solid rgba(216,184,148,0.3);">
+          <button id="ts-mode-teach-btn" type="button" class="button" style="padding: 6px 14px; font-size: 0.8rem; background: #2F4A3C; color: #E9E2D7;">Teach AI</button>
+          <button id="ts-mode-use-btn" type="button" class="button dark" style="padding: 6px 14px; font-size: 0.8rem; background: transparent; color: #8A7D6B; border: none;">Use AI</button>
+        </div>
+        <button id="ts-audit-btn" type="button" class="button" style="padding: 6px 14px; font-size: 0.8rem; background: #8A7D6B; color: #151715; margin-left: 8px;">Grade/Audit AI</button>
+      </div>
+
+      <!-- Mode Banner -->
+      <div id="ts-mode-banner" style="background: rgba(47,74,60,0.3); border-bottom: 1px solid rgba(216,184,148,0.2); padding: 8px 18px; font-size: 0.82rem; color: #D8B894; display: flex; justify-content: space-between; align-items: center;">
+        <span id="ts-mode-desc">TEACH MODE: Show it real examples, explain processes, and set rules. Everything sticks permanently.</span>
+        <button id="ts-toggle-memory-btn" type="button" style="background: none; border: none; color: #E9E2D7; text-decoration: underline; cursor: pointer; font-size: 0.8rem;">View Learned Memory</button>
+      </div>
+
+      <!-- Learned Memory Drawer (Collapsible) -->
+      <div id="ts-memory-drawer" style="display: none; background: #1E211E; border-bottom: 1px solid rgba(216,184,148,0.2); padding: 14px 18px; max-height: 180px; overflow-y: auto;">
+        <h4 style="margin: 0 0 6px; font-size: 0.9rem; color: #D8B894;">Accumulated Permanent Knowledge</h4>
+        <pre id="ts-learned-memory-text" style="margin: 0; font-size: 0.82rem; color: #E9E2D7; font-family: inherit; white-space: pre-wrap;">(AI started blank - begin conversation to teach it)</pre>
+      </div>
+
+      <div class="chat-log" id="ts-chat-log" aria-live="polite" style="flex: 1; padding: 16px;"></div>
+
+      <div class="chat-foot">
+        <div class="chat-form" id="ts-chat-form">
+          <div class="field">
+            <textarea id="ts-chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="Teach your AI or give it a task..." aria-label="Message"></textarea>
+            <button class="button" id="ts-chat-send" type="button" aria-label="Send" style="background: #2F4A3C; color: #E9E2D7;">&uarr;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thoughtspace Audit Report View Modal -->
+  <div class="chat-backdrop" id="ts-audit-modal" role="dialog" aria-modal="true" aria-labelledby="ts-audit-title">
+    <div class="chat-panel auth-panel" style="max-width: 600px; max-height: 90vh; overflow-y: auto; border-color: #D8B894;">
+      <button class="chat-close auth-close" id="ts-audit-modal-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="ts-audit-title" style="color: #D8B894;">AI Audit & Grade Report</h2>
+      <p class="auth-sub" id="ts-audit-sub">Evidence-based score calculated from actual training conversations.</p>
+      <div id="ts-audit-report-body" style="background: #1E211E; border: 1px solid rgba(216,184,148,0.2); border-radius: 12px; padding: 18px; color: #E9E2D7; font-size: 0.92rem; line-height: 1.55; white-space: pre-wrap; margin-top: 10px;">
+        Loading evaluation...
+      </div>
+      <button class="button" id="ts-audit-done-btn" type="button" style="margin-top: 16px; background: #2F4A3C; color: #E9E2D7; border: 1px solid #D8B894;">Close Report</button>
+    </div>
+  </div>
+
+  <!-- Thoughtspace Creation Modal -->
+  <div class="chat-backdrop" id="ts-create-modal" role="dialog" aria-modal="true" aria-labelledby="ts-modal-heading">
+    <div class="chat-panel auth-panel" style="max-width: 480px; max-height: 90vh; overflow-y: auto; border-color: #D8B894;">
+      <button class="chat-close auth-close" id="ts-create-modal-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="ts-modal-heading" style="color: #D8B894;">Start a Blank AI</h2>
+      <p class="auth-sub">Your AI starts knowing nothing. Name it and set its role — then teach it through conversation.</p>
+
+      <form id="ts-create-form" style="display: flex; flex-direction: column; gap: 14px; margin-top: 10px; text-align: left;">
+        <div>
+          <label style="font-size: 0.85rem; color: #D8B894; display: block; margin-bottom: 4px;">AI Name</label>
+          <input id="ts-name" type="text" placeholder="e.g. Jarvis, Sales Coach, Alex" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: #D8B894; display: block; margin-bottom: 4px;">Role & Purpose</label>
+          <input id="ts-role" type="text" placeholder="e.g. Personal executive assistant, Full-stack coding helper, B2B sales coach" required style="width: 100%;" />
+        </div>
+        <p style="font-size: 0.82rem; color: #8A7D6B; margin: 0; line-height: 1.4;">
+          It starts completely blank. In the workspace, you will show it real examples and teach it your tone, workflow, and rules.
+        </p>
+        <button class="button" type="submit" style="background: #2F4A3C; color: #E9E2D7; border: 1px solid #D8B894; margin-top: 10px;">Create Blank AI</button>
+      </form>
+      <div class="auth-msg" id="ts-create-msg" aria-live="polite"></div>
+    </div>
+  </div>
+
   <!-- Companion Creation Modal -->
   <div class="chat-backdrop" id="companion-modal" role="dialog" aria-modal="true" aria-labelledby="companion-modal-heading">
     <div class="chat-panel auth-panel" style="max-width: 550px; max-height: 90vh; overflow-y: auto;">
@@ -2486,6 +2587,306 @@ const PRESET_FACES = {
 
     // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
     function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // ---------------------------------------------------------------------------
+    // THOUGHTSPACE CONSUMER BUILDER JS FRONTEND LOGIC
+    // ---------------------------------------------------------------------------
+    let currentTsAI = null;
+    let currentTsMode = 'teach';
+
+    const tsGrid = document.getElementById('thoughtspace-ai-grid');
+    const tsCreateModal = document.getElementById('ts-create-modal');
+    const tsCreateForm = document.getElementById('ts-create-form');
+    const tsCreateMsg = document.getElementById('ts-create-msg');
+    const openTsCreateModalBtn = document.getElementById('open-ts-create-modal');
+    const tsCreateModalCloseBtn = document.getElementById('ts-create-modal-close');
+
+    const tsWsModal = document.getElementById('ts-workspace-modal');
+    const tsWsCloseBtn = document.getElementById('ts-ws-close');
+    const tsWsTitle = document.getElementById('ts-ws-title');
+    const tsWsSub = document.getElementById('ts-ws-sub');
+    const tsModeTeachBtn = document.getElementById('ts-mode-teach-btn');
+    const tsModeUseBtn = document.getElementById('ts-mode-use-btn');
+    const tsModeDesc = document.getElementById('ts-mode-desc');
+    const tsToggleMemoryBtn = document.getElementById('ts-toggle-memory-btn');
+    const tsMemoryDrawer = document.getElementById('ts-memory-drawer');
+    const tsLearnedMemoryText = document.getElementById('ts-learned-memory-text');
+    const tsChatLog = document.getElementById('ts-chat-log');
+    const tsChatForm = document.getElementById('ts-chat-form');
+    const tsChatInput = document.getElementById('ts-chat-input');
+    const tsChatSend = document.getElementById('ts-chat-send');
+    const tsAuditBtn = document.getElementById('ts-audit-btn');
+
+    const tsAuditModal = document.getElementById('ts-audit-modal');
+    const tsAuditModalClose = document.getElementById('ts-audit-modal-close');
+    const tsAuditDoneBtn = document.getElementById('ts-audit-done-btn');
+    const tsAuditReportBody = document.getElementById('ts-audit-report-body');
+
+    if (openTsCreateModalBtn) {
+      openTsCreateModalBtn.addEventListener('click', () => {
+        if (!isLoggedIn()) { openAuth('login', 'Sign in to build your personal AI.'); return; }
+        if (tsCreateMsg) tsCreateMsg.textContent = '';
+        if (tsCreateForm) tsCreateForm.reset();
+        if (tsCreateModal) tsCreateModal.classList.add('is-open');
+      });
+    }
+    if (tsCreateModalCloseBtn) {
+      tsCreateModalCloseBtn.addEventListener('click', () => tsCreateModal.classList.remove('is-open'));
+    }
+
+    if (tsCreateForm) {
+      tsCreateForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!isLoggedIn()) { openAuth('login'); return; }
+        const name = document.getElementById('ts-name').value.trim();
+        const role = document.getElementById('ts-role').value.trim();
+        if (!name) return;
+        tsCreateMsg.textContent = 'Creating blank AI...';
+        tsCreateMsg.className = 'auth-msg';
+
+        try {
+          const res = await fetch(API_BASE_URL + '/thoughtspace/ai', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ name, role_purpose: role })
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            tsCreateMsg.textContent = 'Created!';
+            tsCreateMsg.className = 'auth-msg ok';
+            setTimeout(() => {
+              tsCreateModal.classList.remove('is-open');
+              loadThoughtspaceAIs();
+              openThoughtspaceWorkspace(data.ai.id);
+            }, 600);
+          } else {
+            tsCreateMsg.textContent = data.detail || 'Could not create AI';
+            tsCreateMsg.className = 'auth-msg error';
+          }
+        } catch (err) {
+          tsCreateMsg.textContent = 'Network error. Try again.';
+          tsCreateMsg.className = 'auth-msg error';
+        }
+      });
+    }
+
+    async function loadThoughtspaceAIs() {
+      if (!tsGrid) return;
+      if (!isLoggedIn()) {
+        tsGrid.innerHTML = '<div style="background: #1E211E; border: 1px dashed rgba(216,184,148,0.3); border-radius: 16px; padding: 30px; text-align: center; grid-column: 1/-1;"><p style="color: #a9a294;">Sign in to build and manage your personal AIs.</p></div>';
+        return;
+      }
+
+      try {
+        const res = await fetch(API_BASE_URL + '/thoughtspace/ais', { headers: authHeaders() });
+        if (!res.ok) {
+          tsGrid.innerHTML = '<div style="background: #1E211E; border: 1px dashed rgba(216,184,148,0.3); border-radius: 16px; padding: 30px; text-align: center; grid-column: 1/-1;"><p style="color: #a9a294;">Could not load AIs.</p></div>';
+          return;
+        }
+        const data = await res.json();
+        const ais = data.ais || [];
+
+        if (ais.length === 0) {
+          tsGrid.innerHTML = '<div style="background: #1E211E; border: 1px dashed rgba(216,184,148,0.3); border-radius: 16px; padding: 30px; text-align: center; grid-column: 1/-1;"><h3 style="color: #D8B894; margin-top: 0;">No AIs Built Yet</h3><p style="color: #a9a294;">Click "+ Create New AI" above to start training your first blank personal AI.</p></div>';
+          return;
+        }
+
+        tsGrid.innerHTML = ais.map(ai => {
+          const name = escapeHtml(ai.name);
+          const role = escapeHtml(ai.role_purpose || 'Personal Helper');
+          const memoryExcerpt = ai.learned_memory ? escapeHtml(ai.learned_memory.slice(0, 120)) + '...' : 'Starts blank. Ready to be taught.';
+          return '<article style="background: #1E211E; border: 1px solid rgba(216,184,148,0.2); border-radius: 16px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between;">' +
+            '<div>' +
+            '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">' +
+            '<h3 style="color: #E9E2D7; margin: 0; font-size: 1.25rem;">' + name + '</h3>' +
+            '<span style="background: #2F4A3C; color: #D8B894; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px;">Consumer AI</span>' +
+            '</div>' +
+            '<p style="color: #D8B894; font-size: 0.85rem; margin: 0 0 12px; font-weight: 600;">' + role + '</p>' +
+            '<p style="color: #a9a294; font-size: 0.86rem; line-height: 1.4; margin: 0 0 16px; background: rgba(0,0,0,0.2); padding: 8px 10px; border-radius: 8px;">' + memoryExcerpt + '</p>' +
+            '</div>' +
+            '<div style="display: flex; gap: 8px;">' +
+            '<button class="button open-ts-ai-btn" data-ai-id="' + ai.id + '" type="button" style="flex: 1; padding: 8px 12px; font-size: 0.85rem; background: #2F4A3C; color: #E9E2D7; border: 1px solid #D8B894;">Open Workspace</button>' +
+            '<button class="button delete-ts-ai-btn" data-ai-id="' + ai.id + '" type="button" style="padding: 8px 10px; font-size: 0.85rem; background: transparent; color: #8A7D6B; border: 1px solid rgba(233,226,215,0.15);">&times;</button>' +
+            '</div>' +
+            '</article>';
+        }).join('');
+
+        tsGrid.querySelectorAll('.open-ts-ai-btn').forEach(btn => {
+          btn.addEventListener('click', () => openThoughtspaceWorkspace(parseInt(btn.dataset.aiId, 10)));
+        });
+        tsGrid.querySelectorAll('.delete-ts-ai-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            if (confirm('Delete this AI and its training history?')) {
+              await fetch(API_BASE_URL + '/thoughtspace/ai/' + btn.dataset.aiId, { method: 'DELETE', headers: authHeaders() });
+              loadThoughtspaceAIs();
+            }
+          });
+        });
+      } catch (e) {
+        tsGrid.innerHTML = '<div style="background: #1E211E; border: 1px dashed rgba(216,184,148,0.3); border-radius: 16px; padding: 30px; text-align: center; grid-column: 1/-1;"><p style="color: #a9a294;">Error connecting to server.</p></div>';
+      }
+    }
+
+    async function openThoughtspaceWorkspace(aiId) {
+      if (!isLoggedIn()) return;
+      try {
+        const res = await fetch(API_BASE_URL + '/thoughtspace/ai/' + aiId, { headers: authHeaders() });
+        if (!res.ok) { alert('Could not load AI details'); return; }
+        const data = await res.json();
+        currentTsAI = data.ai;
+
+        tsWsTitle.textContent = currentTsAI.name;
+        tsWsSub.textContent = 'Role: ' + (currentTsAI.role_purpose || 'Personal Helper');
+        tsLearnedMemoryText.textContent = currentTsAI.learned_memory || '(AI started blank - begin conversation to teach it)';
+
+        setThoughtspaceMode('teach');
+
+        tsChatLog.innerHTML = '';
+        const msgs = data.messages || [];
+        if (msgs.length === 0) {
+          const note = document.createElement('div');
+          note.className = 'msg note';
+          note.textContent = 'Workspace initialized. Start teaching ' + currentTsAI.name + ' what you need.';
+          tsChatLog.appendChild(note);
+        } else {
+          msgs.forEach(m => {
+            const el = document.createElement('div');
+            el.className = 'msg ' + (m.sender === 'user' ? 'me' : 'her');
+            el.textContent = (m.mode ? '[' + m.mode.toUpperCase() + '] ' : '') + m.message;
+            tsChatLog.appendChild(el);
+          });
+        }
+        tsChatLog.scrollTop = tsChatLog.scrollHeight;
+
+        tsWsModal.classList.add('is-open');
+        tsChatInput.value = '';
+        tsChatInput.focus();
+      } catch (e) {
+        alert('Failed to open workspace');
+      }
+    }
+
+    function setThoughtspaceMode(mode) {
+      currentTsMode = mode;
+      if (mode === 'teach') {
+        tsModeTeachBtn.style.background = '#2F4A3C';
+        tsModeTeachBtn.style.color = '#E9E2D7';
+        tsModeUseBtn.style.background = 'transparent';
+        tsModeUseBtn.style.color = '#8A7D6B';
+        tsModeDesc.textContent = 'TEACH MODE: Show it real examples, explain processes, and set rules. Everything sticks permanently.';
+        tsChatInput.placeholder = 'Teach your AI... (e.g. "When writing emails, use a concise, direct tone without fluff.")';
+      } else {
+        tsModeUseBtn.style.background = '#2F4A3C';
+        tsModeUseBtn.style.color = '#E9E2D7';
+        tsModeTeachBtn.style.background = 'transparent';
+        tsModeTeachBtn.style.color = '#8A7D6B';
+        tsModeDesc.textContent = 'USE MODE: Put your AI to work daily. It acts strictly on what you taught it.';
+        tsChatInput.placeholder = 'Give your AI a task... (e.g. "Draft a cold outreach email for a new product.")';
+      }
+    }
+
+    if (tsModeTeachBtn) tsModeTeachBtn.addEventListener('click', () => setThoughtspaceMode('teach'));
+    if (tsModeUseBtn) tsModeUseBtn.addEventListener('click', () => setThoughtspaceMode('use'));
+    if (tsWsCloseBtn) tsWsCloseBtn.addEventListener('click', () => { tsWsModal.classList.remove('is-open'); loadThoughtspaceAIs(); });
+
+    if (tsToggleMemoryBtn && tsMemoryDrawer) {
+      tsToggleMemoryBtn.addEventListener('click', () => {
+        const isHidden = tsMemoryDrawer.style.display === 'none';
+        tsMemoryDrawer.style.display = isHidden ? 'block' : 'none';
+        tsToggleMemoryBtn.textContent = isHidden ? 'Hide Learned Memory' : 'View Learned Memory';
+      });
+    }
+
+    async function sendThoughtspaceChatMessage() {
+      if (!currentTsAI || !tsChatInput) return;
+      const message = tsChatInput.value.trim();
+      if (!message) return;
+
+      tsChatInput.value = '';
+      const userEl = document.createElement('div');
+      userEl.className = 'msg me';
+      userEl.textContent = '[' + currentTsMode.toUpperCase() + '] ' + message;
+      tsChatLog.appendChild(userEl);
+
+      const typingEl = document.createElement('div');
+      typingEl.className = 'typing';
+      typingEl.textContent = currentTsAI.name + ' is thinking...';
+      tsChatLog.appendChild(typingEl);
+      tsChatLog.scrollTop = tsChatLog.scrollHeight;
+
+      try {
+        const res = await fetch(API_BASE_URL + '/thoughtspace/ai/' + currentTsAI.id + '/chat', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ message, mode: currentTsMode })
+        });
+        typingEl.remove();
+        const data = await res.json();
+
+        if (res.ok && data.ok) {
+          const aiEl = document.createElement('div');
+          aiEl.className = 'msg her';
+          aiEl.textContent = data.reply;
+          tsChatLog.appendChild(aiEl);
+        } else {
+          const errEl = document.createElement('div');
+          errEl.className = 'msg error';
+          errEl.textContent = data.detail || 'Failed to receive response.';
+          tsChatLog.appendChild(errEl);
+        }
+      } catch (err) {
+        typingEl.remove();
+        const errEl = document.createElement('div');
+        errEl.className = 'msg error';
+        errEl.textContent = 'Network error.';
+        tsChatLog.appendChild(errEl);
+      }
+      tsChatLog.scrollTop = tsChatLog.scrollHeight;
+    }
+
+    if (tsChatSend) tsChatSend.addEventListener('click', sendThoughtspaceChatMessage);
+    if (tsChatInput) {
+      tsChatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendThoughtspaceChatMessage();
+        }
+      });
+    }
+
+    // Audit AI trigger
+    if (tsAuditBtn) {
+      tsAuditBtn.addEventListener('click', async () => {
+        if (!currentTsAI) return;
+        tsAuditReportBody.textContent = 'Compiling audit evaluation report...';
+        tsAuditModal.classList.add('is-open');
+
+        try {
+          const res = await fetch(API_BASE_URL + '/thoughtspace/ai/' + currentTsAI.id + '/audit', {
+            method: 'POST',
+            headers: authHeaders()
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            tsAuditReportBody.textContent = typeof data.report === 'string' ? data.report : JSON.stringify(data.report, null, 2);
+          } else {
+            tsAuditReportBody.textContent = data.detail || 'Audit calculation failed.';
+          }
+        } catch (err) {
+          tsAuditReportBody.textContent = 'Error connecting to audit service.';
+        }
+      });
+    }
+
+    if (tsAuditModalClose) tsAuditModalClose.addEventListener('click', () => tsAuditModal.classList.remove('is-open'));
+    if (tsAuditDoneBtn) tsAuditDoneBtn.addEventListener('click', () => tsAuditModal.classList.remove('is-open'));
+
+    // Hook refreshState to load Thoughtspace AIs as well
+    const _oldRefreshState = refreshState;
+    refreshState = function() {
+      _oldRefreshState();
+      loadThoughtspaceAIs();
+    };
 
     const SHOPIFY_STOREFRONT_URL = 'https://sororityhouse-zlw64-vet1iva0.myshopify.com/api/2025-07/graphql.json';
     const SHOPIFY_STOREFRONT_TOKEN = '17478e428d0dbb29bf9a6d161c6c6b65';
