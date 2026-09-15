@@ -2,11 +2,11 @@
 // shipped with the site. Conversations, the roster and everything else the API
 // answers are left alone, so an installed copy can never show a stale girl or a
 // stale message. Bump SHELL on every shell change to retire the old copy.
-const SHELL = 'house-shell-v17';
+const SHELL = 'house-shell-v18';
 const SHELL_FILES = [
   './',
   './index.html',
-  './town.html',
+  './godprint.html',
   './manifest.webmanifest',
   './assets/icon-192.png',
   './assets/icon-512.png',
@@ -32,6 +32,16 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// One normalized cache key per page: search and hash are stripped so
+// ?utm tags and #anchors share the page's entry, but two different pages
+// can never overwrite each other.
+function pageKey(request) {
+  const key = new URL(request.url);
+  key.search = '';
+  key.hash = '';
+  return key.toString();
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -41,7 +51,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   // The page itself comes from the network first so a deploy lands immediately,
-  // and from the cache only when the network is gone.
+  // and from the cache only when the network is gone. Each page is cached under
+  // its own key; the home page is the generic offline fallback.
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -50,12 +61,16 @@ self.addEventListener('fetch', (event) => {
           // passed through but never becomes the copy we open offline.
           if (response.ok) {
             const copy = response.clone();
-            caches.open(SHELL).then((cache) => cache.put('./index.html', copy)).catch(() => {});
+            caches.open(SHELL).then((cache) => cache.put(pageKey(request), copy)).catch(() => {});
           }
           return response;
         })
-        .catch(() => caches.match('./index.html', { ignoreSearch: true })
-          .then((hit) => hit || Response.error()))
+        .catch(() => {
+          const key = pageKey(request);
+          return caches.match(key, { ignoreSearch: true })
+            .then((hit) => hit || caches.match('./index.html', { ignoreSearch: true }))
+            .then((hit) => hit || Response.error());
+        })
     );
     return;
   }
