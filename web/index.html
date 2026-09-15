@@ -32,6 +32,8 @@
 
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
+    /* Keep anchored targets clear of the sticky topbar. */
+    section[id], .door-card[id] { scroll-margin-top: 84px; }
     body {
       margin: 0;
       color: var(--white);
@@ -220,6 +222,8 @@
     .merch-row select { flex: 1; min-width: 0; border-radius: 999px; padding: 12px 16px; font: inherit; color: var(--white); background: rgba(30,33,30,.94); border: 1px solid var(--line); }
     .merch-row select:focus { outline: none; border-color: rgba(85,99,87,.6); }
     .merch-row .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .merch-soldout { display: inline-block; align-self: flex-start; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .18em; color: #151715; background: #8A7D6B; border-radius: 999px; padding: 6px 14px; margin-bottom: 2px; }
+    .merch-card.is-soldout img { filter: grayscale(.45) brightness(.85); }
     .merch-note { text-align: center; color: var(--muted); margin: 0; }
 
     footer { padding: 50px 0 70px; border-top: 1px solid rgba(218,188,255,.12); color: var(--muted); }
@@ -525,6 +529,23 @@
 .rl-checklist li { color: #c9c2b4; font-size: .95rem; line-height: 1.5; padding: 11px 0 11px 30px; position: relative; border-bottom: 1px solid rgba(233,226,215,.07); }
 .rl-checklist li::before { content: '✓'; position: absolute; left: 4px; top: 11px; color: #8A7D6B; font-weight: 700; }
 
+/* ---------- sample conversation preview (pre-signup taste) ---------- */
+.sample-link { background: none; border: 0; padding: 0; margin-top: 16px; color: #8A7D6B; font: inherit; font-size: .95rem; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
+.sample-link:hover { color: #E9E2D7; }
+.sample-panel { padding: 34px 30px 30px; height: auto; max-height: 92vh; overflow-y: auto; position: relative; }
+.sample-flag { display: inline-block; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .22em; color: #151715; background: #8A7D6B; border-radius: 999px; padding: 6px 14px; margin: 0 0 14px; }
+.sample-panel h2 { font-family: var(--serif); font-size: 1.7rem; margin: 0 0 8px; color: #E9E2D7; font-weight: 600; }
+.sample-sub { color: #a9a294; font-size: .95rem; line-height: 1.6; margin: 0 0 20px; }
+.sample-thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.sample-day { font-size: .7rem; text-transform: uppercase; letter-spacing: .24em; color: #8A7D6B; margin: 14px 0 2px; font-weight: 700; }
+.sample-line { max-width: 88%; padding: 10px 15px; border-radius: 16px; font-size: .95rem; line-height: 1.45; }
+.sample-line span { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .18em; opacity: .75; margin-bottom: 3px; font-weight: 700; }
+.sample-line.me { align-self: flex-end; background: #556357; color: #E9E2D7; border-bottom-right-radius: 6px; }
+.sample-line.her { align-self: flex-start; background: #2a2d2a; color: #E9E2D7; border-bottom-left-radius: 6px; }
+.sample-note { color: #a9a294; font-size: .92rem; line-height: 1.6; margin: 0; border-top: 1px solid rgba(233,226,215,.09); padding-top: 18px; }
+.sample-note a { color: #8A7D6B; font-weight: 600; }
+.sample-note a:hover { color: #E9E2D7; }
+
 /* ---------- footer ---------- */
 .rl-footer { border-top: 1px solid rgba(233,226,215,.09); padding: 66px 0 28px; margin-top: 10px; background: #121411; }
 .rl-footer-grid { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 40px; margin-bottom: 46px; }
@@ -583,7 +604,7 @@
       <div class="wrap rl-hero-inner">
         <p class="rl-eyebrow">At the end of a dirt road, deep in the pines.</p>
         <h1>Where small towns hold <em>big mysteries</em>.</h1>
-        <p class="rl-hero-sub">Seventeen AI townspeople. Talk to all of them free — trust takes real days, and there's no pay-to-skip.</p>
+        <p class="rl-hero-sub">A whole town of AI people. Talk to all of them free — trust takes real days, and there's no pay-to-skip.</p>
         <div class="rl-hero-ctas">
           <a class="rl-btn rl-btn-primary" href="#town">Start free trial</a>
           <a class="rl-btn rl-btn-ghost" href="town.html">Come into town ↓</a>
@@ -596,7 +617,8 @@
         <p class="rl-eyebrow">Meet the residents</p>
         <div class="rl-section-head">
           <h2>The heart of Maple Hollow.</h2>
-          <p class="rl-section-sub">Seventeen doors. Every one of them opens the same way — real talk, over real days.</p>
+          <p class="rl-section-sub">Every door opens the same way — real talk, over real days.</p>
+          <button class="sample-link" id="sample-open" type="button">See a sample conversation →</button>
         </div>
         <div id="companion-section" style="margin-bottom: 26px;">
           <div id="companion-card-container"></div>
@@ -760,7 +782,7 @@
           <aside class="rl-checklist">
             <ul>
               <li>Free trial — no card required</li>
-              <li>All 17 residents open to every tier</li>
+              <li>Every resident is open to every tier</li>
               <li>No pay-to-skip, ever</li>
               <li>Psychological audits on every plan</li>
               <li>Cancel anytime — secure Stripe checkout</li>
@@ -854,6 +876,26 @@
       </div>
 
       <div class="auth-msg" id="auth-msg" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div class="chat-backdrop" id="sample-modal" role="dialog" aria-modal="true" aria-labelledby="sample-heading">
+    <div class="chat-panel sample-panel">
+      <button class="chat-close" id="sample-close" type="button" aria-label="Close">&times;</button>
+      <p class="sample-flag">Sample — a fictional preview</p>
+      <h2 id="sample-heading">How trust builds</h2>
+      <p class="sample-sub">This isn't a real conversation. It's a taste of the pace: show up, be straight, and the doors open over real days.</p>
+      <div class="sample-thread">
+        <p class="sample-day">Day 1</p>
+        <div class="sample-line me"><span>You</span>Hey — I'm new in town. What's good here?</div>
+        <div class="sample-line her"><span>Dakota</span>Coffee's hot at the diner. That's about all the touring I do on day one.</div>
+        <p class="sample-day">Day 3</p>
+        <div class="sample-line me"><span>You</span>You remembered I take it black.</div>
+        <div class="sample-line her"><span>Dakota</span>I remember most things. People don't usually stick around long enough to notice.</div>
+        <p class="sample-day">Day 9</p>
+        <div class="sample-line her"><span>Dakota</span>Corner booth's free if you want it. Don't make it weird.</div>
+      </div>
+      <p class="sample-note">Real doors open slower — and that's the point. <a href="#" id="sample-cta">Start your free trial →</a></p>
     </div>
   </div>
   <div class="chat-backdrop" id="avatar-setup" role="dialog" aria-modal="true" aria-labelledby="avatar-setup-heading">
@@ -1079,6 +1121,22 @@
     document.getElementById('to-login').addEventListener('click', () => showAuthPane('login'));
     document.getElementById('verify-to-login').addEventListener('click', () => showAuthPane('login'));
     updateAuthLinks();
+
+    // ---------- Sample conversation preview (pre-signup taste; trust gates untouched) ----------
+    const sampleBox = document.getElementById('sample-modal');
+    function openSample() { sampleBox.classList.add('is-open'); }
+    function closeSample() { sampleBox.classList.remove('is-open'); }
+    document.getElementById('sample-open').addEventListener('click', openSample);
+    document.getElementById('sample-close').addEventListener('click', closeSample);
+    sampleBox.addEventListener('click', (event) => { if (event.target === sampleBox) closeSample(); });
+    document.getElementById('sample-cta').addEventListener('click', (event) => {
+      event.preventDefault();
+      closeSample();
+      openAuth('signup', 'Create a free account to start your own story.');
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && sampleBox.classList.contains('is-open')) closeSample();
+    });
 
     // ---------- Player avatars: private graphic-novel portrait per account ----------
     const avatarSetupBox = document.getElementById('avatar-setup');
@@ -2584,7 +2642,18 @@ const PRESET_FACES = {
           select.appendChild(opt);
         });
         const firstOpen = variants.find((v) => v.availableForSale);
-        if (firstOpen) select.value = firstOpen.id; else button.disabled = true;
+        if (firstOpen) {
+          select.value = firstOpen.id;
+        } else {
+          // Intentional sold-out state: badge + labeled button, not a dead card.
+          button.disabled = true;
+          button.textContent = 'Sold out';
+          card.classList.add('is-soldout');
+          const badge = document.createElement('span');
+          badge.className = 'merch-soldout';
+          badge.textContent = 'Sold out — check back soon';
+          card.querySelector('.merch-body').prepend(badge);
+        }
         select.addEventListener('change', () => {
           const v = variants.find((x) => x.id === select.value);
           if (v) price.textContent = money(v.price);
