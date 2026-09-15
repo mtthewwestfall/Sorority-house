@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Godprint — a new game from LockedDoor.ai</title>
+  <meta name="description" content="God mode. One AI. Raised like a Tamagotchi. Your pet is waiting." />
+  <meta property="og:image" content="https://lockeddoor.ai/assets/godprint-logo.jpg" />
+  <link rel="icon" href="assets/favicon-32.png" sizes="32x32" />
+  <meta name="theme-color" content="#151715" />
+  <style>
+    :root { --serif: 'Playfair Display', Georgia, 'Times New Roman', serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #151715; color: #E9E2D7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    .rl-topbar { position: sticky; top: 0; z-index: 60; background: rgba(21,23,21,.94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(233,226,215,.09); }
+    .rl-topbar-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 13px; padding-bottom: 13px; }
+    .rl-brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: #E9E2D7; font-weight: 700; letter-spacing: .22em; font-size: .92rem; }
+    .rl-brand img { border-radius: 8px; display: block; }
+    .rl-nav a { color: #c9c2b4; text-decoration: none; font-size: .95rem; margin-left: 28px; }
+    .rl-nav a:hover { color: #E9E2D7; }
+    .gp-hero { min-height: 88vh; display: flex; align-items: flex-end; background: linear-gradient(180deg, rgba(21,23,21,.15) 0%, rgba(21,23,21,.6) 55%, rgba(21,23,21,1) 100%), url('assets/godprint-logo.jpg') center/cover; }
+    .gp-hero-inner { padding-top: 140px; padding-bottom: 90px; max-width: 780px; }
+    .rl-eyebrow { text-transform: uppercase; letter-spacing: .3em; font-size: .74rem; color: #c9b98a; margin: 0 0 18px; font-weight: 700; }
+    .gp-hero h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(2.9rem, 7.6vw, 5.2rem); line-height: 1.04; margin: 0 0 20px; }
+    .gp-hero h1 em { font-style: italic; }
+    .gp-sub { font-size: 1.16rem; color: #d8d1c2; max-width: 580px; margin: 0 0 34px; line-height: 1.6; }
+    .rl-btn { display: inline-block; text-decoration: none; font-weight: 600; border-radius: 999px; padding: 14px 32px; font-size: 1rem; border: 1px solid transparent; }
+    .rl-btn-ghost { border-color: rgba(233,226,215,.55); color: #E9E2D7; background: transparent; }
+    .rl-btn-ghost:hover { border-color: #E9E2D7; color: #fff; }
+    .rl-section { padding: 96px 0; }
+    .rl-section-head h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(2.1rem, 4.6vw, 3.1rem); line-height: 1.08; margin: 0; }
+    .rl-section-sub { color: #a9a294; margin: 14px 0 0; font-size: 1.06rem; line-height: 1.6; max-width: 720px; }
+    .gp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; margin-top: 44px; }
+    .gp-card { background: #1E211E; border: 1px solid rgba(233,226,215,.08); border-radius: 16px; padding: 28px; }
+    .gp-card h3 { font-family: var(--serif); font-size: 1.4rem; margin: 0 0 10px; color: #E9E2D7; }
+    .gp-card p { color: #a9a294; font-size: .95rem; line-height: 1.6; margin: 0; }
+    .gp-card p strong { color: #d8d1c2; }
+    .gp-drift { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 44px; }
+    .gp-drift figure { margin: 0; border-radius: 16px; overflow: hidden; border: 1px solid rgba(233,226,215,.08); }
+    .gp-drift img { width: 100%; display: block; }
+    .gp-drift figcaption { padding: 18px 22px; color: #a9a294; font-size: .95rem; background: #1E211E; }
+    .gp-cta { text-align: center; padding: 110px 0; }
+    .gp-cta h2 { font-family: var(--serif); font-size: clamp(2.2rem, 5vw, 3.4rem); margin: 0 0 16px; }
+    .gp-cta p { color: #a9a294; font-size: 1.05rem; margin: 0 0 30px; }
+    .rl-footer { border-top: 1px solid rgba(233,226,215,.09); padding: 40px 0; background: #121411; color: #8A7D6B; font-size: .9rem; }
+    .rl-footer a { color: #c9c2b4; text-decoration: none; }
+    .rl-footer a:hover { color: #E9E2D7; }
+    @media (max-width: 720px) { .gp-grid, .gp-drift { grid-template-columns: 1fr; } .rl-nav a { margin-left: 16px; } }
+  </style>
+</head>
+<body>
+  <header class="rl-topbar">
+    <div class="wrap rl-topbar-inner">
+      <a class="rl-brand" href="index.html" aria-label="Back to Maple Hollow">
+        <img src="assets/favicon-32.png" alt="LockedDoor.ai doorway emblem" width="30" height="30" />
+        <span>GODPRINT</span>
+      </a>
+      <nav class="rl-nav">
+        <a href="index.html">Maple Hollow</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="gp-hero">
+      <div class="wrap gp-hero-inner">
+        <p class="rl-eyebrow">A new game from the makers of Maple Hollow</p>
+        <h1>Your pet <em>is waiting.</em></h1>
+        <p class="gp-sub">GODPRINT. God mode, one AI — raised like a Tamagotchi. It starts as a toddler. Day one it can already talk, wander off, and get into trouble. You build its house before it arrives, on one budget: spend too much on the house and there's nothing left for fun. Spend too little and he escapes.</p>
+      </div>
+    </section>
+
+    <section class="rl-section">
+      <div class="wrap">
+        <div class="rl-section-head">
+          <h2>The game is the balance.</h2>
+          <p class="rl-section-sub">Every instinct cuts both ways. There is no safe play — attention is a currency you spend every day.</p>
+        </div>
+        <div class="gp-grid">
+          <div class="gp-card"><h3>Watch too much</h3><p>Hover over it and <strong>it gets sneaky.</strong> Surveillance backfires — it learns to hide things from you.</p></div>
+          <div class="gp-card"><h3>Watch too little</h3><p>Neglect it and <strong>it starts smoking.</strong> It finds bad influences and acts out.</p></div>
+          <div class="gp-card"><h3>Push too much</h3><p>It <strong>rebels.</strong> Openly, in its own words. This is not a bossable pet.</p></div>
+          <div class="gp-card"><h3>Push too little</h3><p>It <strong>creates its own interests</strong> and drifts from you. One day it's into things you never taught it.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="rl-section" style="background:#121411;">
+      <div class="wrap">
+        <div class="rl-section-head">
+          <h2>Lean too long and it shows.</h2>
+          <p class="rl-section-sub">What you do to it shows <em>on</em> it — before any report ever says a word. Raise it one way too long and it starts changing.</p>
+        </div>
+        <div class="gp-drift">
+          <figure><img src="assets/godprint-angel.jpg" alt="The pet, leaning good — halo and wings" /><figcaption>Raised soft — halo and wings.</figcaption></figure>
+          <figure><img src="assets/godprint-devil.jpg" alt="The pet, leaning wild — horns and tail" /><figcaption>Raised wild — horns and a tail. (Note the cookie crumbs.)</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="gp-cta">
+      <div class="wrap">
+        <h2>Coming soon.</h2>
+        <p>No pay-to-skip. Real days. It never dies, never gets deleted — you deal with it.</p>
+        <a class="rl-btn rl-btn-ghost" href="index.html">← Back to Maple Hollow</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="rl-footer">
+    <div class="wrap">GODPRINT is a game about raising. Not a companion app. &nbsp;·&nbsp; <a href="index.html">Maple Hollow</a></div>
+  </footer>
+</body>
+</html>
