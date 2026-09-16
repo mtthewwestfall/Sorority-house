@@ -43,7 +43,7 @@ Key environment variables (Railway): `DATABASE_URL`, `ADMIN_SECRET`, `GEMINI_API
 ## Frontend (web/)
 
 - `index.html` — landing, doors, chat, membership, merch. The door cards are a fallback; `GET /roster` replaces them with live data.
-- `areas/` — the four corners of town: Westfall, Pellegrjn, Umina, Muse.
+- `areas/` — the four corners of town: Westfall, Pellegrin, Umina, Muse.
 - `assets/` — portraits, area backgrounds, hangout shots, icons.
 - `sw.js` + `manifest.webmanifest` — makes the site installable. Bump `SHELL` in `sw.js` when the shell changes.
 
