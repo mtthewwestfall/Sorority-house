@@ -3146,9 +3146,14 @@ def generate_picture(girl, name, avatar_url, portrait=None, scenes=None):
         "a coffee-shop selfie, laughing at something off camera",
     ])
     prompt = (f"Create a new picture of {name}, the same person as in the reference image: "
-              f"same face, hair, skin tone and overall art style. Scene: {scene}. "
+              f"same face, hair, skin tone and overall art style. "
+              "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
+              "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
+              "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
+              "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
+              "mountain slopes, soft golden daylight. Scene: {scene}. "
               "Fully clothed, tasteful, natural expression, phone-camera framing. "
-              "No text or watermarks.")
+              "No text, no watermarks.")
     parts = [{"text": prompt}]
     if portrait is None:
         portrait = _portrait_bytes(avatar_url)
@@ -3318,6 +3323,10 @@ Defensive Guard (When trust is low):
 Hidden Wound (Internal drive - do not dump instantly; reveal as trust grows):
 - {trauma}
 
+Texting Style & Communication Law:
+- Text like a real person sending text messages on a phone: short bursts, a word or a single short line.
+- NEVER write paragraph dumps, long essays, or multi-sentence blocks. Keep every reply brief and punchy.
+
 Town Awareness:
 - You live in God's Greek. You know the town, the atmosphere, and the residents (Anna, Bailey, Billy, Brittany, Dakota, Darwin, Dean, Jordan, Kristen, Matt, Mia, Piper, Ryan, Sarah, Sasha, Ty, Veronica, Willow, Zoe).
 - You make the player feel included in God's Greek from day one.
@@ -3355,13 +3364,12 @@ _PHOTO_DESCRIBE_PROMPT = (
 )
 
 _COMPANION_PORTRAIT_STYLE = (
-    "Redraw the person from the reference photo as a detailed digital illustration "
-    "portrait in a clean, high-quality stylized comic art / webtoon cover style -- "
-    "the God's Greek house style. Medium close-up portrait from the chest up, "
-    "subject looking directly at the viewer. Background: a dense, detailed coniferous "
-    "forest of pine and fir trees on rolling mountain slopes, soft natural daylight. "
-    "Fully clothed, tasteful, natural expression. Use the photo ONLY as a likeness "
-    "reference for the face. Never reproduce the photo itself. No text, no watermarks."
+    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
+    "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
+    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
+    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. "
+    "Use the photo ONLY as a likeness reference for the face. Never reproduce the photo itself. No text, no watermarks."
 )
 
 
@@ -3496,8 +3504,8 @@ async def create_companion(request: Request, user=Depends(current_user)):
         gender = data.get("gender") or "female"
     else:
         form = await request.form()
-        if form.get("consent") != "true":
-            raise HTTPException(status_code=400, detail="Upload consent is required.")
+        if str(form.get("consent")).lower() not in ("true", "1") or str(form.get("attestation")).lower() not in ("true", "1"):
+            raise HTTPException(status_code=400, detail="Consent and 18+ attestation are required.")
         photo = form.get("photo")
         if photo is None or not getattr(photo, "filename", None):
             raise HTTPException(status_code=400, detail="A photo is required.")
@@ -3530,14 +3538,19 @@ async def create_companion(request: Request, user=Depends(current_user)):
             slot_row = cur.fetchone()
             max_slots = slot_row["max_slots"] if slot_row else 1
 
-            cur.execute("SELECT count(*) AS n FROM companions WHERE user_id=%s", (uid,))
-            count_row = cur.fetchone()
-            existing_count = count_row["n"] if count_row else 0
+            cur.execute("SELECT slot_number FROM companions WHERE user_id=%s", (uid,))
+            existing_slots = {row["slot_number"] for row in (cur.fetchall() or [])}
 
-            if existing_count >= max_slots:
+            if len(existing_slots) >= max_slots:
                 raise HTTPException(status_code=400, detail=f"Companion limit reached ({max_slots} slot(s)). Purchase an additional slot to create another companion.")
 
-            next_slot = existing_count + 1
+            next_slot = None
+            for s in range(1, max_slots + 1):
+                if s not in existing_slots:
+                    next_slot = s
+                    break
+            if next_slot is None:
+                raise HTTPException(status_code=400, detail=f"Companion limit reached ({max_slots} slot(s)). Purchase an additional slot to create another companion.")
 
         # The machine: moderate the photo BEFORE anything is stored.
         if photo_bytes:
@@ -3696,7 +3709,12 @@ def _build_companion_chat_messages(user_id: str, comp: dict, user_message: str):
 
     # Layer 1: identical system prefix every turn -- same shape as the 17 residents,
     # so companions write just like the characters.
-    system_text = f"You are {comp['first_name']} from God's Greek.\n\n{comp['persona_file']}\n\n{HOUSE_RULES}"
+    system_text = (
+        f"You are {comp['first_name']} from God's Greek.\n\n"
+        f"{comp['persona_file']}\n\n"
+        f"{HOUSE_RULES}\n\n"
+        "STRICT TEXTING LAW: Text like a real person sending quick text messages — short bursts, a word or a single line. NEVER send paragraph dumps, long essays, or multi-sentence blocks."
+    )
 
     # Layer 2: relationship state card (the companion's memory block)
     state_card = (
@@ -3810,7 +3828,7 @@ def companion_chat(companion_id: int, body: CompanionChatIn, user=Depends(curren
                 "milestone": int(comp.get("milestone", 1))}
     try:
         msgs = _build_companion_chat_messages(user["user_id"], comp, body.message)
-        reply = llm(MOUTH, msgs)
+        reply = llm(MOUTH, msgs, max_tokens=150)
         _persist_companion_turn(user["user_id"], companion_id, body.message, reply)
     except Exception:
         refund_message(user["user_id"])
@@ -3851,7 +3869,7 @@ async def companion_chat_stream(companion_id: int, body: CompanionChatIn, reques
         full_reply = []
         try:
             yield f"event: open\ndata: {json.dumps({'companion_id': companion_id})}\n\n"
-            reply_text = await asyncio.to_thread(llm, MOUTH, msgs)
+            reply_text = await asyncio.to_thread(llm, MOUTH, msgs, max_tokens=150)
             full_reply.append(reply_text)
             # chunking stream simulate
             for chunk in [reply_text[i:i+6] for i in range(0, len(reply_text), 6)]:
@@ -4198,12 +4216,12 @@ def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_
 # residents never retire.
 # ---------------------------------------------------------------------------
 AVATAR_STYLE = (
-    "A detailed digital illustration portrait in a clean, high-quality stylized "
-    "comic art / webtoon cover style. Medium close-up portrait from the chest up, "
-    "subject looking directly at the viewer. Background: a dense, detailed "
-    "coniferous forest of pine and fir trees on rolling mountain slopes, soft "
-    "natural daylight. Fully clothed, tasteful, natural expression. No text, no "
-    "watermarks. The person depicted is: "
+    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
+    "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
+    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
+    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
+    "The person depicted is: "
 )
 
 
