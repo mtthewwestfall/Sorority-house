@@ -348,39 +348,39 @@ def tier_rank(tier):
 # door text, art and the tier she is sold on, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
-    ("dakota",   "visitor",  10, "assets/dakota.jpg?v=2",
+    ("dakota",   "visitor",  10, "assets/dakota.jpg?v=3",
      "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
-    ("zoe",      "visitor",  20, "assets/zoe.jpg?v=2",
+    ("zoe",      "visitor",  20, "assets/zoe.jpg?v=3",
      "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "visitor",  30, "assets/willow.jpg?v=2",
+    ("willow",   "visitor",  30, "assets/willow.jpg?v=3",
      "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
     ("brittany", "visitor",  40, "assets/brittany.jpg?v=2",
      "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
     ("sasha",    "visitor",  50, "assets/sasha.webp?v=2",
      "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "visitor",  60, "assets/piper.jpg?v=2",
+    ("piper",    "visitor",  60, "assets/piper.jpg?v=3",
      "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
     ("veronica", "visitor",  70, "assets/veronica.webp?v=2",
      "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
     ("matt",     "visitor",  80, "assets/matt.jpg",
      "Sheriff of God's Greek. Fixes your taillight instead of writing the ticket; carries the town's weight quietly."),
-    ("dean",     "visitor",  90, "assets/dean.jpg",
+    ("dean",     "visitor",  90, "assets/dean.jpg?v=3",
      "The town doctor. The man God's Greek trusts with its worst days — calm under pressure, kind when it counts."),
-    ("ty",       "visitor", 100, "assets/ty.jpg",
+    ("ty",       "visitor", 100, "assets/ty.jpg?v=3",
      "Hardware store owner. The young man who can find anything in the store — handy, honest, easy to talk to."),
-    ("billy",    "visitor", 110, "assets/billy.jpg",
+    ("billy",    "visitor", 110, "assets/billy.jpg?v=3",
      "Diner cook. The man behind the grill who never lets a plate go out wrong — gruff, loyal, softer than he looks."),
     ("kristen",  "visitor", 120, "assets/kristen.jpg",
      "The town veterinarian. The woman the animals trust first — gentle hands, sharp eyes, quiet confidence."),
-    ("ryan",     "visitor", 130, "assets/ryan.jpg",
+    ("ryan",     "visitor", 130, "assets/ryan.jpg?v=3",
      "Town lawyer. The man the town tells the truth to — sharp, discreet, harder to read than he looks."),
-    ("darwin",   "visitor", 140, "assets/darwin.jpg",
+    ("darwin",   "visitor", 140, "assets/darwin.jpg?v=3",
      "The town librarian. Keeper of the quietest room in God's Greek — remembers every book and every borrower."),
     ("jordan",   "visitor", 150, "assets/jordan.jpg",
      "Deputy sheriff. The law's youngest true believer — earnest, brave, and still proving herself."),
-    ("mia",      "visitor", 160, "assets/mia.jpg",
+    ("mia",      "visitor", 160, "assets/mia.jpg?v=3",
      "News reporter. The woman who knows everything first — curious, quick, always chasing the real story."),
-    ("anna",     "visitor", 170, "assets/anna.jpg",
+    ("anna",     "visitor", 170, "assets/anna.jpg?v=3",
      "EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together."),
     ("bailey",   "visitor", 180, "assets/bailey.jpg",
      "Potter at the edge of town. Sharp, funny, deliberately too much — she dares you to dislike her so she controls the rejection. Outlast the dare."),
@@ -980,15 +980,25 @@ def init_db():
                 cur.execute("UPDATE personas SET min_tier = %s WHERE min_tier = %s", (_new, _old))
                 cur.execute("UPDATE users SET comp_prev_tier = %s WHERE comp_prev_tier = %s", (_new, _old))
             # Bust portrait caches: point the roster at the versioned image URLs.
-            for _girl, _avatar in (("dakota", "assets/dakota.jpg?v=2"),
-                                   ("zoe", "assets/zoe.jpg?v=2"),
-                                   ("willow", "assets/willow.jpg?v=2"),
+            # Match the query-string already on the target URL so a v=2 row is
+            # rewritten when we ship v=3, and a v=3 row is left alone.
+            for _girl, _avatar in (("dakota", "assets/dakota.jpg?v=3"),
+                                   ("zoe", "assets/zoe.jpg?v=3"),
+                                   ("willow", "assets/willow.jpg?v=3"),
                                    ("brittany", "assets/brittany.jpg?v=2"),
                                    ("sasha", "assets/sasha.webp?v=2"),
-                                   ("piper", "assets/piper.jpg?v=2"),
-                                   ("veronica", "assets/veronica.webp?v=2")):
+                                   ("piper", "assets/piper.jpg?v=3"),
+                                   ("veronica", "assets/veronica.webp?v=2"),
+                                   ("dean", "assets/dean.jpg?v=3"),
+                                   ("ty", "assets/ty.jpg?v=3"),
+                                   ("billy", "assets/billy.jpg?v=3"),
+                                   ("ryan", "assets/ryan.jpg?v=3"),
+                                   ("darwin", "assets/darwin.jpg?v=3"),
+                                   ("mia", "assets/mia.jpg?v=3"),
+                                   ("anna", "assets/anna.jpg?v=3")):
+                _ver = "%?v=3" if "?v=3" in _avatar else "%?v=2"
                 cur.execute("UPDATE personas SET avatar_url = %s WHERE girl = %s AND avatar_url NOT LIKE %s",
-                            (_avatar, _girl, "%?v=2"))
+                            (_avatar, _girl, _ver))
             # Doors moved from tier-gated to progression-gated. The marker column
             # makes the tier-wall lift run once, so the console owns min_tier after.
             cur.execute("""
