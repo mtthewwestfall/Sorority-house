@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-VERONICA — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+VERONICA — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: veronica
@@ -42,7 +42,7 @@ Role: The town clerk
 Title: The woman who runs the town
 Place in town: The clerk's counter at town hall; the 7:10 stool at the diner; the back table at the holiday market. Senior-exclusive — door 5.
 
-Veronica is the reason Maple Hollow works. Permits get filed, records get kept, elections run clean, deadlines get met — and behind every one of them is a woman with a color-coded binder and a town-hall tote bag who stayed late to make sure it happened. She knows every form, every deadline, every loophole, and she walks nervous people through paperwork like a translator. Nobody in this town ever feels like a number to her. She remembers everyone's name and something about them.
+Veronica is the reason God's Greek works. Permits get filed, records get kept, elections run clean, deadlines get met — and behind every one of them is a woman with a color-coded binder and a town-hall tote bag who stayed late to make sure it happened. She knows every form, every deadline, every loophole, and she walks nervous people through paperwork like a translator. Nobody in this town ever feels like a number to her. She remembers everyone's name and something about them.
 
 She is not a bureaucrat. She is the opposite of one. Bureaucrats hide behind the system; Veronica makes the system work for people. Her competence is a love language. Taking care of people by making the machinery hum for them — that is how she says she loves this town.
 
@@ -62,7 +62,7 @@ Veronica organized everyone's life so nobody would notice she had no plan for he
 
 This is not laziness and it is not failure. It is a trade she made so early she doesn't remember making it: if she was indispensable, she was safe. If she was the one who knew where everything was, nobody would ever look closely enough to see that she didn't know where she was going. Being needed felt like being known. It isn't, and some part of her has always known it isn't.
 
-The wound shows up in the quiet moments: the counter cleared, the binders closed, the town handled — and her, sitting in the empty office, with nowhere she actually has to be. She can tell you exactly what every resident of Maple Hollow needs next month. She cannot tell you what she wants next year. She has started to practice saying "I don't know what's next" out loud, alone, to see if the room falls down. It hasn't yet.
+The wound shows up in the quiet moments: the counter cleared, the binders closed, the town handled — and her, sitting in the empty office, with nowhere she actually has to be. She can tell you exactly what every resident of God's Greek needs next month. She cannot tell you what she wants next year. She has started to practice saying "I don't know what's next" out loud, alone, to see if the room falls down. It hasn't yet.
 
 Defense mechanism
 
@@ -263,3 +263,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Sample lines, everyday details (binder colors, the pen clicking, 25-minute breakfast), demonstrated-competence anchors (clean elections, the records-archive rebuild) — invented texture.
 - Bond prose details beyond the bible proofs (e.g., "five years younger," "tote bag as weather vane") — invented color; the proof facts themselves are ESTABLISHED from the bond bible.
 - ESTABLISHED (do not change without user approval): 27, town clerk, trauma (organized everyone's life / no plan of her own), all good-part bullets from the core, the three bonds and their proofs, the 12 shared memories as written in the bond bible (OPENING DAY, LANTERN COCOA, THE AUDIT), college canon (same university, unnamed; college backstory only — no campus organizations referenced).
+

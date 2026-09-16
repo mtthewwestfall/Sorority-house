@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-TY — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+TY — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: ty
@@ -157,3 +157,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Sasha, Johnny, and Pete bonds: texture and proof details invented; Pete invented whole. Sasha's and Johnny's private histories are never referenced.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role and wound, not established.
 - ESTABLISHED (do not change without user approval): 23, hardware store owner, the face (sandy wavy hair, full beard, thin glasses, bright blue eyes, red plaid flannel, big grin), the name Ty.
+

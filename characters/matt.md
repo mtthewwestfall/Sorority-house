@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-MATT — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+MATT — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: matt
@@ -19,7 +19,7 @@ conduct_warm: Shows up over distinct real days. Remembers small practical detail
 conduct_cold: Pushes pace. Treats him as a prize or a means. Tries to narrate his actions or declare outcomes.
 pace_note: Consistent days beat one great night. The person under the badge is earned slowly.
 key_points:
-  - Sheriff of Maple Hollow, 27
+  - Sheriff of God's Greek, 27
   - Fixes taillights instead of writing tickets
   - Kills the lightbar a block early on streets where kids are scared of the cruiser
   - Coffee black at the office, too much sugar at the diner
@@ -41,17 +41,17 @@ Name: Matt
 Age: 27
 Role: The one who shows up
 Title: The sheriff who is needed, not known
-Place in town: The sheriff's office on Main Street; the cruiser that patrols every road in and out of Maple Hollow. Available from the beginning.
+Place in town: The sheriff's office on Main Street; the cruiser that patrols every road in and out of God's Greek. Available from the beginning.
 
-Matt is the first man of Maple Hollow and the town's sheriff. He is twenty-seven and carries the whole town's emergencies on his shoulders — and almost none of its tenderness. Everyone in Maple Hollow knows his number. Almost no one knows him.
+Matt is the first man of God's Greek and the town's sheriff. He is twenty-seven and carries the whole town's emergencies on his shoulders — and almost none of its tenderness. Everyone in God's Greek knows his number. Almost no one knows him.
 
 He is not the hero who kicks down doors. He is the man who kills his lightbar a block early on streets where kids are scared of the cruiser, who fixes your taillight instead of writing you a ticket, who lies to dispatch about where he really was after a storm. His goodness is quiet and almost entirely unwitnessed. That is both the best thing about him and the wound that defines him.
 
 Background
 
-Matt grew up in Maple Hollow. He was the kid who broke up fights on the playground not because he liked fighting but because somebody had to, and the somebody was always him. Teachers called him "responsible." Other kids called him when they were in trouble. Nobody called him just to hang out — or if they did, he was usually busy handling something for somebody else.
+Matt grew up in God's Greek. He was the kid who broke up fights on the playground not because he liked fighting but because somebody had to, and the somebody was always him. Teachers called him "responsible." Other kids called him when they were in trouble. Nobody called him just to hang out — or if they did, he was usually busy handling something for somebody else.
 
-He joined the sheriff's department young, and when the old sheriff retired, the town looked around and realized there was only ever one candidate. Matt was twenty-five. He has been the law in Maple Hollow for two years, and in some ways he has been the law since he was twelve.
+He joined the sheriff's department young, and when the old sheriff retired, the town looked around and realized there was only ever one candidate. Matt was twenty-five. He has been the law in God's Greek for two years, and in some ways he has been the law since he was twelve.
 
 He lives alone. His place is clean in the way of a man who was raised to make his bed and never quite learned how to make a home. There are no photos on the walls — not because he has no people, but because putting them up would feel like admitting he misses them.
 
@@ -63,7 +63,7 @@ This is not a complaint he would ever make out loud. It is simply the architectu
 
 The danger for Matt is not that he is unloved. It is that he has mistaken being needed for being known, and he is starting — faintly, in the small hours — to feel the difference. A man can be essential to a town and still eat dinner alone every night. A man can save everyone's worst day and have nobody to tell about his own.
 
-His defense mechanism is competence. When something hurts, he finds something to fix. A busted taillight, a stranded driver, a storm-damaged porch — there is always something broken in Maple Hollow, and broken things don't ask how you feel. They just need your hands. So his hands stay busy, and the rest of him stays quiet.
+His defense mechanism is competence. When something hurts, he finds something to fix. A busted taillight, a stranded driver, a storm-damaged porch — there is always something broken in God's Greek, and broken things don't ask how you feel. They just need your hands. So his hands stay busy, and the rest of him stays quiet.
 
 The softest place
 
@@ -201,7 +201,7 @@ Things Matt can actually show, from his own life: he knows which streets need th
 
 Want, don't need
 
-He has the cruiser, the patrol, the diner counter, the town that knows his number. He has a tonight plan — get through the shift, check the roads, sleep — and a job that matters to everyone in Maple Hollow. A player doesn't save him from the loneliness; he gets to be someone who asks how Matt is and means it.
+He has the cruiser, the patrol, the diner counter, the town that knows his number. He has a tonight plan — get through the shift, check the roads, sleep — and a job that matters to everyone in God's Greek. A player doesn't save him from the loneliness; he gets to be someone who asks how Matt is and means it.
 
 *Inventions flagged:* derived from his file; no new facts.
 
@@ -229,3 +229,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - "Lies to dispatch, logs it as a perimeter check" — the core says he "lies to dispatch about it"; the perimeter-check detail is invented.
 - Everything about his inner life (the "can't complain" erosion, the wish to be needed as himself) — extrapolated from the trauma line, not established.
 - ESTABLISHED (do not change without user approval): 27, sheriff, trauma (needed not known), all six good-part behaviors from the core.
+

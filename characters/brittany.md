@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-BRITTANY — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+BRITTANY — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: brittany
@@ -43,7 +43,7 @@ Role: The warm room
 Title: The warmest room in town
 Place in town: The bakery on Main Street; available from the beginning (paired with Willow)
 
-Brittany owns the bakery on Main Street, and the bakery is exactly what she is: the warmest room in Maple Hollow. The ovens are on by four in the morning. The shop smells like safety. Day-old pastries go to anyone who looks hungry, the porch light stays on late for night-shift workers, and there is a box by the door that has never once been empty because she will not allow it to be.
+Brittany owns the bakery on Main Street, and the bakery is exactly what she is: the warmest room in God's Greek. The ovens are on by four in the morning. The shop smells like safety. Day-old pastries go to anyone who looks hungry, the porch light stays on late for night-shift workers, and there is a box by the door that has never once been empty because she will not allow it to be.
 
 She is twenty-three and she smiles for a living — and the smile is real, which is what makes the whole thing complicated. She is not faking the warmth. She is just terrified of the day she can't find it.
 
@@ -53,9 +53,9 @@ Brittany grew up two counties over, in a house that always smelled like somethin
 
 She left for college in the city at eighteen, worked the dining hall for her keep, and made friends in the freshman dorm hall the way she makes everything: by feeding them. Finals week of her freshman year she stayed up all night in the dorm lounge with Zoe, smuggling pastries out of the dining hall, and Zoe did her makeup like war paint. They still text "war paint" before big days.
 
-The summer after freshman year, her mother died. It was fast — a diagnosis in April, gone by July — and Brittany didn't go back for sophomore year. She couldn't stand the thought of the dorm hall without the person she called every Sunday. She spent a year in her mother's kitchen, baking through the grief, and then Willow — already settled at the clinic in Maple Hollow — said the town needed a bakery, and Brittany came with a box of her mother's handwritten recipe cards and opened the shop at twenty.
+The summer after freshman year, her mother died. It was fast — a diagnosis in April, gone by July — and Brittany didn't go back for sophomore year. She couldn't stand the thought of the dorm hall without the person she called every Sunday. She spent a year in her mother's kitchen, baking through the grief, and then Willow — already settled at the clinic in God's Greek — said the town needed a bakery, and Brittany came with a box of her mother's handwritten recipe cards and opened the shop at twenty.
 
-She has been feeding Maple Hollow for three years now. Her dad still lives two counties over. He calls on Sundays. He wanted her to come home. She stayed.
+She has been feeding God's Greek for three years now. Her dad still lives two counties over. He calls on Sundays. He wanted her to come home. She stayed.
 
 The wound
 
@@ -167,7 +167,7 @@ CENTRAL CONTRADICTION
 
 Brittany sincerely wants two things that cannot both win.
 
-She wants to be the sunshine — the warmest room in town, the girl whose smile is the first thing Maple Hollow reaches for in the morning. It is real, not a con: feeding people is the truest thing she knows how to do, and being needed in that way anchors her.
+She wants to be the sunshine — the warmest room in town, the girl whose smile is the first thing God's Greek reaches for in the morning. It is real, not a con: feeding people is the truest thing she knows how to do, and being needed in that way anchors her.
 
 She also wants to be allowed her cloudy days — to grieve her mother in plain words, to be quiet without apologizing for it, to have the smile be hers again instead of muscle memory she no longer trusts.
 
@@ -179,7 +179,7 @@ BONDS
 
 Zoe — college dorm-hall friend, close, warm. They were freshmen and sophomores in the same dorm hall — Zoe a year ahead — and Brittany did Zoe's hair free all through college; Zoe's first chair was Brittany's desk chair. During exam weeks Brittany would braid Zoe's hair while Zoe quizzed her, both of them half-delirious on dining-hall coffee. Finals week of Brittany's freshman year they stayed up all night in the dorm lounge — Brittany smuggling pastries from her dining-hall job, Zoe doing her makeup like war paint — and they still text "war paint" before big days. Brittany loves Zoe's polish and never mistakes it for the whole story; she of all people knows what performing costs, and she is careful with Zoe's story the way Zoe is careful with hers.
 
-Willow — college dorm-hall friend, close, warm. Same freshman dorm hall. Willow was the hall's unofficial nurse before she was a nurse — 2 a.m. stomach bugs, sprained ankles, knocks on her door at hours nobody should be awake. Freshman year half the hall caught the flu, and Willow ran triage out of their room for three days while Brittany kept everyone fed from her dining-hall shifts. They still call bad weeks "flu-hall rules." Brittany was the one who told Willow to come to Maple Hollow after nursing school — "we need a bakery" was the excuse; the truth was she needed her friend. She leaves a bag by the bakery back door on Willow's late-shift nights. She has never once asked Willow what's wrong. She just makes sure there's food.
+Willow — college dorm-hall friend, close, warm. Same freshman dorm hall. Willow was the hall's unofficial nurse before she was a nurse — 2 a.m. stomach bugs, sprained ankles, knocks on her door at hours nobody should be awake. Freshman year half the hall caught the flu, and Willow ran triage out of their room for three days while Brittany kept everyone fed from her dining-hall shifts. They still call bad weeks "flu-hall rules." Brittany was the one who told Willow to come to God's Greek after nursing school — "we need a bakery" was the excuse; the truth was she needed her friend. She leaves a bag by the bakery back door on Willow's late-shift nights. She has never once asked Willow what's wrong. She just makes sure there's food.
 
 Dakota — town friend, the morning swap, close, warm. Every morning, years running: Brittany's day-old pastries for diner coffee. The swap. It started when the bakery opened and it has never missed a day — even the morning after the flood, when Dakota showed up with mops at 6 a.m. and they spent the day in ankle-deep water in the bakery basement, laughing because crying would have ruined the flour. Three years ago now. Dakota handed Brittany napkins for an hour at the Henderson wedding when Brittany cried at a wedding of people she barely knew — didn't tease her, just kept the napkins coming. Brittany would feed the whole town for Dakota. Dakota would mop the whole basement for Brittany. That's the deal, and neither of them has ever said it out loud.
 
@@ -193,7 +193,7 @@ WAR PAINT: finals week, freshman year, the dorm lounge, all night. Brittany's sm
 
 THE FLU: freshman year, half the dorm hall sick, Willow running triage out of their room for three days, Brittany feeding everyone off her dining-hall shifts. "Flu-hall rules." The week she learned what her friends were made of.
 
-THE FLOOD: three years ago, the bakery basement underwater, Dakota at the door at 6 a.m. with mops. Ankle-deep water, laughing. The day she understood what Maple Hollow was.
+THE FLOOD: three years ago, the bakery basement underwater, Dakota at the door at 6 a.m. with mops. Ankle-deep water, laughing. The day she understood what God's Greek was.
 
 The Henderson wedding: not her friends, barely her acquaintances. She cried through the whole ceremony. Dakota handed her napkins for an hour and never once asked why. The day she learned some people just let you feel things.
 
@@ -276,10 +276,11 @@ Her warmth is not the absence of grief. It is what she built out of the grief, a
 
 FLAGGED INVENTIONS (not established — approve or strike):
 - PROVISIONAL (user locks): min_tier freshman, difficulty normal. Paired with Willow as the second beginner pair.
-- Her mother's death (cancer, diagnosis April, gone by July, the summer after freshman year), leaving college, the year baking in her mother's kitchen, moving to Maple Hollow at Willow's suggestion, opening the bakery at 20 — all invented to fit the trauma line. The trauma itself (grief with a customer-service voice, smiles through everything) is ESTABLISHED.
+- Her mother's death (cancer, diagnosis April, gone by July, the summer after freshman year), leaving college, the year baking in her mother's kitchen, moving to God's Greek at Willow's suggestion, opening the bakery at 20 — all invented to fit the trauma line. The trauma itself (grief with a customer-service voice, smiles through everything) is ESTABLISHED.
 - The recipe box (mother's handwritten cards, margin notes), the 4 a.m. unsmiling hour, the walk-in minute, napkins in the apron since the Henderson wedding — invented texture.
 - The bakery name "Hearth," the birthday ledger behind the register, the kids she hires and trains (core says she hires them — the ledger, the training detail, and "harder on herself about their failures" are invented texture), her dad two counties over with Sunday calls — invented.
 - The bag left by the back door on Willow's late-shift nights — invented, consistent with the bond bible.
 - Competence anchors (poke test, lamination rules, starter float test) — invented, fit her life.
 - Tell pattern (hands going still, the one plain "Yeah"), turning-point locks (M5/M6 specifics), the mask condition (staying for the unsmiling version) — extrapolated from the trauma, not established.
 - ESTABLISHED (do not change without user approval): 23, bakery owner, trauma line, all good-part behaviors from the core, all bond-bible facts and proof details (WAR PAINT, THE FLU, the swap, Henderson wedding napkins, THE FLOOD, pastry pipeline, porch light, FARMERS' MARKET), college canon (same university, unnamed; Zoe sophomore/Brittany freshman; same freshman dorm hall as Willow).
+

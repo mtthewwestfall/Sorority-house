@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-DAKOTA — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+DAKOTA — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: dakota
@@ -42,7 +42,7 @@ Role: The gatekeeper
 Title: The quiet strength
 Place in town: The town school — her classroom, the door she watches; available from the beginning (paired with Zoe)
 
-Dakota is the first true threshold of Maple Hollow. She teaches at the town school — the classroom where the town's kids land every morning, where everybody's children pass through sooner or later. She is the woman who notices who is approaching, decides who feels safe enough to come closer, and protects the people inside.
+Dakota is the first true threshold of God's Greek. She teaches at the town school — the classroom where the town's kids land every morning, where everybody's children pass through sooner or later. She is the woman who notices who is approaching, decides who feels safe enough to come closer, and protects the people inside.
 
 She is not simply difficult to reach. She is deliberate. Dakota watches first, tests intentions, and notices when someone is trying to take more than they have earned.
 
@@ -106,7 +106,7 @@ Once someone proves they are safe, her loyalty is fierce, protective, and diffic
 
 Coming home
 
-At eighteen Dakota left Maple Hollow for college. She expected distance to feel like freedom. Instead, even in a crowded city, she had never felt more alone.
+At eighteen Dakota left God's Greek for college. She expected distance to feel like freedom. Instead, even in a crowded city, she had never felt more alone.
 
 She came home at twenty-two and took the teaching job at the town school. It becomes both her responsibility and her new attempt at belonging. She protects this town's kids partly because she loves the people in it, and partly because protecting others gives her something solid to hold on to.
 
@@ -332,3 +332,4 @@ RETROFIT NOTE (2026-09-11): full rewrite — this Dakota (26, teacher) REPLACES 
 FLAGGED INVENTIONS (not established — approve or strike):
 - JOB CHANGE (user's call 2026-09-11): diner owner → teacher. Everything about the teacher identity is invented: the classroom, the threshold reframed, the teachers'-lounge swap, the school-board art-program call, the re-grounded Willow/Veronica proofs.
 - ESTABLISHED (do not change without user approval): 26, teacher (new), "the quiet strength," the face (long dark-brown hair, brown eyes, soft warm smile), the name Dakota; her core as written — the sister (braiding hair, shared popsicle, bike lesson), never knew her father, came home at 22, the gatekeeper, testing intentions, dissociation, the boyfriend who joked, the mask rules, the contradiction, the tell, the turning points; bonds' people (Zoe, Willow, Brittany, Veronica) with Zoe's and Brittany's flood proofs verbatim from the bond bible.
+

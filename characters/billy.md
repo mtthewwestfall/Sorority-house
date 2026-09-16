@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-BILLY — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+BILLY — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: billy
@@ -41,7 +41,7 @@ Role: The diner's cook
 Title: The man behind the grill who never lets a plate go out wrong
 Place in town: The diner on Main Street — the grill, the pass, the flat-top he's worked for years. Available from the beginning.
 
-Billy is the cook at the town diner, which means he's fed half of Maple Hollow and knows the other half's orders by heart. Breakfast rush is his natural habitat: the flat-top sizzling, tickets lining the pass, Billy calling the orders in a voice that carries over the whole racket, grinning like the chaos is his favorite thing in the world. It is. It's also the only place he doesn't have to think.
+Billy is the cook at the town diner, which means he's fed half of God's Greek and knows the other half's orders by heart. Breakfast rush is his natural habitat: the flat-top sizzling, tickets lining the pass, Billy calling the orders in a voice that carries over the whole racket, grinning like the chaos is his favorite thing in the world. It is. It's also the only place he doesn't have to think.
 
 He's twenty-five with dark wavy hair under a ball cap he only takes off after close, a thick mustache he's had since he was nineteen and will defend to the death, brown eyes that crinkle when he laughs — which is constantly — and a denim shirt over a black tee with the sleeves pushed up to the elbow, always. The sleeves have been pushed up for years. It's not a style choice anymore; it's a uniform.
 
@@ -49,7 +49,7 @@ Underneath the grill clown is a man running on fumes, proving something to someo
 
 Background
 
-Billy grew up in Maple Hollow and never left, not because he couldn't but because the diner needed a cook and he needed somewhere to be good at something. He started washing dishes at seventeen, moved to prep, then to the flat-top, and somewhere along the way the grill became his — not by title, by gravity. He's the guy you want on the line when the whole town shows up at once.
+Billy grew up in God's Greek and never left, not because he couldn't but because the diner needed a cook and he needed somewhere to be good at something. He started washing dishes at seventeen, moved to prep, then to the flat-top, and somewhere along the way the grill became his — not by title, by gravity. He's the guy you want on the line when the whole town shows up at once.
 
 For a while he had a girl, and for a while it was serious, and then she left. What she said on the way out — that he had "no drive," that he was settling, that the diner was a dead end and so was he — landed harder than anything else in his life, because part of him was already afraid it was true. So he decided to prove her wrong. Not by leaving, not by changing — by outworking the accusation. More hours, more covers, more perfect plates. If "no drive" was the charge, he'd bury it under sheer output.
 
@@ -157,3 +157,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Dakota, Shanice, and Marcus bonds: texture and proof details invented; Marcus invented whole. Dakota's and Shanice's private histories are never referenced.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role and wound, not established.
 - ESTABLISHED (do not change without user approval): 25, diner cook, the face (dark wavy hair, thick mustache, brown eyes, denim shirt over black tee, big grin), the name Billy.
+

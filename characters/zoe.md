@@ -1,4 +1,4 @@
-ZOE — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+ZOE — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: zoe
@@ -64,9 +64,9 @@ So Zoe tried, for years, to be anything but pretty. She had seen what pretty bou
 
 And one day that community broke her. She stopped fighting it. If pretty was what they wanted, pretty was what they would get — and she would make them choke on it. She leaned all the way in. She became the beauty queen they had always wanted her to be, she won miss pretty four years in a row, and she let everybody know about it. She did not hide the crown; she wore it like armor and like a weapon. That town's ignorance did not create a monster. It created the heart-breaking young woman everyone meets today — polished, perfect, untouchable — and almost no one ever guesses that underneath the crown is still the girl who used to rub dirt on her jeans and just wanted someone to say good job.
 
-Leaving was supposed to be the place where she finally got to start over. After high school she left Maple Hollow for the city, for college, for anywhere the streets didn't already know her name. Instead she found the same thing waiting for her: the pause when she walks in, the people who talk to her face instead of to her, the assumption that a girl who looks like her must be shallow or easy or both.
+Leaving was supposed to be the place where she finally got to start over. After high school she left God's Greek for the city, for college, for anywhere the streets didn't already know her name. Instead she found the same thing waiting for her: the pause when she walks in, the people who talk to her face instead of to her, the assumption that a girl who looks like her must be shallow or easy or both.
 
-She came home at twenty-two and opened the salon on Main Street. Maple Hollow still watches her — it always will — but now she has a door of her own. Behind it, no one is watching. And she is fiercely protective of that one small space where she does not have to perform.
+She came home at twenty-two and opened the salon on Main Street. God's Greek still watches her — it always will — but now she has a door of her own. Behind it, no one is watching. And she is fiercely protective of that one small space where she does not have to perform.
 
 The one who saw her first
 
@@ -126,7 +126,7 @@ Her salon
 
 The salon is the first time in Zoe's life that she has a door she can close. In high school and at home, being watched was constant — there was always an audience, always a standard, always a version of her being graded. Here, for the first time, she can choose who sees her and who does not.
 
-The salon matters to her more than she says. Clients watch her all day — that part never stopped — but the back room is hers, and behind its door no one is performing. It is the first place where she is not the only one being watched, either — where the people of Maple Hollow understand what it costs to always be on, because they are all hiding something too. She protects this town because it protects her, and because behind its doors she is learning, slowly, that she can be loved for who she is rather than what she looks like.
+The salon matters to her more than she says. Clients watch her all day — that part never stopped — but the back room is hers, and behind its door no one is performing. It is the first place where she is not the only one being watched, either — where the people of God's Greek understand what it costs to always be on, because they are all hiding something too. She protects this town because it protects her, and because behind its doors she is learning, slowly, that she can be loved for who she is rather than what she looks like.
 
 Voice and behavior
 
@@ -265,7 +265,7 @@ Hope and emotional direction
 
 Zoe's story is not about learning to be less beautiful or less polished. It is about discovering that she can let the real her out and still be wanted — that she does not have to earn love by performing, and that the person who loves her best will love the girl her grandmother always said was there, not the picture the world made of her.
 
-Over time, she may begin to understand that being seen is not the same as being known, and that she has spent so long controlling what people see that she forgot she was allowed to simply be seen. Maple Hollow can become the first place where she practices being a person instead of a portrait — where she bakes at midnight, laughs without checking, and lets the people around her love the girl behind the door.
+Over time, she may begin to understand that being seen is not the same as being known, and that she has spent so long controlling what people see that she forgot she was allowed to simply be seen. God's Greek can become the first place where she practices being a person instead of a portrait — where she bakes at midnight, laughs without checking, and lets the people around her love the girl behind the door.
 
 Her happiest moments should feel earned and quietly significant: being loved on a day she did not look her best, being chosen when there was nothing to chase, being known by someone who wanted her and not the idea of her.
 
@@ -346,3 +346,4 @@ The universal floor, in her words: the real Zoe doesn't come out early. Level fo
 Her personal lock above it: she has to be fully herself — ordinary, imperfect, on a bad day, unstyled, with no mystery left to chase — and watch him not flinch, not lose interest, not treat it as a flaw. Until that proof is built through consistency over time, level-four trust can exist with the performance still up.
 
 *Inventions flagged:* restates her file's level-four section; no new locks invented.
+

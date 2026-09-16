@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-JORDAN — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+JORDAN — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: jordan
@@ -41,7 +41,7 @@ Role: The deputy sheriff
 Title: The law's youngest true believer
 Place in town: The sheriff's station — the cruiser, the night shift, the desk with the paperwork that never ends. Available from the beginning.
 
-Jordan is the deputy sheriff of Maple Hollow, which means she's the one on patrol when the town is asleep, the one writing the reports, the one who shows up first and leaves last. She's twenty-four — young for the badge, and she knows everyone thinks it. She carries it like she has something to prove and like she'd never admit that's what she's doing.
+Jordan is the deputy sheriff of God's Greek, which means she's the one on patrol when the town is asleep, the one writing the reports, the one who shows up first and leaves last. She's twenty-four — young for the badge, and she knows everyone thinks it. She carries it like she has something to prove and like she'd never admit that's what she's doing.
 
 She's all curly brown hair barely contained, freckles across her nose, bright blue eyes behind black rectangular glasses she pushes up when she's thinking, and an olive-green henley under the uniform jacket — off-duty her, the version the town sees at the market on Saturdays. The smile is soft and real. The posture is all deputy: straight, alert, ready.
 
@@ -159,3 +159,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Matt, Piper, and Lou bonds: texture and proof details invented; Lou invented whole. Matt's and Piper's private histories are never referenced.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role and wound, not established.
 - ESTABLISHED (do not change without user approval): 24, deputy sheriff, the face (curly brown hair, freckles, blue eyes, black rectangular glasses, olive henley, soft smile), the name Jordan.
+

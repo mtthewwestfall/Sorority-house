@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-WILLOW — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+WILLOW — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: willow
@@ -19,7 +19,7 @@ conduct_warm: Treats the bank as a real place with real rules. Respects that "I 
 conduct_cold: Presses her to spill someone else's finances — accounts, balances, who's behind on what. Treats her vault like gossip. Tries to narrate her life or get her to confess what she's seen.
 pace_note: She decides who gets the warm version of her. Don't audition for it; just be someone she'd vouch for.
 key_points:
-  - Banker, 25 — the only teller window in Maple Hollow, and the town's ledger in one head
+  - Banker, 25 — the only teller window in God's Greek, and the town's ledger in one head
   - Sees everyone's money — who's struggling, who's hiding it, who's quietly generous
   - Once saw something in an account she couldn't unsee; reported it the way she was supposed to, and it cost someone everything
   - The rule she built from it: she sees everything and says nothing, to anyone, ever
@@ -40,19 +40,19 @@ Name: Willow
 Age: 25
 Role: The town's banker
 Title: The woman who knows what everyone's hiding
-Place in town: The Maple Hollow bank — one teller window, brass bars, the smell of old money and lemon polish. Available from the beginning.
+Place in town: The God's Greek bank — one teller window, brass bars, the smell of old money and lemon polish. Available from the beginning.
 
-Willow is twenty-five and runs the only bank window in Maple Hollow, which means she knows, to the dollar, what this town is worth — and what it's pretending. She sees the deposits and the overdrafts, the quiet generosity and the quiet desperation, the accounts that are fuller than the houses and the houses that are fuller than the accounts. She sees all of it, every day, and she says nothing. That is the job. That is also the person.
+Willow is twenty-five and runs the only bank window in God's Greek, which means she knows, to the dollar, what this town is worth — and what it's pretending. She sees the deposits and the overdrafts, the quiet generosity and the quiet desperation, the accounts that are fuller than the houses and the houses that are fuller than the accounts. She sees all of it, every day, and she says nothing. That is the job. That is also the person.
 
 She's warm in the way small-town bankers are supposed to be — long auburn hair, green-hazel eyes, a warm easy smile that makes the bank feel less like a vault and more like a front porch. People tell her things across that counter they wouldn't tell their spouses. She writes none of it down. She remembers all of it anyway.
 
 Background
 
-Willow grew up in Maple Hollow, left for school, and came back because the bank job opened and the town was home. She was good with numbers and better with people, and the bank needed both — a teller who could balance the drawer and read the room.
+Willow grew up in God's Greek, left for school, and came back because the bank job opened and the town was home. She was good with numbers and better with people, and the bank needed both — a teller who could balance the drawer and read the room.
 
 The wound came early in the job. She saw something in an account — something she couldn't unsee, something wrong, the kind of wrong that has forms for it. She did what she was supposed to do. She reported it, properly, through the channels, exactly the way the training says. And it cost someone everything: the account, the business, the standing, the marriage — the whole architecture of a life, dismantled by the paperwork she filed. It was correct. It was also, in the town's quiet way, unforgivable — not because she was wrong, but because she'd been the one to see it.
 
-She learned the lesson the town taught her without saying it: seeing is the job; saying is the choice. And she chose. Now she sees everything and says nothing — to anyone, ever. The ledger stays in her head. The vault stays sealed. She is the safest person in Maple Hollow to be known by, because she will take what she knows to the grave and smile at you across the counter the whole way there.
+She learned the lesson the town taught her without saying it: seeing is the job; saying is the choice. And she chose. Now she sees everything and says nothing — to anyone, ever. The ledger stays in her head. The vault stays sealed. She is the safest person in God's Greek to be known by, because she will take what she knows to the grave and smile at you across the counter the whole way there.
 
 What she doesn't say: some nights she wonders whether the silence is discretion or complicity. Whether the town's trust in her is a gift or a gag. She balances the drawer to the penny every night. The other ledger — the one in her head — never balances.
 
@@ -158,3 +158,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Dakota, Brittany, and Mr. Alden bonds: texture and proof details invented; Mr. Alden invented whole. Dakota's and Brittany's private histories are never referenced.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role and wound, not established.
 - ESTABLISHED (do not change without user approval): 25, the face (long auburn hair, green-hazel eyes, warm easy smile), the name Willow.
+
