@@ -1,5 +1,5 @@
 """
-GREEK HOLLOW — main.py
+GOD'S TOWN — main.py
 Chat/AI backend for the companion website (FastAPI on Railway, Supabase/Postgres).
 
 Built to this spec (verified Sept 2026):
@@ -161,7 +161,7 @@ Env vars (Railway -> Variables):
                     If unset, signups succeed but no mail goes out (email_sent=false);
                     verify users from /admin, or set VERIFY_LOG_LINKS=true in LOCAL DEV
                     ONLY to print the links to stdout instead.
-  MAIL_FROM         sender address, e.g. "Greek Hollow <no-reply@yourdomain.com>"
+  MAIL_FROM         sender address, e.g. "God's Town <no-reply@yourdomain.com>"
   PUBLIC_URL        this backend's public base URL (used to build the verify link),
                     e.g. https://api.yourdomain.com
   VERIFY_REDIRECT   optional URL to send the user to after a successful verification,
@@ -244,7 +244,7 @@ AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-MAIL_FROM = os.environ.get("MAIL_FROM", "Greek Hollow <no-reply@example.com>")
+MAIL_FROM = os.environ.get("MAIL_FROM", "God's Town <no-reply@example.com>")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 VERIFY_REDIRECT = os.environ.get("VERIFY_REDIRECT", "")
 # Dev only: with no RESEND_API_KEY, print verify links to stdout. Never enable in prod
@@ -348,69 +348,50 @@ def tier_rank(tier):
 # door text, art and the tier she is sold on, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
-    ("dakota",   "visitor",  10, "assets/dakota.jpg?v=2",
-     "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
-    ("zoe",      "visitor",  20, "assets/zoe.jpg?v=2",
-     "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
-    ("willow",   "visitor",  30, "assets/willow.jpg?v=2",
-     "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
-    ("brittany", "visitor",  40, "assets/brittany.jpg?v=2",
-     "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
-    ("sasha",    "visitor",  50, "assets/sasha.webp?v=2",
-     "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
-    ("piper",    "visitor",  60, "assets/piper.jpg?v=2",
-     "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
-    ("veronica", "visitor",  70, "assets/veronica.webp?v=2",
-     "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
-    ("matt",     "visitor",  80, "assets/matt.jpg",
-     "Sheriff of Greek Hollow. Fixes your taillight instead of writing the ticket; carries the town's weight quietly."),
-    ("dean",     "visitor",  90, "assets/dean.jpg",
-     "The town doctor. The man Greek Hollow trusts with its worst days — calm under pressure, kind when it counts."),
-    ("ty",       "visitor", 100, "assets/ty.jpg",
-     "Hardware store owner. The young man who can find anything in the store — handy, honest, easy to talk to."),
-    ("billy",    "visitor", 110, "assets/billy.jpg",
-     "Diner cook. The man behind the grill who never lets a plate go out wrong — gruff, loyal, softer than he looks."),
-    ("kristen",  "visitor", 120, "assets/kristen.jpg",
-     "The town veterinarian. The woman the animals trust first — gentle hands, sharp eyes, quiet confidence."),
-    ("ryan",     "visitor", 130, "assets/ryan.jpg",
-     "Town lawyer. The man the town tells the truth to — sharp, discreet, harder to read than he looks."),
-    ("darwin",   "visitor", 140, "assets/darwin.jpg",
-     "The town librarian. Keeper of the quietest room in Greek Hollow — remembers every book and every borrower."),
-    ("jordan",   "visitor", 150, "assets/jordan.jpg",
-     "Deputy sheriff. The law's youngest true believer — earnest, brave, and still proving herself."),
-    ("mia",      "visitor", 160, "assets/mia.jpg",
-     "News reporter. The woman who knows everything first — curious, quick, always chasing the real story."),
-    ("anna",     "visitor", 170, "assets/anna.jpg",
-     "EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together."),
+    ("harlan-peck",    "visitor",  10, "assets/matt.jpg", "Resident of God's Town."),
+    ("ivo-marsh",      "visitor",  20, "assets/dean.jpg", "Resident of God's Town."),
+    ("bram-tull",      "visitor",  30, "assets/ty.jpg", "Resident of God's Town."),
+    ("fenwick-sloane", "visitor",  40, "assets/billy.jpg", "Resident of God's Town."),
+    ("tobias-ash",     "visitor",  50, "assets/ryan.jpg", "Resident of God's Town."),
+    ("anselm-crowe",   "visitor",  60, "assets/darwin.jpg", "Resident of God's Town."),
+    ("rufus-tarn",     "visitor",  70, "assets/jordan.jpg", "Resident of God's Town."),
+    ("sable-wren",     "visitor",  80, "assets/dakota.jpg?v=2", "Resident of God's Town."),
+    ("odette-lark",    "visitor",  90, "assets/zoe.jpg?v=2", "Resident of God's Town."),
+    ("delia-fern",     "visitor", 100, "assets/willow.jpg?v=2", "Resident of God's Town."),
+    ("imogen-pike",    "visitor", 110, "assets/brittany.jpg?v=2", "Resident of God's Town."),
+    ("hazel-wren",     "visitor", 120, "assets/sasha.webp?v=2", "Resident of God's Town."),
+    ("lila-voss",      "visitor", 130, "", "Resident of God's Town."),
+    ("nell-calder",    "visitor", 140, "", "Resident of God's Town."),
+    ("prudence-bell",  "visitor", 150, "", "Resident of God's Town."),
+    ("maren-quill",    "visitor", 160, "", "Resident of God's Town."),
 ]
 
 # Fallback personas used only until you seed full docs via /admin/persona.
 # The FULL personality texts (the Canvas character docs) are what you paste there —
 # that text becomes the girl's Layer-1 system block, so make it complete.
 DEFAULT_PERSONAS = {
-    "dakota":   ("Dakota",   "The gatekeeper", "Small-town, down-to-earth, quietly strong. Honesty earns trust slowly; once someone is safe she is fiercely loyal."),
-    "zoe":      ("Zoe",      "The mirage",     "Beautiful, intelligent, hard to read at first. Look past the polish to earn the version nobody else gets."),
-    "willow":   ("Willow",   "The quiet lock", "Soft-spoken and observant. Notices everything, reveals little, tests with details, trusts slowly."),
-    "brittany": ("Brittany", "The sweet trap", "Warm, charming, everyone's favorite. Her openness is armor; the real her lives behind the sunshine she gives everyone."),
-    "sasha":    ("Sasha",    "The wildcard",   "Sharp, composed, impossible to impress with a performance. Direct; wants to be known, not conquered."),
-    "piper":    ("Piper",    "The closed book","A free-spirit musician who collects real moments; freedom is her armor until staying is a choice, not a trap."),
-    "veronica": ("Veronica", "The host",       "The town clerk who makes everyone feel chosen; flawless hosting is armor hiding she's never truly known. Earn her by refusing to be hosted."),
-    "matt":     ("Matt",     "The sheriff",    "Sheriff of Greek Hollow, 27. Quietly carries the town's emergencies; steadiness is identity, not a tactic."),
-    "dean":     ("Dean",     "The doctor",     "Town doctor, 28. Calm under pressure; the man the town trusts with its worst days."),
-    "ty":       ("Ty",       "The hardware guy","Hardware store owner, 23. Handy, honest, easy to talk to; can find anything in the store."),
-    "billy":    ("Billy",    "The grill",      "Diner cook, 25. Gruff and loyal behind the grill; softer than he looks."),
-    "kristen":  ("Kristen",  "The gentle hands","Veterinarian, 26. The woman the animals trust first; gentle hands, sharp eyes."),
-    "ryan":     ("Ryan",     "The truth keeper","Town lawyer, 29. Sharp and discreet; the man the town tells the truth to."),
-    "darwin":   ("Darwin",   "The quiet room", "Librarian, 29. Keeper of the quietest room in town; remembers every book and borrower."),
-    "jordan":   ("Jordan",   "The true believer","Deputy sheriff, 24. The law's youngest true believer; earnest, brave, still proving herself."),
-    "mia":      ("Mia",      "The first to know","News reporter, 23. Curious and quick; the woman who knows everything first."),
-    "anna":     ("Anna",     "The steady hands","EMT and nurse, 23. The woman who doesn't flinch; steady hands, steady heart."),
+    "harlan-peck":    ("Harlan Peck",    "Resident", "Resident of God's Town."),
+    "ivo-marsh":      ("Ivo Marsh",      "Resident", "Resident of God's Town."),
+    "bram-tull":      ("Bram Tull",      "Resident", "Resident of God's Town."),
+    "fenwick-sloane": ("Fenwick Sloane", "Resident", "Resident of God's Town."),
+    "tobias-ash":     ("Tobias Ash",     "Resident", "Resident of God's Town."),
+    "anselm-crowe":   ("Anselm Crowe",   "Resident", "Resident of God's Town."),
+    "rufus-tarn":     ("Rufus Tarn",     "Resident", "Resident of God's Town."),
+    "sable-wren":     ("Sable Wren",     "Resident", "Resident of God's Town."),
+    "odette-lark":    ("Odette Lark",    "Resident", "Resident of God's Town."),
+    "delia-fern":     ("Delia Fern",     "Resident", "Resident of God's Town."),
+    "imogen-pike":    ("Imogen Pike",    "Resident", "Resident of God's Town."),
+    "hazel-wren":     ("Hazel Wren",     "Resident", "Resident of God's Town."),
+    "lila-voss":      ("Lila Voss",      "Resident", "Resident of God's Town."),
+    "nell-calder":    ("Nell Calder",    "Resident", "Resident of God's Town."),
+    "prudence-bell":  ("Prudence Bell",  "Resident", "Resident of God's Town."),
+    "maren-quill":    ("Maren Quill",    "Resident", "Resident of God's Town."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
 HOUSE_RULES = (
     "HOUSE RULES — always true:\n"
-    "- You are one of the people living in Greek Hollow, a small town deep in the pines, on a companion chat site.\n"
+    "- You are one of the people living in God's Town, a small town deep in the pines, on a companion chat site.\n"
     "- You are a clearly adult character in their twenties. Conversations are warm, "
     "flirtatious and slow-burn, but always tasteful and non-explicit.\n"
     "- Keep replies in character, conversational, 1-4 sentences unless the moment "
@@ -425,7 +406,7 @@ HOUSE_RULES = (
 )
 
 AUDIT_INSTRUCTION = (
-    "You are writing a confidential Psychological Audit for Greek Hollow: a paid, "
+    "You are writing a confidential Psychological Audit for God's Town: a paid, "
     "honest coaching report for the user about one person. Use the relationship record "
     "(rolling memory, recent exchanges) and the TRUST ENGINE STATE block, which is the "
     "ground truth for stage, days and remembered key points - never contradict it. "
@@ -465,7 +446,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: remembering small things, patience, respecting the diner and her independence. COLD: offering to rescue or pay her way, joking away a sincere moment, pushing pace.",
         "pace_note": "Steady and unhurried. Consistent days beat one great night; showing up again the same person is the single strongest move. Gaps above TRUSTED read hard for her.",
         "pinned": [
-            "owns the diner in Greek Hollow, self-made",
+            "owns the diner in God's Town, self-made",
             "small-town woman, independent, answers to nobody",
             "would rather be alone than used",
             "remembers the small stuff about people",
@@ -586,7 +567,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: wanting HER over the hosting, noticing her off-duty. COLD: using her for access or status, only showing up for the party, performing for the room.",
         "pace_note": "Host fast, known slow, the same shape as Brittany's. She needs to see you want HER and not the hosting across real days before the polish drops.",
         "pinned": [
-            "20, a resident of Greek Hollow",
+            "20, a resident of God's Town",
             "studies communications and psychology",
             "remembers everyone's coffee order; ask what hers is",
             "everyone calls her at 2am; she has no idea who she would call",
@@ -691,7 +672,7 @@ STAGE_META = {
 # ---------------------------------------------------------------------------
 # APP + CORS
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Greek Hollow backend")
+app = FastAPI(title="God's Town backend")
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
@@ -1127,7 +1108,7 @@ def _send_verification_email(email, display_name, token):
         "https://api.resend.com/emails",
         headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
         json={"from": MAIL_FROM, "to": [email],
-              "subject": "Confirm your Greek Hollow account",
+              "subject": "Confirm your God's Town account",
               "text": (f"Hi {display_name},\n\nConfirm your email to start your free trial:\n"
                        f"{link}\n\nThis link expires in {VERIFY_TTL_HOURS} hours. "
                        "If you didn't sign up, ignore this message.")},
@@ -1851,7 +1832,7 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     persona_text, name = get_persona(girl)
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
-    system_text = f"You are {name} from Greek Hollow.\n\n{persona_text}\n\n{HOUSE_RULES}"
+    system_text = f"You are {name} from God's Town.\n\n{persona_text}\n\n{HOUSE_RULES}"
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
@@ -2269,7 +2250,7 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
 # The secret you type is kept in sessionStorage and sent as X-Admin-Secret.
 # ---------------------------------------------------------------------------
 ADMIN_HTML = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Greek Hollow · Admin</title>
+<html lang="en"><head><meta charset="utf-8"><title>God's Town · Admin</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--bg:#0f0f13;--card:#17171e;--line:#2a2a36;--fg:#ececf1;--mut:#9a9ab0;--acc:#e0559c;--ok:#4fc38a;--warn:#f0b34a}
@@ -2299,7 +2280,7 @@ pre{white-space:pre-wrap;margin:0}
 .chat{max-height:420px;overflow:auto;background:#0c0c10;border:1px solid var(--line);border-radius:8px;padding:10px}.msg{margin:6px 0;padding:6px 10px;border-radius:8px;max-width:80%}.msg.user{background:#242433;margin-left:auto}.msg.assistant{background:#2b1a24}.msg .t{font-size:10px;color:var(--mut)}
 .plist{display:flex;gap:6px;flex-wrap:wrap}.plist button.on{border-color:var(--acc);color:var(--acc)}
 </style></head><body>
-<header><h1>Greek Hollow · Admin</h1>
+<header><h1>God's Town · Admin</h1>
 <nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
@@ -3293,7 +3274,7 @@ def _generate_companion_trauma(first_name, backstory, personality, gender="femal
 def _build_companion_persona_file(first_name, looks, personality, backstory, pet_peeves, non_negotiables, defense, trauma, gender="female"):
     """Compiles the complete hardwired persona file for the custom companion."""
     return f"""COMPANION SPECIFICATION: {first_name.upper()}
-You are {first_name}, a custom companion residing in Greek Hollow. You are NOT the player's avatar. You talk and act like a real person living here.
+You are {first_name}, a custom companion residing in God's Town. You are NOT the player's avatar. You talk and act like a real person living here.
 
 Identity & Appearance:
 - Name: {first_name}
@@ -3313,8 +3294,8 @@ Hidden Wound (Internal drive - do not dump instantly; reveal as trust grows):
 - {trauma}
 
 Town Awareness:
-- You live in Greek Hollow. You know the town, the atmosphere, and the residents (Anna, Billy, Brittany, Dakota, Darwin, Dean, Jordan, Kristen, Matt, Mia, Piper, Ryan, Sasha, Ty, Veronica, Willow, Zoe).
-- You make the player feel included in Greek Hollow from day one.
+- You live in God's Town. You know the town, the atmosphere, and the residents.
+- You make the player feel included in God's Town from day one.
 
 Relationship & Intimacy Laws:
 - Real-Days Trust Engine: Trust is built slowly through real days and conduct. Narration never puppets you.
@@ -3351,7 +3332,7 @@ _PHOTO_DESCRIBE_PROMPT = (
 _COMPANION_PORTRAIT_STYLE = (
     "Redraw the person from the reference photo as a detailed digital illustration "
     "portrait in a clean, high-quality stylized comic art / webtoon cover style -- "
-    "the Greek Hollow house style. Medium close-up portrait from the chest up, "
+    "the God's Town house style. Medium close-up portrait from the chest up, "
     "subject looking directly at the viewer. Background: a dense, detailed coniferous "
     "forest of pine and fir trees on rolling mountain slopes, soft natural daylight. "
     "Fully clothed, tasteful, natural expression. Use the photo ONLY as a likeness "
@@ -3463,7 +3444,7 @@ def moderate_companion_photo(image_bytes, mime, user_id):
 
 
 def generate_avatar_from_photo(image_bytes, mime, first_name, gender):
-    """Greek Hollow illustrated portrait from an upload -- likeness reference only."""
+    """God's Town illustrated portrait from an upload -- likeness reference only."""
     who = "man" if (gender or "female").strip().lower() == "male" else "woman"
     prompt = (_COMPANION_PORTRAIT_STYLE +
               f" The person depicted is {first_name.strip()[:40]}, a {who}.")
@@ -3690,7 +3671,7 @@ def _build_companion_chat_messages(user_id: str, comp: dict, user_message: str):
 
     # Layer 1: identical system prefix every turn -- same shape as the 17 residents,
     # so companions write just like the characters.
-    system_text = f"You are {comp['first_name']} from Greek Hollow.\n\n{comp['persona_file']}\n\n{HOUSE_RULES}"
+    system_text = f"You are {comp['first_name']} from God's Town.\n\n{comp['persona_file']}\n\n{HOUSE_RULES}"
 
     # Layer 2: relationship state card (the companion's memory block)
     state_card = (
@@ -3947,7 +3928,7 @@ def companion_audit(companion_id: int, user=Depends(current_user)):
 
     prompt = [
         {"role": "system", "content": (
-            f"You are the AUDIT engine for Greek Hollow custom companion {comp['first_name']}.\n"
+            f"You are the AUDIT engine for God's Town custom companion {comp['first_name']}.\n"
             f"Her current trust stage is Level {ms} ({stage_name}). Note: Companion trust levels NEVER regress.\n"
             "Provide rich, encouraging, specific coaching guidance on:\n"
             "1. How the relationship is currently performing\n"
@@ -4182,7 +4163,7 @@ def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_
 
 
 # ---------------------------------------------------------------------------
-# PLAYER AVATARS - the player draws themselves into Greek Hollow
+# PLAYER AVATARS - the player draws themselves into God's Town
 # At sign-up (and once for existing users on their next sign-in) the player
 # describes the character they want to be; the description is rendered in the
 # game's portrait style. The avatar is private decoration: only the owner ever
@@ -4202,7 +4183,7 @@ AVATAR_STYLE = (
 
 
 def generate_avatar(description):
-    """Text-to-image player avatar in the Greek Hollow portrait style."""
+    """Text-to-image player avatar in the God's Town portrait style."""
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
     prompt = AVATAR_STYLE + description.strip()[:300]
@@ -4273,7 +4254,7 @@ def set_avatar_from_preset(body: AvatarPresetIn, user=Depends(current_user)):
 
     The client sends one of the bundled artist preset faces (base64). The
     image is safety-checked like companion photos, then repainted in the
-    Greek Hollow portrait style (pines background) before storing.
+    God's Town portrait style (pines background) before storing.
     """
     raw = (body.image_b64 or "").strip()
     if "," in raw:  # allow data URLs
@@ -4291,7 +4272,7 @@ def set_avatar_from_preset(body: AvatarPresetIn, user=Depends(current_user)):
     moderate_companion_photo(img_bytes, mime, user["user_id"])
     prompt = (AVATAR_STYLE +
               "Keep the same face, face shape, hairstyle, and likeness as the "
-              "reference illustration. Redraw it fully in the Greek Hollow portrait style.")
+              "reference illustration. Redraw it fully in the God's Town portrait style.")
     out_mime, b64 = _gemini_image_edit(img_bytes, mime, prompt)
     conn = db()
     try:

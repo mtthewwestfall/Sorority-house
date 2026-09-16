@@ -1,4 +1,4 @@
-# Greek Hollow
+# God's Town
 
 A small town deep in the pines, past the last highway exit. Every resident is an AI character with their own walls — players earn trust over real days. No pay-to-skip.
 
