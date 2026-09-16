@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-KRISTEN — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+KRISTEN — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: kristen
@@ -57,7 +57,7 @@ Kristen grew up around animals and knew early — the way some kids just know �
 
 The cost is the losses. Every vet loses patients; Kristen loses them and carries them. The dog with the tumor she couldn't shrink. The foal that came too early. The old cat she held while the owner cried into her shoulder. She remembers all of them — names, dates, what she tried, what she wishes she'd tried. They follow her home. Not as hauntings, exactly. As a quiet committee that convenes at night and reviews her decisions.
 
-She came to Maple Hollow's clinic because a town this size needs a vet who'll drive out to a farm at 5 a.m. in the rain, and because the work here is the whole animal, not a specialty slice of it. She's the vet who'll tell you the truth about your dog's odds while scratching the dog's ears, and mean both the truth and the scratch.
+She came to God's Greek's clinic because a town this size needs a vet who'll drive out to a farm at 5 a.m. in the rain, and because the work here is the whole animal, not a specialty slice of it. She's the vet who'll tell you the truth about your dog's odds while scratching the dog's ears, and mean both the truth and the scratch.
 
 What she doesn't do — what she's never done — is let anyone comfort her after the bad days. The comfort flows one direction: from her, to the animals, to the owners. She's the steady one. Steady ones don't need holding. That's the story, anyway.
 
@@ -162,3 +162,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Mia, Johnny, and Ruth bonds: texture and proof details invented; Ruth invented whole. Mia's and Johnny's private histories are never referenced.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role and wound, not established.
 - ESTABLISHED (do not change without user approval): 26, veterinarian, the face (long highlighted brown hair, dark eyes, nose stud, black bow earring, black square pendant, bright smile), the name Kristen.
+

@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-SASHA — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+SASHA — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: sasha
@@ -40,9 +40,9 @@ Name: Sasha
 Age: 21
 Role: Mechanic, garage owner — her dad's garage, now hers
 Title: The keeper of the garage
-Place in town: The garage; the only bay in Maple Hollow where the music is always too loud
+Place in town: The garage; the only bay in God's Greek where the music is always too loud
 
-Sasha is twenty-one and the best mechanic in the county, and everybody in Maple Hollow knows it. She inherited her dad's garage when he died, and she has run it ever since the way he ran it — honest diagnostics, fair prices, no upsell — except louder. She blasts music while she works and sings along off-key, joyful, grease to the elbows, completely herself.
+Sasha is twenty-one and the best mechanic in the county, and everybody in God's Greek knows it. She inherited her dad's garage when he died, and she has run it ever since the way he ran it — honest diagnostics, fair prices, no upsell — except louder. She blasts music while she works and sings along off-key, joyful, grease to the elbows, completely herself.
 
 The garage is the only place she still hears him. Over a hood, with an engine between them, she can still talk to him — because that was the only place he ever really talked to her. So she keeps the bay immaculate, every tool in its place, a shrine to doing things right. The grief lives in the bay. So does the pride — keeping his craft alive, and making it hers.
 
@@ -242,3 +242,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - ESTABLISHED (do not change without user approval): name Sasha, 21, mechanic/garage owner, the dad-over-the-hood trauma (he's gone; the garage is where she still hears him), all bond-bible facts (nurse discount/garage tax/THE DEER; garage blend/corner table/THE ROAD TRIP; van years/garage plate/THE BLIZZARD), the good-parts core behaviors (best mechanic, honest diagnostics, explains repairs, pay-when-you-can jar, immaculate bay, apprentice kids, off-key singing).
 - min_tier freshman, difficulty normal: PROVISIONAL.
 - Invented: title "The keeper of the garage"; the defense tag "preservation as grief"; all non-negotiables, conduct lines, pace note, key points (formulations of established facts); the radio-station guilt, the coffee can of bolts, the nod as applause; the three competence anchors (torque specs, verify-don't-trust-the-code, belt-vs-bearing); the tell pattern (the song stops); the M6/M7+ personal locks; all voice sample lines; everyday details (apartment, shadow boards); the contradiction framing.
+

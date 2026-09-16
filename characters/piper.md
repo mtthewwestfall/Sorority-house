@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-PIPER — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+PIPER — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: piper
@@ -263,3 +263,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Bond prose details beyond the bible proofs (e.g., "five years older," Brittany bringing her pastries to try) — invented color; the proof facts themselves are ESTABLISHED from the bond bible.
 - College attendance details kept minimal and consistent with the bible (same university, unnamed; graduated timeline vague) — the lease at 21 and "came home" beats are invented but consistent with age 22.
 - ESTABLISHED (do not change without user approval): 22, barista, trauma (remembers every regular's order / nobody remembers hers / background character in her own life), all good-part bullets from the core, the three bonds and their proofs, the 12 shared memories as written in the bond bible (FARMERS' MARKET, LANTERN COCOA, THE ROAD TRIP), college canon (college backstory only — no campus organizations referenced).
+

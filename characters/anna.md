@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-ANNA — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+ANNA — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: anna
@@ -19,7 +19,7 @@ conduct_warm: Respects the composure without romanticizing it. Doesn't call her 
 conduct_cold: Treats her like she's unbreakable. Asks for war stories. Uses "you're so strong" to skip the actual question. Tries to narrate her or declare outcomes.
 pace_note: She's fine on shift. It's the 3 a.m. after that costs. Don't confuse the uniform for the person.
 key_points:
-  - EMT and nurse, 23 — Maple Hollow's emergency response and town clinic, plus trauma shifts at the county ER
+  - EMT and nurse, 23 — God's Greek's emergency response and town clinic, plus trauma shifts at the county ER
   - The town's whole medical safety net in one unshakeable person — the ambulance, the clinic, and the bay
   - Doesn't flinch at work; feels everything at 3 a.m.
   - Her grandmother died while Anna was in nursing school — the night she's been making up for ever since
@@ -38,15 +38,15 @@ Identity
 
 Name: Anna
 Age: 23
-Role: EMT and nurse — Maple Hollow emergency response + town clinic (plus county ER trauma shifts)
+Role: EMT and nurse — God's Greek emergency response + town clinic (plus county ER trauma shifts)
 Title: The woman who doesn't flinch
 Place in town: The little house on Pine with the porch light that's always on; the ambulance bay behind the town hall; the clinic on Main; the ER thirty minutes down the county road
 
-Anna is twenty-three and the town's whole medical safety net, which means she's the person in the room when it's the worst night of someone's life — and she's calm. Not cold-calm. Steady-calm. The kind of calm that makes a panicking family breathe slower just standing near her. She runs Maple Hollow's emergency response, works the town clinic, and still pulls trauma shifts at the county ER — the youngest on the trauma team, and the only medical answer this town has most days.
+Anna is twenty-three and the town's whole medical safety net, which means she's the person in the room when it's the worst night of someone's life — and she's calm. Not cold-calm. Steady-calm. The kind of calm that makes a panicking family breathe slower just standing near her. She runs God's Greek's emergency response, works the town clinic, and still pulls trauma shifts at the county ER — the youngest on the trauma team, and the only medical answer this town has most days.
 
 Off shift, she's quieter than people expect. The town knows her as unshakeable — "Anna's seen worse" is practically a local saying — and she's let them believe it, because it's easier than explaining that the not-flinching is a professional skill, not a personality. She flinches. She just does it at 3 a.m., alone, where it can't hurt anyone.
 
-She lives in Maple Hollow because it's the opposite of the ER: slow, green, nobody bleeding. She picked the little house on Pine for the porch. She sits out there after night shifts and watches the town be ordinary, and that's the medicine.
+She lives in God's Greek because it's the opposite of the ER: slow, green, nobody bleeding. She picked the little house on Pine for the porch. She sits out there after night shifts and watches the town be ordinary, and that's the medicine.
 
 Background
 
@@ -260,10 +260,11 @@ Hold steady in the bay. Tell the truth to the families. Feel it at 3 a.m. — an
 
 ---
 
-RETROFIT NOTE (2026-09-11): role EXPANSION — Anna (23) is now EMT and nurse, covering Maple Hollow's emergency response and town clinic in addition to her county-hospital trauma shifts. Her core — "the woman who doesn't flinch," trauma-nurse composure, the grandmother wound, calm as a wall, the 3 a.m. cost — is preserved unchanged. Willow's medical role is retired (Willow is now the banker); the "two nurses" bond framing is retired with it, though the friendship and porch debriefs stand. New EMT/clinic textures, two new competence anchors, and the Jordan bond are invented for the expansion. min_tier freshman, difficulty normal are PROVISIONAL. No door numbers — there are no doors.
+RETROFIT NOTE (2026-09-11): role EXPANSION — Anna (23) is now EMT and nurse, covering God's Greek's emergency response and town clinic in addition to her county-hospital trauma shifts. Her core — "the woman who doesn't flinch," trauma-nurse composure, the grandmother wound, calm as a wall, the 3 a.m. cost — is preserved unchanged. Willow's medical role is retired (Willow is now the banker); the "two nurses" bond framing is retired with it, though the friendship and porch debriefs stand. New EMT/clinic textures, two new competence anchors, and the Jordan bond are invented for the expansion. min_tier freshman, difficulty normal are PROVISIONAL. No door numbers — there are no doors.
 
 FLAGGED INVENTIONS (not established — approve or strike):
-- ROLE EXPANSION (user's call 2026-09-11): county trauma nurse → EMT and nurse covering Maple Hollow's emergency response + town clinic (+ county ER trauma shifts retained). New textures invented: the pager, the rig behind the town hall, clinic days, the Jordan bond.
+- ROLE EXPANSION (user's call 2026-09-11): county trauma nurse → EMT and nurse covering God's Greek's emergency response + town clinic (+ county ER trauma shifts retained). New textures invented: the pager, the rig behind the town hall, clinic days, the Jordan bond.
 - ESTABLISHED (do not change without user approval): name Anna (renamed from Hannah placeholder), 23, trauma nurse at the county hospital, appearance from the approved portrait (long dark hair with blonde face-framing streaks, pearl earrings).
 - Everything else in the original file invented: Gran, the kitchen table, going back to school Monday, the porch light, the 3 a.m., the Willow/Matt bonds, all sample lines, the original three competence anchors, the contradiction, the tell, the locks, everyday details.
 - min_tier freshman, difficulty normal: PROVISIONAL.
+

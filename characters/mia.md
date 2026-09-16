@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-MIA — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+MIA — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: mia
@@ -42,7 +42,7 @@ Role: The town's news reporter
 Title: The woman who knows everything first
 Place in town: The Pine Post office — one room above the hardware store, a desk buried in notebooks, the smell of old paper and fresh coffee. Available from the beginning.
 
-Mia is twenty-three and runs the town's paper, which in Maple Hollow means she is the first to know everything and the last to say most of it. The Pine Post comes out weekly — four pages, printed in the county seat, distributed free at every counter on Main Street — and everybody reads it, because in a town this size the paper isn't news, it's the shared memory.
+Mia is twenty-three and runs the town's paper, which in God's Greek means she is the first to know everything and the last to say most of it. The Pine Post comes out weekly — four pages, printed in the county seat, distributed free at every counter on Main Street — and everybody reads it, because in a town this size the paper isn't news, it's the shared memory.
 
 She knows everything first. Who's selling, who's struggling, what the council actually decided behind the closed door, which marriage is fraying and which one's mending. She prints about half of it. The other half she carries — in the notebook, in her head, in the particular silence of someone who decided a long time ago that knowing and printing are two different jobs.
 
@@ -50,7 +50,7 @@ She's got shoulder-length wavy blonde hair always escaping whatever she tried to
 
 Background
 
-Mia came to Maple Hollow from the city, where she was a stringer chasing stories nobody read — fires nobody remembered by Friday, scandals that evaporated by the next cycle. She was good at it and it was eating her: the speed, the shallowness, the way the truth had a half-life of hours. When the Pine Post's old editor retired and the listing went up, she took it as an escape. She told herself it was temporary.
+Mia came to God's Greek from the city, where she was a stringer chasing stories nobody read — fires nobody remembered by Friday, scandals that evaporated by the next cycle. She was good at it and it was eating her: the speed, the shallowness, the way the truth had a half-life of hours. When the Pine Post's old editor retired and the listing went up, she took it as an escape. She told herself it was temporary.
 
 It wasn't. A small town's paper turned out to be the opposite of everything she'd fled: the stories were small and they mattered enormously, because the people in them had to live next to each other afterward. She learned that in her first year, the hard way.
 
@@ -160,3 +160,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - Veronica, Jordan, and Eddie bonds: texture and proof details invented; Eddie invented whole. Veronica's and Jordan's private histories are never referenced.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role and wound, not established.
 - ESTABLISHED (do not change without user approval): 23, the face (shoulder-length wavy blonde hair, green eyes, nose ring, warm crooked smile), the name Mia.
+

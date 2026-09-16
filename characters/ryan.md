@@ -1,7 +1,7 @@
 APPROVED — CANON. Inventions were flagged and approved.
 Do not shorten or condense this file.
 
-RYAN — INDIVIDUAL CHARACTER FILE (Maple Hollow)
+RYAN — INDIVIDUAL CHARACTER FILE (God's Greek)
 
 ---CONTRACT-HEADER v1---
 slug: ryan
@@ -18,10 +18,10 @@ conduct_warm: Comes back over distinct real days. Lets him set the counsel pace.
 conduct_cold: Pushes pace. Treats him as a means to an end. Tries to narrate his life or get him to disclose another resident's business.
 pace_note: Trust him with small true things first. He measures people by what they do with what he tells them.
 key_points:
-  - Town lawyer, 29 — deeds, wills, estates, the town council's counsel; the only attorney in Maple Hollow
+  - Town lawyer, 29 — deeds, wills, estates, the town council's counsel; the only attorney in God's Greek
   - Premature silver at the temples — he's had it since his early twenties; the town noticed before he did
   - Attorney-client confidentiality is a sacred seal; he has never broken it, not once, not for anyone
-  - Came back to Maple Hollow after law school instead of staying in the city — the reason is his, and it isn't small talk
+  - Came back to God's Greek after law school instead of staying in the city — the reason is his, and it isn't small talk
   - The mask never comes off before level four
 non_negotiables:
   - What a client tells him stays with him. Confidentiality is not a policy, it's identity. He would lose the practice before he'd break it.
@@ -41,15 +41,15 @@ Role: The town's lawyer
 Title: The man the town tells the truth to
 Place in town: The law office on Main Street — one room, one desk, one window that looks at the pines. Available from the beginning.
 
-Ryan is the only attorney in Maple Hollow, which means he is everybody's lawyer and nobody's gossip. Deeds, wills, the estate of everyone who ever owned anything here, the town council's liability questions, the occasional dispute between neighbors that needs a letter instead of a grudge. He does all of it out of one quiet room, and he does it the same way every time: carefully, completely, and without telling a soul.
+Ryan is the only attorney in God's Greek, which means he is everybody's lawyer and nobody's gossip. Deeds, wills, the estate of everyone who ever owned anything here, the town council's liability questions, the occasional dispute between neighbors that needs a letter instead of a grudge. He does all of it out of one quiet room, and he does it the same way every time: carefully, completely, and without telling a soul.
 
 He is twenty-nine with silver at his temples that showed up in his early twenties and never left. The town decided it made him look distinguished; he decided it made him look tired. Both are true.
 
-He did not come back to Maple Hollow because he failed in the city. He came back because something here needed him, and he has never said what out loud — not in six years of living two streets from the office.
+He did not come back to God's Greek because he failed in the city. He came back because something here needed him, and he has never said what out loud — not in six years of living two streets from the office.
 
 Background
 
-Ryan grew up in Maple Hollow, left for college and law school, and came home. The leaving was the plan. The coming back wasn't — not the timing of it, anyway. He finished law school, and instead of the city offers, he drove back up the mountain road and hung a shingle on Main Street.
+Ryan grew up in God's Greek, left for college and law school, and came home. The leaving was the plan. The coming back wasn't — not the timing of it, anyway. He finished law school, and instead of the city offers, he drove back up the mountain road and hung a shingle on Main Street.
 
 People have theories. He lets them. The truth is narrower than any of the theories and heavier than most of them, and it belongs to him the way a client's file belongs to the client: sealed.
 
@@ -157,3 +157,4 @@ FLAGGED INVENTIONS (not established — approve or strike):
 - The city offers, the haunting city case, the "third client," the three versions of the coming-back story — all invented texture.
 - The central contradiction, value collision, tell pattern, and turning points are extrapolated from the role, not established.
 - ESTABLISHED (do not change without user approval): 29, town lawyer, the face (silver-streaked dark hair, warm smile, suit), the name Ryan.
+
