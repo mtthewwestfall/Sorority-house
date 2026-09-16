@@ -980,25 +980,25 @@ def init_db():
                 cur.execute("UPDATE personas SET min_tier = %s WHERE min_tier = %s", (_new, _old))
                 cur.execute("UPDATE users SET comp_prev_tier = %s WHERE comp_prev_tier = %s", (_new, _old))
             # Bust portrait caches: point the roster at the versioned image URLs.
-            # Match the query-string already on the target URL so a v=2 row is
-            # rewritten when we ship v=3, and a v=3 row is left alone.
-            for _girl, _avatar in (("dakota", "assets/dakota.jpg?v=3"),
-                                   ("zoe", "assets/zoe.jpg?v=3"),
-                                   ("willow", "assets/willow.jpg?v=3"),
-                                   ("brittany", "assets/brittany.jpg?v=2"),
-                                   ("sasha", "assets/sasha.webp?v=2"),
-                                   ("piper", "assets/piper.jpg?v=3"),
-                                   ("veronica", "assets/veronica.webp?v=2"),
-                                   ("dean", "assets/dean.jpg?v=3"),
-                                   ("ty", "assets/ty.jpg?v=3"),
-                                   ("billy", "assets/billy.jpg?v=3"),
-                                   ("ryan", "assets/ryan.jpg?v=3"),
-                                   ("darwin", "assets/darwin.jpg?v=3"),
-                                   ("mia", "assets/mia.jpg?v=3"),
-                                   ("anna", "assets/anna.jpg?v=3")):
-                _ver = "%?v=3" if "?v=3" in _avatar else "%?v=2"
-                cur.execute("UPDATE personas SET avatar_url = %s WHERE girl = %s AND avatar_url NOT LIKE %s",
-                            (_avatar, _girl, _ver))
+            # Only rewrite known legacy seeded values. Admin-customized, external,
+            # or blank portraits never match the legacy list, so they survive deploys.
+            for _girl, _avatar, _legacy in (("dakota", "assets/dakota.jpg?v=3", ("assets/dakota.jpg", "assets/dakota.jpg?v=2")),
+                                           ("zoe", "assets/zoe.jpg?v=3", ("assets/zoe.jpg", "assets/zoe.jpg?v=2")),
+                                           ("willow", "assets/willow.jpg?v=3", ("assets/willow.jpg", "assets/willow.jpg?v=2")),
+                                           ("brittany", "assets/brittany.jpg?v=2", ("assets/brittany.jpg",)),
+                                           ("sasha", "assets/sasha.webp?v=2", ("assets/sasha.webp",)),
+                                           ("piper", "assets/piper.jpg?v=3", ("assets/piper.jpg", "assets/piper.jpg?v=2")),
+                                           ("veronica", "assets/veronica.webp?v=2", ("assets/veronica.webp",)),
+                                           ("dean", "assets/dean.jpg?v=3", ("assets/dean.jpg",)),
+                                           ("ty", "assets/ty.jpg?v=3", ("assets/ty.jpg",)),
+                                           ("billy", "assets/billy.jpg?v=3", ("assets/billy.jpg",)),
+                                           ("ryan", "assets/ryan.jpg?v=3", ("assets/ryan.jpg",)),
+                                           ("darwin", "assets/darwin.jpg?v=3", ("assets/darwin.jpg",)),
+                                           ("mia", "assets/mia.jpg?v=3", ("assets/mia.jpg",)),
+                                           ("anna", "assets/anna.jpg?v=3", ("assets/anna.jpg",))):
+                _placeholders = ", ".join(["%s"] * len(_legacy))
+                cur.execute(f"UPDATE personas SET avatar_url = %s WHERE girl = %s AND avatar_url IN ({_placeholders})",
+                            (_avatar, _girl, *_legacy))
             # Doors moved from tier-gated to progression-gated. The marker column
             # makes the tier-wall lift run once, so the console owns min_tier after.
             cur.execute("""
