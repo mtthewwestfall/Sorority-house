@@ -2070,8 +2070,9 @@ const PRESET_FACES = {
     chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
 
-    // Pictures: every account starts with a few free pictures; packs add credits.
-    // The + button is always there; /image is checked each time a chat opens.
+    // Pictures: paid tiers start with a free allotment; visitors have 0 by design
+    // (signup ploy). Packs add credits. The + button is always there; /image is
+    // checked each time a chat opens.
     chatPhotoBtn.hidden = false;
     chatAuditBtn.hidden = false;
     async function loadPictureStatus() {
@@ -2099,7 +2100,7 @@ const PRESET_FACES = {
       let outOf;
       if (s.next_in) outOf = `You get ${s.free_per} more free every ${s.every} messages — ${s.next_in} to go. Or grab a pack of ${packSize} for ${price}.`;
       else if (s.free_start) outOf = `You've used your ${s.free_start} free pictures. Grab a pack of ${packSize} for ${price} to keep them coming.`;
-      else outOf = `You're out of pictures. Grab a pack of ${packSize} for ${price}.`;
+      else outOf = `The visitor tier doesn't include pictures. Paid accounts start with a free allotment, or grab a pack of ${packSize} for ${price}.`;
       // No status yet (offline, or /image not loaded): don't claim she's out.
       p.textContent = (!picStatus || available > 0)
         ? (compName ? `${compName} picks the moment. Same style as their portrait.` : 'She picks the moment. Same girl, same style as her.')
@@ -2113,7 +2114,9 @@ const PRESET_FACES = {
         if (!picStatus || available > 0) { requestPicture(); return; }
         addMessage('note', s.next_in
           ? `She'll send one after ${s.next_in} more message${s.next_in === 1 ? '' : 's'}.`
-          : `You're out of pictures. Grab a pack of ${packSize} for more.`);
+          : (s.free_start
+              ? `You're out of pictures. Grab a pack of ${packSize} for more.`
+              : `The visitor tier doesn't include pictures. Grab a pack of ${packSize} for ${price}, or join a paid membership for a free allotment.`));
         loadPictureStatus();
       });
       const pack = document.createElement('button');

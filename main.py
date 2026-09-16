@@ -180,6 +180,7 @@ requirements.txt for Railway:
   requests
   psycopg2-binary
   pydantic
+  python-multipart
 """
 
 import os
@@ -267,11 +268,12 @@ PIECE_CHARS = 24            # granularity the mouth thread hands to the emitter
 SENTENCE_END = ".!?\u2026"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Pictures (POST /image): she sends a new photo of herself in the style of her door
-# portrait. Every account starts with PICTURE_FREE_START free pictures; PICTURE_FREE more
-# are earned per PICTURE_EVERY user messages (all girls combined; 0 = none). After that a
-# pack of PICTURE_PACK_SIZE is sold as a Shopify product (checkout via the
-# storefront cart, credited by the /webhooks/shopify/orders webhook). Portraits are
-# fetched from the site serving web/assets.
+# portrait. Paid tiers start with PICTURE_FREE_START free pictures; visitor accounts
+# get 0 by design (pictures are the signup ploy). PICTURE_FREE more are earned per
+# PICTURE_EVERY user messages (all girls combined; 0 = none). After that a pack of
+# PICTURE_PACK_SIZE is sold as a Shopify product (checkout via the storefront cart,
+# credited by the /webhooks/shopify/orders webhook). Portraits are fetched from the
+# site serving web/assets.
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gemini-2.5-flash-image")
 PICTURE_EVERY = int(os.environ.get("PICTURE_EVERY", "100"))
 PICTURE_FREE = int(os.environ.get("PICTURE_FREE", "0"))
@@ -2950,7 +2952,7 @@ async def chat_stream(body: ChatIn, request: Request, user=Depends(current_user)
 
 
 # ---------------------------------------------------------------------------
-# PICTURES — PICTURE_FREE_START to begin with, then bought in packs
+# PICTURES — paid tiers start with PICTURE_FREE_START (visitors: 0), then packs
 # ---------------------------------------------------------------------------
 class ImageIn(BaseModel):
     girl: str
@@ -3473,8 +3475,10 @@ async def create_companion(request: Request, user=Depends(current_user)):
     """Creates a custom companion in slot 1 or an unlocked extra slot.
 
     The live client sends multipart/form-data with a required photo and an
-    18+/rights consent checkbox. A legacy JSON body (no photo) is still
-    accepted so older clients keep working.
+    18+/rights consent checkbox. If that photo is present and portrait
+    generation fails, the request errors and nothing is inserted (the slot
+    is not burned). A legacy JSON body (no photo) is still accepted so
+    older clients keep working.
     """
     ctype = request.headers.get("content-type", "")
     photo_bytes, photo_mime = None, None
@@ -3534,12 +3538,22 @@ async def create_companion(request: Request, user=Depends(current_user)):
             moderate_companion_photo(photo_bytes, photo_mime, uid)
 
         # Portrait: from the photo when present, else the legacy text prompt.
+        # A photo upload must produce a portrait; failing here used to INSERT a
+        # companion with an empty portrait_url and burn the slot.
         portrait_b64 = ""
         if photo_bytes:
             try:
                 _, portrait_b64 = generate_avatar_from_photo(photo_bytes, photo_mime, first_name, gender)
+            except HTTPException:
+                raise
             except Exception:
-                pass
+                raise HTTPException(
+                    status_code=502,
+                    detail="Couldn't paint a portrait from that photo. Try another one.")
+            if not (portrait_b64 or "").strip():
+                raise HTTPException(
+                    status_code=502,
+                    detail="Couldn't paint a portrait from that photo. Try another one.")
             # The original upload was used once as a reference and is never stored.
             photo_bytes = None
         elif GEMINI_API_KEY:

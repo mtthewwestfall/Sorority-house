@@ -34,7 +34,7 @@ Single-file FastAPI app. The important systems:
 - **Trust engine** — every resident has their own trust scale: real days at each stage, remembered key points, and warm conduct. All three gates must pass together to deepen a stage.
 - **Personas as data** — residents live in the `personas` table, editable from the admin console (`/admin` + `ADMIN_SECRET`). No redeploy to add or rewrite a character.
 - **Psychological audits** — paid coaching reports (`POST /audit`), gender-neutral, honest to the raw chat record. Neighbor tier gets 2 free per month.
-- **Pictures** — 10 free per account, then $0.99 per 5-pack via Shopify (`POST /image`).
+- **Pictures** — visitors get 0 free pictures (signup ploy); paid tiers start with 10 (`PICTURE_FREE_START`), then $0.99 per 5-pack via Shopify (`POST /image`).
 - **Player avatars** — users describe a character, get a graphic-novel-style avatar. Private to the account, profile-only, never a chat character. Monthly contest entries via `POST /avatar/contest`; winners are copied into the game through the admin console only.
 - **Tiers** — Visitor (free), Community Member, Resident, Neighbor. Subscriptions via Stripe Payment Links.
 
