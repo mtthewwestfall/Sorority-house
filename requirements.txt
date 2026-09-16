@@ -6,3 +6,4 @@ pydantic
 google-generativeai
 requests
 python-telegram-bot>=21
+python-multipart==0.0.32
