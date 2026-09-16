@@ -12,3 +12,14 @@
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json"
+
+# Old misspelling: keep saved / indexed links working after the Pellegrin rename.
+[[redirects]]
+  from = "/areas/pellegrjn.html"
+  to = "/areas/pellegrin.html"
+  status = 301
+
+[[redirects]]
+  from = "/areas/pellegrjn"
+  to = "/areas/pellegrin"
+  status = 301
