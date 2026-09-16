@@ -1,4 +1,4 @@
-# Maple Hollow
+# Greek Hollow
 
 A small town deep in the pines, past the last highway exit. Every resident is an AI character with their own walls — players earn trust over real days. No pay-to-skip.
 
@@ -43,7 +43,7 @@ Key environment variables (Railway): `DATABASE_URL`, `ADMIN_SECRET`, `GEMINI_API
 ## Frontend (web/)
 
 - `index.html` — landing, doors, chat, membership, merch. The door cards are a fallback; `GET /roster` replaces them with live data.
-- `areas/` — the four corners of town: Main Street, The Pines, Creekside, Mill Road.
+- `areas/` — the four corners of town: Westfall, Pellegrjn, Umina, Muse.
 - `assets/` — portraits, area backgrounds, hangout shots, icons.
 - `sw.js` + `manifest.webmanifest` — makes the site installable. Bump `SHELL` in `sw.js` when the shell changes.
 
