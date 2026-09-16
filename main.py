@@ -1198,30 +1198,46 @@ def current_user(authorization: str = Header(default="")):
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT user_id FROM sessions WHERE token=%s", (token,))
+            # OPTIMIZATION (Bolt ⚡): Single JOIN query to resolve session token and user row in 1 roundtrip
+            cur.execute("""
+                SELECT u.* FROM sessions s
+                JOIN users u ON s.user_id = u.user_id
+                WHERE s.token = %s
+            """, (token,))
             row = cur.fetchone()
+            if row is not None:
+                return _ensure_user(row["user_id"], user_row=row, conn=conn)
+
+            # Fallback if session exists but user row was not joined
+            cur.execute("SELECT user_id FROM sessions WHERE token=%s", (token,))
+            s_row = cur.fetchone()
+            if s_row is None:
+                raise HTTPException(status_code=401, detail="Session expired, log in again")
+            return _ensure_user(s_row["user_id"], conn=conn)
     finally:
         conn.close()
-    if row is None:
-        raise HTTPException(status_code=401, detail="Session expired, log in again")
-    return _ensure_user(row["user_id"])
 
 
-def _ensure_user(user_id, display_name="Player"):
-    conn = db()
+def _ensure_user(user_id, display_name="Player", user_row=None, conn=None):
+    close_conn = False
+    if conn is None:
+        conn = db()
+        close_conn = True
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
-            row = cur.fetchone()
+            row = user_row
             if row is None:
-                cur.execute("""
-                    INSERT INTO users (user_id, display_name, tier, plan_reset_at)
-                    VALUES (%s,%s,'visitor', now() + interval '1 month')
-                """, (user_id, display_name))
-                conn.commit()
-                return {"user_id": user_id, "tier": "visitor", "msg_used": 0,
-                        "audit_credits": 0, "free_audits_used": 0,
-                        "total_audits_used": 0, "display_name": display_name}
+                cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+                row = cur.fetchone()
+                if row is None:
+                    cur.execute("""
+                        INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                        VALUES (%s,%s,'visitor', now() + interval '1 month')
+                    """, (user_id, display_name))
+                    conn.commit()
+                    return {"user_id": user_id, "tier": "visitor", "msg_used": 0,
+                            "audit_credits": 0, "free_audits_used": 0,
+                            "total_audits_used": 0, "display_name": display_name}
             now = datetime.now(timezone.utc)
             # comped free time ran out: fall back to whatever tier they had before
             if row.get("comp_until") is not None and row["comp_until"] < now:
@@ -1273,7 +1289,8 @@ def _ensure_user(user_id, display_name="Player"):
                 row["plan_reset_at"] = fresh["plan_reset_at"]
             return row
     finally:
-        conn.close()
+        if close_conn:
+            conn.close()
 
 
 def get_persona(girl):
