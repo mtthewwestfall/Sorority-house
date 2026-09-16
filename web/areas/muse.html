@@ -39,11 +39,12 @@
     h2 { font-size: 1.35rem; margin: 0 0 16px; color: var(--gold); font-weight: 400; }
     .residents { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
     .resident {
-      display: block; padding: 16px 18px; border: 1px solid var(--line);
+      display: flex; align-items: center; gap: 14px; padding: 12px 16px; border: 1px solid var(--line);
       border-radius: 14px; text-decoration: none; color: var(--text);
       background: rgba(30,33,30,.6); transition: transform .15s, border-color .15s;
     }
     .resident:hover { transform: translateY(-3px); border-color: rgba(85,99,87,.6); }
+    .resident img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1px solid var(--line); }
     .resident strong { display: block; font-size: 1.05rem; font-weight: 400; }
     .resident span { color: var(--muted); font-size: .92rem; }
     .hangout img { width: 100%; border-radius: 14px; display: block; margin-bottom: 16px; }
@@ -76,9 +77,9 @@
       <div class="panel">
         <h2>Who works here</h2>
         <div class="residents">
-          <a class="resident" href="../index.html#door-sasha"><strong>Sasha</strong><span>mechanic</span></a>
-          <a class="resident" href="../index.html#door-jordan"><strong>Jordan</strong><span>deputy sheriff</span></a>
-          <a class="resident" href="../index.html#door-mia"><strong>Mia</strong><span>news reporter</span></a>
+          <a class="resident" href="../index.html#door-sasha"><img src="../assets/sasha.webp?v=2" alt="Sasha" /><div><strong>Sasha</strong><span>mechanic</span></div></a>
+          <a class="resident" href="../index.html#door-jordan"><img src="../assets/jordan.jpg" alt="Jordan" /><div><strong>Jordan</strong><span>deputy sheriff</span></div></a>
+          <a class="resident" href="../index.html#door-mia"><img src="../assets/mia.jpg" alt="Mia" /><div><strong>Mia</strong><span>news reporter</span></div></a>
         </div>
       </div>
       <div class="panel hangout"><h2>Seen around town</h2><img src="../assets/group-winter-collage.jpg" alt="A crowd of Greek Hollow residents together in winter" /><p>Half the town in one frame, out on Mill Road in winter.</p></div>

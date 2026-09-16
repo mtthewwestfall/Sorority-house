@@ -39,11 +39,12 @@
     h2 { font-size: 1.35rem; margin: 0 0 16px; color: var(--gold); font-weight: 400; }
     .residents { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
     .resident {
-      display: block; padding: 16px 18px; border: 1px solid var(--line);
+      display: flex; align-items: center; gap: 14px; padding: 12px 16px; border: 1px solid var(--line);
       border-radius: 14px; text-decoration: none; color: var(--text);
       background: rgba(30,33,30,.6); transition: transform .15s, border-color .15s;
     }
     .resident:hover { transform: translateY(-3px); border-color: rgba(85,99,87,.6); }
+    .resident img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1px solid var(--line); }
     .resident strong { display: block; font-size: 1.05rem; font-weight: 400; }
     .resident span { color: var(--muted); font-size: .92rem; }
     .hangout img { width: 100%; border-radius: 14px; display: block; margin-bottom: 16px; }
@@ -76,9 +77,9 @@
       <div class="panel">
         <h2>Who works here</h2>
         <div class="residents">
-          <a class="resident" href="../index.html#door-dean"><strong>Dean</strong><span>doctor</span></a>
-          <a class="resident" href="../index.html#door-kristen"><strong>Kristen</strong><span>veterinarian</span></a>
-          <a class="resident" href="../index.html#door-anna"><strong>Anna</strong><span>EMT and nurse</span></a>
+          <a class="resident" href="../index.html#door-dean"><img src="../assets/dean.jpg" alt="Dean" /><div><strong>Dean</strong><span>doctor</span></div></a>
+          <a class="resident" href="../index.html#door-kristen"><img src="../assets/kristen.jpg" alt="Kristen" /><div><strong>Kristen</strong><span>veterinarian</span></div></a>
+          <a class="resident" href="../index.html#door-anna"><img src="../assets/anna.jpg" alt="Anna" /><div><strong>Anna</strong><span>EMT and nurse</span></div></a>
         </div>
       </div>
       <div class="panel hangout"><h2>Around here</h2><img src="../assets/hangout-fishing-trip.jpg" alt="The creek" /><h3>The creek</h3><p>Early mornings, mist on the water, a line in the current. Some of the best conversations in town happen without a word being said.</p></div>
