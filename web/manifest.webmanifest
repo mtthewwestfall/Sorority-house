@@ -1,1 +1,29 @@
-{"background_color":"#151715","description":"God's Greek — AI townspeople. Trust takes real days.","display":"standalone","icons":[{"purpose":"any","sizes":"192x192","src":"assets/icon-192.png","type":"image/png"},{"purpose":"any","sizes":"512x512","src":"assets/icon-512.png","type":"image/png"},{"purpose":"maskable","sizes":"512x512","src":"assets/icon-maskable-512.png","type":"image/png"}],"name":"LockedDoor.ai — God's Greek","short_name":"God's Greek","start_url":"/","theme_color":"#151715"}
+{
+  "background_color": "#0d0d0f",
+  "description": "LockedDoor.ai \u2014 God's Town and God's Companions.",
+  "display": "standalone",
+  "icons": [
+    {
+      "purpose": "any",
+      "sizes": "192x192",
+      "src": "assets/icon-192.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "any",
+      "sizes": "512x512",
+      "src": "assets/icon-512.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "maskable",
+      "sizes": "512x512",
+      "src": "assets/icon-maskable-512.png",
+      "type": "image/png"
+    }
+  ],
+  "name": "LockedDoor.ai",
+  "short_name": "LockedDoor",
+  "start_url": "/",
+  "theme_color": "#0d0d0f"
+}
