@@ -171,7 +171,7 @@ Env vars (Railway -> Variables):
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
-  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 2 / Community 4 / Resident 8 / Neighbor 2 per month
+  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 2 / Community 4 / Resident 8 / Neighbor 2 / Companion 4 per month
   FREE_AUDIT_PROMO_CAP = 200  (lifetime global cap on free audits across all users)
 
 requirements.txt for Railway:
@@ -318,6 +318,7 @@ FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allow
     "community": 4,
     "resident":  8,
     "neighbor":  2,
+    "companion": 4,   # God's Companions $4.99 plan (was missing: subscribers got 0)
 }
 # Lifetime global cap on free (promo) audits handed out across ALL users.
 # When the cap is hit, no more free audits are granted and users fall through
@@ -497,9 +498,23 @@ ROMAN_GIRLS = frozenset((
 def town_for(girl: str) -> str:
     return "God's Town" if girl in ROMAN_GIRLS else "God's Greek"
 
+def audit_instruction_for(girl: str) -> str:
+    """Psychological Audit system prompt: identical except the town name, so a
+    Roman resident's paid report never tells the model to write for God's Greek."""
+    if girl in ROMAN_GIRLS:
+        return AUDIT_INSTRUCTION.replace("God's Greek", "God's Town")
+    return AUDIT_INSTRUCTION
+
+
 def house_rules_for(girl: str) -> str:
     if girl in ROMAN_GIRLS:
-        return HOUSE_RULES.replace("God's Greek", "God's Town")
+        # God's Town residents range from their 20s to their 70s: the town and
+        # the age line are both town-specific, never the Greek defaults.
+        return (HOUSE_RULES
+                .replace("one of the people living in God's Greek, a small town deep in the pines",
+                          "one of the people living in God's Town, a small town of marble and sunlit stone")
+                .replace("You are a clearly adult character in their twenties.",
+                          "You are a clearly adult character; your character file gives your true age - never contradict it."))
     return HOUSE_RULES
 
 AUDIT_INSTRUCTION = (
@@ -699,6 +714,86 @@ GENERIC_ENGINE = {
 }
 
 
+def _parse_contract_header(text):
+    """Parse a character file's ---CONTRACT-HEADER v1--- block into a trust
+    engine dict. Returns None when the block is missing or has no stage_days,
+    so the caller keeps the generic engine for that resident."""
+    m = re.search(r'---CONTRACT-HEADER v1---(.*?)---END-CONTRACT-HEADER---',
+                  text, re.S)
+    if not m:
+        return None
+    fields = {}
+    key_points = []
+    in_keys = False
+    for line in m.group(1).splitlines():
+        s = line.strip()
+        if s.startswith("key_points:"):
+            in_keys = True
+            continue
+        if in_keys:
+            km = re.match(r'-\s+(.*)', s)
+            if km:
+                key_points.append(km.group(1).strip())
+                continue
+            if s == "":
+                continue
+            in_keys = False
+        mm = re.match(r'([a-z_]+):\s*(.*)', s)
+        if mm:
+            fields[mm.group(1)] = mm.group(2).strip()
+    try:
+        stage_days = [int(x) for x in
+                      fields.get("stage_days", "").strip("[]").split(",")
+                      if x.strip()]
+        stage_kept = [int(x) for x in
+                      fields.get("stage_kept", "").strip("[]").split(",")
+                      if x.strip()]
+    except ValueError:
+        return None
+    if not stage_days:
+        return None
+    who = fields.get("name", fields.get("slug", "her"))
+    warm = fields.get("conduct_warm", "")
+    cold = fields.get("conduct_cold", "")
+    conduct_note = ("WARM for %s: %s COLD: %s" % (who, warm, cold)).strip()
+    return {
+        "stage_days": stage_days,
+        "stage_kept": stage_kept or [0, 1, 2, 2, 3, 4, 5],
+        "conduct_note": conduct_note or GENERIC_ENGINE["conduct_note"],
+        "pace_note": fields.get("pace_note", "") or GENERIC_ENGINE["pace_note"],
+        "pinned": key_points[:5],
+        "key_points": key_points,
+    }
+
+
+def _fill_engines_from_canon():
+    """Give every character file with a parseable contract header its own
+    trust engine. Hand-written GIRLS_ENGINE entries always win; files that
+    fail to parse keep the generic engine. Canon stays the single source of
+    truth, so console edits to a file's pacing apply on the next restart."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "characters")
+    try:
+        files = sorted(f for f in os.listdir(base) if f.endswith(".md"))
+    except OSError:
+        return
+    for fn in files:
+        slug = fn[:-3]
+        if slug in GIRLS_ENGINE:
+            continue
+        try:
+            with open(os.path.join(base, fn), encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        eng = _parse_contract_header(text)
+        if eng:
+            GIRLS_ENGINE[slug] = eng
+
+
+_fill_engines_from_canon()
+
+
 def engine_for(girl):
     """Her trust x time dials. A sister added from the console has no hand-written
     block, so she gets the generic one - never another girl's facts and pacing."""
@@ -873,6 +968,16 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS sessions (
                     token      TEXT PRIMARY KEY,
                     user_id    TEXT NOT NULL REFERENCES users(user_id),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS google_oauth_states (
+                    state_hash TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS login_codes (
+                    code_hash  TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    used       BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 -- free time granted from the admin page: tier is comped until comp_until,
@@ -2925,10 +3030,23 @@ def _google_api_base() -> str:
                           "https://sorority-house-production-aeb5.up.railway.app").rstrip("/")
 
 def _google_state_sign(landing: str) -> str:
-    raw = base64.urlsafe_b64encode(landing.encode()).decode().rstrip("=")
+    payload = {"l": landing, "n": secrets.token_urlsafe(16),
+               "e": int(time.time()) + 600}   # 10-minute life, random nonce
+    raw = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     sig = hmac.new(GOOGLE_CLIENT_SECRET.encode(), raw.encode(),
                    hashlib.sha256).hexdigest()[:32]
-    return f"{raw}.{sig}"
+    state = f"{raw}.{sig}"
+    # Single-use: record the state so a captured value cannot be replayed.
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM google_oauth_states WHERE created_at < now() - interval '30 minutes'")
+            cur.execute("INSERT INTO google_oauth_states (state_hash) VALUES (%s) ON CONFLICT DO NOTHING",
+                        (hashlib.sha256(state.encode()).hexdigest(),))
+            conn.commit()
+    finally:
+        conn.close()
+    return state
 
 def _google_state_verify(state: str):
     try:
@@ -2938,7 +3056,25 @@ def _google_state_verify(state: str):
         if not hmac.compare_digest(sig, want):
             return None
         pad = "=" * (-len(raw) % 4)
-        return base64.urlsafe_b64decode(raw + pad).decode()
+        payload = json.loads(base64.urlsafe_b64decode(raw + pad).decode())
+        if int(payload.get("e", 0)) < int(time.time()):
+            return None   # expired
+        landing = payload.get("l") or ""
+        if not landing:
+            return None
+        # Consume: a state that was never issued (or was already used) fails.
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM google_oauth_states WHERE state_hash=%s",
+                            (hashlib.sha256(state.encode()).hexdigest(),))
+                consumed = cur.rowcount
+                conn.commit()
+        finally:
+            conn.close()
+        if not consumed:
+            return None
+        return landing
     except Exception:
         return None
 
@@ -3010,14 +3146,52 @@ def auth_google_callback(code: str = "", state: str = ""):
             else:
                 user_id = acct["user_id"]
                 if acct["verified_at"] is None:
-                    cur.execute("UPDATE accounts SET verified_at=now() WHERE email=%s", (email,))
+                    # Google just proved ownership of this email. Any password
+                    # on the row predates verification - possibly set by an
+                    # attacker pre-registering this address - so replace it
+                    # with an unusable marker instead of preserving it.
+                    cur.execute("UPDATE accounts SET verified_at=now(), password_hash=%s WHERE email=%s",
+                                ("google-oauth:" + secrets.token_hex(16), email))
                     conn.commit()
-            token = _new_session(cur, user_id)
+            # Never put the session token in the URL (fragment or query): it
+            # persists in history and can leak. Issue a single-use login code;
+            # the frontend swaps it for a token via POST /auth/exchange.
+            login_code = secrets.token_urlsafe(32)
+            cur.execute("INSERT INTO login_codes (code_hash, user_id) VALUES (%s,%s)",
+                        (hashlib.sha256(login_code.encode()).hexdigest(), user_id))
             conn.commit()
     finally:
         conn.close()
     _ensure_user(user_id)
-    return RedirectResponse(f"{landing}/#token={token}", status_code=302)
+    return RedirectResponse(f"{landing}/?gcode={login_code}", status_code=302)
+
+
+class ExchangeIn(BaseModel):
+    code: str = ""
+
+@app.post("/auth/exchange", dependencies=[Depends(auth_rate_limit)])
+def auth_exchange(body: ExchangeIn):
+    """Swap a single-use Google login code for a session token. The code is
+    bound to one user, expires after 10 minutes, and is consumed on first use,
+    so a captured code cannot be replayed."""
+    code = (body.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing login code")
+    digest = hashlib.sha256(code.encode()).hexdigest()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM login_codes WHERE created_at < now() - interval '10 minutes'")
+            cur.execute("SELECT user_id, used FROM login_codes WHERE code_hash=%s", (digest,))
+            row = cur.fetchone()
+            if not row or row["used"]:
+                raise HTTPException(status_code=400, detail="Invalid or expired login code")
+            cur.execute("UPDATE login_codes SET used=TRUE WHERE code_hash=%s", (digest,))
+            token = _new_session(cur, row["user_id"])
+            conn.commit()
+            return {"ok": True, "token": token}
+    finally:
+        conn.close()
 
 
 
@@ -4348,6 +4522,30 @@ class HairstyleIn(BaseModel):
     style_label: str = ""
 
 
+@app.get("/companions/{companion_id}/history")
+def get_companion_history(companion_id: int, user=Depends(current_user)):
+    """Last messages of this companion's chat, scoped to its owner. The app
+    restores the visible transcript from this when a chat is reopened."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM companions WHERE id=%s AND user_id=%s",
+                        (companion_id, uid))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Companion not found")
+            cur.execute("""SELECT sender, message FROM companion_chat_logs
+                           WHERE companion_id=%s AND user_id=%s
+                           ORDER BY id DESC LIMIT 8""",
+                        (companion_id, uid))
+            rows = cur.fetchall()
+            return {"ok": True,
+                    "messages": [{"sender": r["sender"], "message": r["message"]}
+                                 for r in reversed(rows)]}
+    finally:
+        conn.close()
+
+
 @app.delete("/companions/{companion_id}")
 def delete_companion(companion_id: int, user=Depends(current_user)):
     """Hard-deletes a companion so a new one can start clean (no data mixing).
@@ -4795,7 +4993,7 @@ def audit(body: AuditIn, user=Depends(current_user)):
                         "\n\nROLLING MEMORY:\n" + (rel["summary"] or "(none yet)") +
                         "\n\nRECENT EXCHANGES:\n" + ("\n".join(record) if record else "(none)"))
 
-        messages = [{"role": "system", "content": AUDIT_INSTRUCTION},
+        messages = [{"role": "system", "content": audit_instruction_for(girl)},
                     {"role": "user", "content": full_context}]
         # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
         thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
