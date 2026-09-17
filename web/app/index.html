@@ -1056,6 +1056,10 @@
             const d = await r.json().catch(() => null);
             if (r.ok && d && d.token) {
               try { localStorage.setItem(TOKEN_KEY, d.token); } catch (_) {}
+              // Reload so the whole app boots with the token in place
+              // instead of racing the exchange against app init.
+              location.replace(location.pathname);
+              return;
             }
           } catch (_) {}
           history.replaceState(null, '', location.pathname);
