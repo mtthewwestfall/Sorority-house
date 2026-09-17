@@ -69,6 +69,13 @@
 </style>
 </head>
 <body>
+<script>
+  // Resident deep links (../index.html#door-<slug>) now live in the Companions app.
+  (function () {
+    var m = /^#door-([a-z]+)$/.exec(location.hash || '');
+    if (m) location.replace('./app/index.html#door-' + m[1]);
+  })();
+</script>
 <header>
   <div class="brand">LockedDoor.ai</div>
   <h1>Two worlds. One door.</h1>
