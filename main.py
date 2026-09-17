@@ -3182,11 +3182,16 @@ def auth_exchange(body: ExchangeIn):
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM login_codes WHERE created_at < now() - interval '10 minutes'")
-            cur.execute("SELECT user_id, used FROM login_codes WHERE code_hash=%s", (digest,))
+            # Atomic consume: the row is validated and removed in one
+            # statement, so two concurrent exchanges cannot both succeed.
+            cur.execute("""
+                DELETE FROM login_codes
+                WHERE code_hash=%s AND used=FALSE
+                RETURNING user_id
+            """, (digest,))
             row = cur.fetchone()
-            if not row or row["used"]:
+            if not row:
                 raise HTTPException(status_code=400, detail="Invalid or expired login code")
-            cur.execute("UPDATE login_codes SET used=TRUE WHERE code_hash=%s", (digest,))
             token = _new_session(cur, row["user_id"])
             conn.commit()
             return {"ok": True, "token": token}
