@@ -6,7 +6,7 @@
   <title>God's Companions</title>
   <meta name="description" content="At the end of a dirt road, deep in the pines. Always earned, never given." />
   <meta property="og:image" content="https://lockeddoor.ai/assets/logo.jpg" />
-  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#151715" />
   <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
@@ -1039,8 +1039,29 @@
     // Account auth: the backend issues a bearer token on login; chat/audit/image
     // are keyed to that token (no more anonymous user_id trials).
     const TOKEN_KEY = 'sorority_house_token';
-    // God's Companions: Google OAuth lands back here with #token=...
-    (function () {
+    // God's Companions: Google OAuth lands back here with ?gcode=<one-time code>,
+    // swapped for a session token via POST /auth/exchange. (#token= links from
+    // before the cutover are still honored once, then cleared.)
+    (async function () {
+      try {
+        const params = new URLSearchParams(location.search || '');
+        const code = params.get('gcode');
+        if (code) {
+          try {
+            const r = await fetch(API_BASE_URL + '/auth/exchange', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: code })
+            });
+            const d = await r.json().catch(() => null);
+            if (r.ok && d && d.token) {
+              try { localStorage.setItem(TOKEN_KEY, d.token); } catch (_) {}
+            }
+          } catch (_) {}
+          history.replaceState(null, '', location.pathname);
+          return;
+        }
+      } catch (_) {}
       const m = /#token=([A-Za-z0-9_\-]+)/.exec(location.hash || '');
       if (m) {
         try { localStorage.setItem(TOKEN_KEY, m[1]); } catch (_) {}
@@ -1533,6 +1554,7 @@ const PRESET_FACES = {
     function openChat(card) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her.'); return; }
       abortStreamAndResync();
+      abortCompanion();
       currentCompanionId = null;
       currentGirl = card.dataset.girl;
       document.getElementById('chat-name').textContent = card.dataset.name;
@@ -1567,6 +1589,7 @@ const PRESET_FACES = {
 
     function closeChat() {
       abortStreamAndResync();
+      abortCompanion();
       chat.classList.remove('is-open');
       clearTimeout(fitTimer);
       clearTimeout(settleTimer);
@@ -1698,13 +1721,13 @@ const PRESET_FACES = {
           ? '<div class="roster-divider">God\u2019s Town</div>' : '';
         const card = '<article id="door-' + escapeHtml(g.girl) + '" class="door-card open" data-girl="' + escapeHtml(g.girl) + '"' +
           ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
-          ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
+          ' data-name="' + name + '" data-title="' + escapeHtml(g.door_title) + '"' +
           ' data-avatar="' + avatar + '">' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
           (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
           '<div class="door-copy">' +
           '<div class="door-name">' + name + '</div>' +
-          '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
+          '<div class="door-title">' + escapeHtml(g.door_title) + '</div>' +
           '<p>' + escapeHtml(g.blurb) + '</p>' +
           '<span class="door-cta">Talk to ' + name + ' \u2192</span></div>' +
           '</article>';
@@ -2077,6 +2100,7 @@ const PRESET_FACES = {
     async function openCompanionChat(companionId) {
       if (!isLoggedIn()) { openAuth('signup', 'Create a free account to talk to your companion.'); return; }
       abortStreamAndResync();
+      abortCompanion();
       currentGirl = null;
       currentCompanionId = companionId;
 
@@ -2147,8 +2171,24 @@ const PRESET_FACES = {
         chatLog.innerHTML = '';
         receipt = null;
         lastStampAt = 0;
-        addMessage('note', 'Companion chat initialized. Say hi.');
         loadPictureStatus();
+        // Reopening must not wipe the visible conversation: restore the last
+        // messages from the server. Greet only when there is no history yet.
+        try {
+          const hRes = await fetch(API_BASE_URL + '/companions/' + companionId + '/history', { headers });
+          const hData = await hRes.json().catch(() => null);
+          if (companionId !== currentCompanionId) return;   // user moved on
+          const msgs = (hRes.ok && hData && hData.messages) || [];
+          if (msgs.length) {
+            addStamp('Earlier');
+            for (const m of msgs) addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
+          } else {
+            addMessage('note', 'Companion chat initialized. Say hi.');
+          }
+        } catch (_) {
+          if (companionId !== currentCompanionId) return;
+          addMessage('note', 'Companion chat initialized. Say hi.');
+        }
 
         chat.classList.add('is-open');
         lockedScrollY = window.scrollY;
@@ -2407,6 +2447,16 @@ const PRESET_FACES = {
       streamAbort = null;
       return true;
     }
+    // Companion replies are plain (non-streamed) fetches: without an abort
+    // handle of their own, a slow reply can land in whatever room replaced the
+    // companion's while it was in flight.
+    let companionAbort = null;
+    function abortCompanion() {
+      if (!companionAbort) return false;
+      try { companionAbort.abort(); } catch (_) {}
+      companionAbort = null;
+      return true;
+    }
 
     // A cut-off reply is still charged, but 'done' never arrives to carry the new
     // count, so the header would keep showing the pre-send number. The backend
@@ -2551,14 +2601,21 @@ const PRESET_FACES = {
       const typing = addMessage('typing', 'typing…');
 
       if (currentCompanionId) {
+        const cid = currentCompanionId;
+        abortCompanion();
+        const cController = new AbortController();
+        companionAbort = cController;
         try {
-          const res = await fetch(API_BASE_URL + '/companions/' + currentCompanionId + '/chat', {
+          const res = await fetch(API_BASE_URL + '/companions/' + cid + '/chat', {
             method: 'POST',
             headers: authHeaders(),
-            body: JSON.stringify({ message })
+            body: JSON.stringify({ message }),
+            signal: cController.signal
           });
+          if (companionAbort === cController) companionAbort = null;
           typing.remove();
           const data = await res.json();
+          if (cid !== currentCompanionId) return;   // room changed mid-flight; drop the reply
           if (res.ok) {
             addMessage('her', data.reply);
             if (typeof data.milestone === 'number') {
@@ -2570,7 +2627,10 @@ const PRESET_FACES = {
             addMessage('error', data.detail || 'Companion did not answer.');
           }
         } catch (err) {
+          if (companionAbort === cController) companionAbort = null;
           typing.remove();
+          if (err && err.name === 'AbortError') return;   // superseded; stay silent
+          if (cid !== currentCompanionId) return;
           addMessage('error', 'Could not reach companion. Try again.');
         } finally {
           sending = false;
@@ -2724,7 +2784,7 @@ const PRESET_FACES = {
 
     if ('serviceWorker' in navigator && window.isSecureContext) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
       });
     }
 
