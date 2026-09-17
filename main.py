@@ -1507,10 +1507,13 @@ def remaining_for(user):
     return max(0, limit - int(user["msg_used"]))
 
 
-def roster(include_retired=False):
+def roster(include_retired=False, conn=None):
     """The house, in door order. Rows are dicts with girl, name, door_title,
     blurb, avatar_url, min_tier, sort_order, active, difficulty."""
-    conn = db()
+    close_conn = False
+    if conn is None:
+        conn = db()
+        close_conn = True
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1522,7 +1525,8 @@ def roster(include_retired=False):
             """, (include_retired,))
             return cur.fetchall()
     finally:
-        conn.close()
+        if close_conn:
+            conn.close()
 
 
 def milestones_for(user_id):
@@ -1610,8 +1614,26 @@ def free_audits_left(user):
 # ---------------------------------------------------------------------------
 # LAYER 2 helpers — the rolling per-girl memory summary
 # ---------------------------------------------------------------------------
-def get_relationship(user_id, girl):
-    conn = db()
+def get_relationships(user_id, conn=None):
+    """OPT (Bolt ⚡): Batch fetch all relationships for a user in 1 query."""
+    close_conn = False
+    if conn is None:
+        conn = db()
+        close_conn = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM relationships WHERE user_id=%s", (user_id,))
+            return {r["girl"]: r for r in cur.fetchall()}
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def get_relationship(user_id, girl, conn=None):
+    close_conn = False
+    if conn is None:
+        conn = db()
+        close_conn = True
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM relationships WHERE user_id=%s AND girl=%s",
@@ -1635,7 +1657,8 @@ def get_relationship(user_id, girl):
                         "pinned_told": [], "pinned_kept": []}
             return row
     finally:
-        conn.close()
+        if close_conn:
+            conn.close()
 
 
 def last_messages(user_id, girl, n):
@@ -4876,26 +4899,34 @@ def public_roster():
 
 @app.get("/state")
 def state(user=Depends(current_user)):
-    house = roster()
-    doors = open_doors(user["user_id"], user["tier"], house)
-    girls = {}
-    for row in house:
-        door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
-        if door["open"]:
-            rel = get_relationship(user["user_id"], row["girl"])
-            band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
-            girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
-                                  "kept": len(rel.get("pinned_kept") or [])}
-        else:
-            # locked girls still show so the frontend can render the shut doors
-            girls[row["girl"]] = {"open": False, "milestone": 0, "band": "", "kept": 0,
-                                  "locked_reason": door["reason"]}
-    return {"tier": user["tier"], "remaining": remaining_for(user),
-            "audit_count": int(user["total_audits_used"]),
-            "free_audits_left": free_audits_left(user),
-            "audit_credits": int(user["audit_credits"]),
-            "audit_price_usd": AUDIT_PRICE_USD,
-            "girls": girls}
+    # OPTIMIZATION (Bolt ⚡): Reuse single DB connection and batch query relationships to eliminate N+1 connection overhead
+    conn = db()
+    try:
+        house = roster(conn=conn)
+        doors = open_doors(user["user_id"], user["tier"], house)
+        rels = get_relationships(user["user_id"], conn=conn)
+        girls = {}
+        for row in house:
+            door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
+            if door["open"]:
+                rel = rels.get(row["girl"])
+                if rel is None:
+                    rel = get_relationship(user["user_id"], row["girl"], conn=conn)
+                band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
+                girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
+                                      "kept": len(rel.get("pinned_kept") or [])}
+            else:
+                # locked girls still show so the frontend can render the shut doors
+                girls[row["girl"]] = {"open": False, "milestone": 0, "band": "", "kept": 0,
+                                      "locked_reason": door["reason"]}
+        return {"tier": user["tier"], "remaining": remaining_for(user),
+                "audit_count": int(user["total_audits_used"]),
+                "free_audits_left": free_audits_left(user),
+                "audit_credits": int(user["audit_credits"]),
+                "audit_price_usd": AUDIT_PRICE_USD,
+                "girls": girls}
+    finally:
+        conn.close()
 
 
 @app.post("/audit")
