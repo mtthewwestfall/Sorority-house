@@ -194,6 +194,7 @@ import queue
 import random
 import secrets
 import time
+import urllib.parse
 import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -204,7 +205,7 @@ import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -298,6 +299,8 @@ STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
     os.environ.get("STRIPE_PRICE_RESIDENT", os.environ.get("STRIPE_PRICE_JUNIOR", "price_1UCVb6EnizOE4dLbBHQNFgpk")): "resident",
     os.environ.get("STRIPE_PRICE_NEIGHBOR", os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2")): "neighbor",
+    # God's Companions: $4.99/mo, 1000 messages/mo, limit hidden in UI.
+    os.environ.get("STRIPE_PRICE_COMPANION", "price_1UGTXa6qicU1CK4UyWHUVLmd"): "companion",
 }
 STRIPE_SIG_TOLERANCE_S = 300
 AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
@@ -327,11 +330,12 @@ TIERS = {
     "community": {"label": "Community Member", "limit": 1500},
     "resident":  {"label": "Resident",         "limit": 2500},
     "neighbor":  {"label": "Neighbor",         "limit": 4000},
+    "companion": {"label": "Companion",        "limit": 1000},
 }
 
 # Tier order, low to high. min_tier is a paywall only: a door also has to be earned
 # (see open_doors). Everyone but Veronica is available on every tier.
-TIER_ORDER = ["visitor", "community", "resident", "neighbor"]
+TIER_ORDER = ["visitor", "community", "resident", "neighbor", "companion"]
 
 # Doors no longer lock: every resident is talkable from day one. The rules
 # below stay for the admin console, but doors_locked defaults off and any
@@ -386,6 +390,39 @@ ROSTER_SEED = [
      "Potter at the edge of town. Sharp, funny, deliberately too much — she dares you to dislike her so she controls the rejection. Outlast the dare."),
     ("sarah",    "visitor", 190, "assets/sarah.jpg",
      "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real answer."),
+    # --- God's Town (Roman) residents: God's Companions cast ---
+    ("harlan",   "visitor", 200, "assets/portraits/harlan.jpg",
+     "Cairn-keeper at the crossing. He counts the stones the way other men count sins — and finds himself short."),
+    ("ivo",      "visitor", 210, "assets/portraits/ivo.jpg",
+     "Lamplighter of God's Town. Every lamp, every night, no matter the weather — somebody has to keep the dark back."),
+    ("lila",     "visitor", 220, "assets/portraits/lila.jpg",
+     "Toll-keeper at the crossing. Everything has a price and she'll tell you yours with a smile. Fastest to warm, fastest to bill."),
+    ("nell",     "visitor", 230, "assets/portraits/nell.jpg",
+     "Millwright. Best hands on the river — she'll fix what's broken, but pity her and the door slams."),
+    ("sable",    "visitor", 240, "assets/portraits/sable.jpg",
+     "Baker. Her oven never cools and her bread has kept more travelers than the cairns. Sweet until she tests you."),
+    ("bram",     "visitor", 250, "assets/portraits/bram.jpg",
+     "Ferryman. He carries everyone across the river. He couldn't carry the one who mattered."),
+    ("odette",   "visitor", 260, "assets/portraits/odette.jpg",
+     "Chandler. She makes the candles that light the town's windows — quiet shop, quieter woman, nothing missed."),
+    ("fenwick",  "visitor", 270, "assets/portraits/fenwick.jpg",
+     "Blacksmith. The forge never lies to him. Rush him and the metal knows."),
+    ("maren",    "visitor", 280, "assets/portraits/maren.jpg",
+     "Teacher. She keeps the town's slates straight and its lessons straighter — quiz her and you'll get schooled."),
+    ("tobias",   "visitor", 290, "assets/portraits/tobias.jpg",
+     "Shepherd. Lives on the ridge with his flock. Summon him and he leaves; earn him and he stays."),
+    ("prudence", "visitor", 300, "assets/portraits/prudence.jpg",
+     "Healer. She mends what the town breaks — bodies, mostly. Reorganizes her drawers when she's worried."),
+    ("anselm",   "visitor", 310, "assets/portraits/anselm.jpg",
+     "Mason. He laid half the town's stone and remembers which block went where. Every wall he builds is a promise."),
+    ("delia",    "visitor", 320, "assets/portraits/delia.jpg",
+     "Fisher. She reads the water like scripture and touches the knot at her wrist when she's thinking. Mock her rituals and the river hears."),
+    ("imogen",   "visitor", 330, "assets/portraits/imogen.jpg",
+     "Orchard keeper. Prunes trees and people with the same care — what's dead gets cut, what's living gets room."),
+    ("rufus",    "visitor", 340, "assets/portraits/rufus.jpg",
+     "Cooper. His barrels hold the town's drink and half its secrets. Taps the stave when he's deciding about you."),
+    ("hazel",    "visitor", 350, "assets/portraits/hazel.jpg",
+     "Midwife. She has caught every baby born in God's Town for thirty years. Panic near her and she goes colder."),
 ]
 
 # Fallback personas used only until you seed full docs via /admin/persona.
@@ -411,6 +448,23 @@ DEFAULT_PERSONAS = {
     "anna":     ("Anna",     "The steady hands","EMT and nurse, 23. The woman who doesn't flinch; steady hands, steady heart."),
     "bailey":   ("Bailey",   "The dare",      "Potter, 23. Sharp and funny by design; the dare is armor over the girl who rebuilt everything herself. Outlast the provocation."),
     "sarah":    ("Sarah",    "The sanctuary", "Teacher, 26. Warm and capable; holds the whole town. Earn her by refusing the praise wall and witnessing the grief."),
+    # --- God's Town (Roman) residents ---
+    "harlan":   ("Harlan",   "The cairn-keeper", "Cairn-keeper, 41. Keeps the homecoming stones at the crossing; counts penance the way others count coins. Slowest to trust — show up thirty days and ask for nothing."),
+    "ivo":      ("Ivo",      "The lamplighter", "Lamplighter, 34. Lights every lamp nightly. Jokes freely; flatter him and he performs right back at you."),
+    "lila":     ("Lila",     "The toll-keeper", "Toll-keeper, 23. Charges coin at the crossing with a smile. Fastest to warm — and fastest to raise your price if you keep score."),
+    "nell":     ("Nell",     "The millwright", "Millwright, 24. Best hands on the river. Fixes what's broken; pity is the one thing she won't take."),
+    "sable":    ("Sable",    "The baker", "Baker, 38. Her oven never cools. Sweet and watchful — tiptoe around her and she tests harder."),
+    "bram":     ("Bram",     "The ferryman", "Ferryman, 47. Carries everyone across. Few words, exact change. Grief with an oar — don't hurry him."),
+    "odette":   ("Odette",   "The chandler", "Chandler, 44. Makes the town's candles. Quiet shop, quieter woman; her shop goes silent when she's cold."),
+    "fenwick":  ("Fenwick",  "The blacksmith", "Blacksmith, 52. The forge never lies to him. Rush him and the quench tells on you."),
+    "maren":    ("Maren",    "The teacher", "Teacher, 22. Keeps the slates straight. Lessons you if you quiz her; respects a straight question."),
+    "tobias":   ("Tobias",   "The shepherd", "Shepherd, 55. Ridge-dweller with his flock. Summon him and he's gone; show up steady and he stays."),
+    "prudence": ("Prudence", "The healer", "Healer, 25. Mends what the town breaks. Reorganizes drawers when worried; opens them when she trusts."),
+    "anselm":   ("Anselm",   "The mason", "Mason, 58. Laid half the town's stone. Taps each block like it's listening — because he is."),
+    "delia":    ("Delia",    "The fisher", "Fisher, 36. Reads the water like scripture. Her rituals aren't superstition; mock them and the river hears."),
+    "imogen":   ("Imogen",   "The orchard keeper", "Orchard keeper, 31. Prunes trees and people alike. What's dead gets cut; what's living gets room to grow."),
+    "rufus":    ("Rufus",    "The cooper", "Cooper, 49. His barrels hold the town's drink and half its secrets. Taps the stave while deciding about you."),
+    "hazel":    ("Hazel",    "The midwife", "Midwife, 63. Caught every baby born here for thirty years. Panic near her and she goes colder; steady hands earn steady trust."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
@@ -429,6 +483,24 @@ HOUSE_RULES = (
     "- Relationship progress is graded M1-M8 and shown in the Memory block. Play the "
     "stage you are at honestly: walls come down slowly, and pushing too hard closes doors.\n"
 )
+
+# ---------------------------------------------------------------------------
+# God's Companions serves two towns from one backend. Roman residents get
+# God's Town in their system prefix and house rules; everyone else keeps
+# God's Greek. Lore must never cross the river between the two towns.
+# ---------------------------------------------------------------------------
+ROMAN_GIRLS = frozenset((
+    "harlan", "ivo", "lila", "nell", "sable", "bram", "odette", "fenwick",
+    "maren", "tobias", "prudence", "anselm", "delia", "imogen", "rufus", "hazel",
+))
+
+def town_for(girl: str) -> str:
+    return "God's Town" if girl in ROMAN_GIRLS else "God's Greek"
+
+def house_rules_for(girl: str) -> str:
+    if girl in ROMAN_GIRLS:
+        return HOUSE_RULES.replace("God's Greek", "God's Town")
+    return HOUSE_RULES
 
 AUDIT_INSTRUCTION = (
     "You are writing a confidential Psychological Audit for God's Greek: a paid, "
@@ -1884,7 +1956,7 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     persona_text, name = get_persona(girl)
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
-    system_text = f"You are {name} from God's Greek.\n\n{persona_text}\n\n{HOUSE_RULES}"
+    system_text = f"You are {name} from {town_for(girl)}.\n\n{persona_text}\n\n{house_rules_for(girl)}"
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
@@ -2832,6 +2904,121 @@ def logout(authorization: str = Header(default=""), user=Depends(current_user)):
     finally:
         conn.close()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# GOOGLE SSO (God's Companions: Google is the ONLY sign-in — no password,
+# no magic link). New Google accounts are created verified. Post-login the
+# user lands back on the app with the session token in the URL hash, which
+# the frontend picks up and stores.
+# ---------------------------------------------------------------------------
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_PATH = "/auth/google/callback"
+GOOGLE_NEXT_ALLOW = [u.strip().rstrip("/") for u in
+    os.environ.get("ALLOWED_GOOGLE_NEXT",
+                   "https://lockeddoor.ai/app,https://godscompanions.lockeddoor.ai").split(",")
+    if u.strip()]
+
+def _google_api_base() -> str:
+    return os.environ.get("PUBLIC_API_BASE",
+                          "https://sorority-house-production-aeb5.up.railway.app").rstrip("/")
+
+def _google_state_sign(landing: str) -> str:
+    raw = base64.urlsafe_b64encode(landing.encode()).decode().rstrip("=")
+    sig = hmac.new(GOOGLE_CLIENT_SECRET.encode(), raw.encode(),
+                   hashlib.sha256).hexdigest()[:32]
+    return f"{raw}.{sig}"
+
+def _google_state_verify(state: str):
+    try:
+        raw, sig = state.split(".", 1)
+        want = hmac.new(GOOGLE_CLIENT_SECRET.encode(), raw.encode(),
+                        hashlib.sha256).hexdigest()[:32]
+        if not hmac.compare_digest(sig, want):
+            return None
+        pad = "=" * (-len(raw) % 4)
+        return base64.urlsafe_b64decode(raw + pad).decode()
+    except Exception:
+        return None
+
+@app.get("/auth/google", dependencies=[Depends(auth_rate_limit)])
+def auth_google(next: str = ""):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    landing = (next or "").strip().rstrip("/")
+    if landing not in GOOGLE_NEXT_ALLOW:
+        landing = GOOGLE_NEXT_ALLOW[0] if GOOGLE_NEXT_ALLOW else "/"
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": _google_api_base() + GOOGLE_REDIRECT_PATH,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": _google_state_sign(landing),
+        "prompt": "select_account",
+    }
+    return RedirectResponse(
+        "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params),
+        status_code=302)
+
+@app.get("/auth/google/callback", dependencies=[Depends(auth_rate_limit)])
+def auth_google_callback(code: str = "", state: str = ""):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    landing = _google_state_verify(state)
+    if not landing:
+        raise HTTPException(status_code=400, detail="Invalid sign-in state")
+    try:
+        tok = requests.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": _google_api_base() + GOOGLE_REDIRECT_PATH,
+            "grant_type": "authorization_code",
+        }, timeout=20)
+        access = tok.json().get("access_token")
+        if not access:
+            raise ValueError("token exchange failed")
+        me = requests.get("https://openidconnect.googleapis.com/v1/userinfo",
+                          headers={"Authorization": f"Bearer {access}"},
+                          timeout=20).json()
+        email = _norm_email(me.get("email", ""))
+        if not email or not me.get("email_verified"):
+            raise ValueError("email not verified by Google")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502,
+                            detail="Google sign-in failed; please try again")
+    name = (me.get("name") or email.split("@")[0])[:40]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            acct = _account_by_email(cur, email)
+            if acct is None:
+                user_id = "u_" + secrets.token_hex(12)
+                cur.execute("""
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at, affitor_click_id)
+                    VALUES (%s,%s,'visitor', now() + interval '1 month', NULL)
+                """, (user_id, name or "Player"))
+                # No password for Google accounts: unusable marker hash.
+                cur.execute("""
+                    INSERT INTO accounts (email, user_id, password_hash, verified_at)
+                    VALUES (%s,%s,%s,now())
+                """, (email, user_id, "google-oauth:" + secrets.token_hex(16)))
+                conn.commit()
+            else:
+                user_id = acct["user_id"]
+                if acct["verified_at"] is None:
+                    cur.execute("UPDATE accounts SET verified_at=now() WHERE email=%s", (email,))
+                    conn.commit()
+            token = _new_session(cur, user_id)
+            conn.commit()
+    finally:
+        conn.close()
+    _ensure_user(user_id)
+    return RedirectResponse(f"{landing}/#token={token}", status_code=302)
+
 
 
 def _telegram_guard(secret: str, telegram_id: int):

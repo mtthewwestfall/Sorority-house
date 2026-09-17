@@ -1,0 +1,2750 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>God's Companions</title>
+  <meta name="description" content="At the end of a dirt road, deep in the pines. Always earned, never given." />
+  <meta property="og:image" content="https://lockeddoor.ai/assets/logo.jpg" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#151715" />
+  <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="God's Companions" />
+  <script src="https://api.affitor.com/js/affitor-tracker.js" data-affitor-program-id="1083"></script>
+  <style>
+    :root {
+      --ink: #151715;
+      --panel: #1E211E;
+      --panel-2: #242824;
+      --line: rgba(233, 226, 215, .14);
+      --white: #E9E2D7;
+      --muted: #8A7D6B;
+      --gold: #8A7D6B;
+      --pink: #8A7D6B;
+      --violet: #8A7D6B;
+      --blue: #556357;
+      --shadow: 0 22px 70px rgba(0, 0, 0, .55);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--white);
+      background: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      background:
+        radial-gradient(circle at 15% 15%, rgba(85, 99, 87, .22), transparent 28%),
+        radial-gradient(circle at 84% 27%, rgba(138, 125, 107, .16), transparent 31%),
+        linear-gradient(180deg, #171917, #101211 75%);
+    }
+    body::after {
+      content: "God's Companions\A\A- always earned, never given";
+      white-space: pre-wrap;
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      opacity: .08;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-family: var(--serif, Georgia, serif);
+      font-size: clamp(2.5rem, 8vw, 6.5rem);
+      font-weight: 700;
+      letter-spacing: .08em;
+      color: #E9E2D7;
+      text-transform: uppercase;
+      background-image: linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: linear-gradient(to bottom, black, transparent 70%);
+    }
+
+    a { color: inherit; }
+    .wrap { width: min(1120px, calc(100% - 36px)); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: .48em;
+      font-size: .84rem;
+      font-weight: 700;
+    }
+    h1, h2, h3, .display, .door-name, .number {
+      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+      font-weight: 500;
+      letter-spacing: .025em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h2 { font-size: clamp(2.6rem, 7vw, 5.8rem); line-height: .98; margin-bottom: 22px; }
+    .gradient-text {
+      background: linear-gradient(100deg, #8A7D6B 5%, #556357 55%, #E9E2D7 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .sandalwood-text { color: #8A7D6B; }
+    .button.hero-cta { background: #556357; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+    .founders-coupon {
+      display: block; max-width: 420px; margin: 26px auto 0; padding: 18px 20px 16px;
+      text-decoration: none; color: var(--white); text-align: center;
+      background: rgba(250, 243, 226, .94);
+      border: 2px dashed rgba(138, 125, 107, .65); border-radius: 14px;
+      backdrop-filter: blur(4px);
+      transition: transform .15s, border-color .15s;
+    }
+    .founders-coupon:hover { transform: translateY(-2px); border-color: var(--gold); }
+    .founders-coupon .coupon-kicker {
+      color: var(--gold); font-size: .72rem; font-weight: 800;
+      letter-spacing: .28em; text-transform: uppercase; margin: 0 0 8px;
+    }
+    .founders-coupon .coupon-offer { font-size: 1.12rem; font-weight: 700; margin: 0 0 6px; line-height: 1.4; }
+    .founders-coupon .coupon-code {
+      display: inline-block; margin: 4px 0 8px; padding: 6px 18px;
+      font-weight: 800; letter-spacing: .24em; color: #E9E2D7;
+      background: #8A7D6B; border-radius: 8px; font-size: 1rem;
+    }
+    .founders-coupon .coupon-fine { color: var(--muted); font-size: .78rem; margin: 0; line-height: 1.5; }
+
+    .topbar {
+      position: fixed; z-index: 20; top: 0; left: 0; right: 0;
+      padding: 16px 0;
+      background: linear-gradient(180deg, rgba(21,23,21,.96), rgba(21,23,21,.10));
+      backdrop-filter: blur(9px);
+    }
+    .topbar .inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { text-decoration: none; color: var(--white); font-weight: 800; letter-spacing: .16em; font-size: .78rem; display: inline-flex; align-items: center; gap: 10px; }
+    .brand-mark { width: 30px; height: 30px; border-radius: 8px; flex: none; }
+    nav { display: flex; gap: 22px; align-items: center; }
+    nav a { text-decoration: none; color: var(--muted); font-size: .86rem; }
+    nav a:hover { color: var(--white); }
+    .nav-cta { border: 1px solid rgba(85,99,87,.6); border-radius: 999px; padding: 8px 14px; color: #E9E2D7; background: #556357; }
+
+
+
+    .hero {
+      min-height: 820px; display: grid; place-items: center; text-align: center; position: relative; overflow: hidden;
+      background: radial-gradient(circle at 50% 30%, rgba(233,226,215,.10), rgba(138,125,107,0) 60%), linear-gradient(160deg, #1b1e1b, #151715);
+    }
+    .hero::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.28) 100%); }
+    .hero-content { position: relative; max-width: 900px; padding: 140px 0 90px; }
+    .hero h1 { font-size: clamp(3.7rem, 11vw, 9rem); line-height: .84; margin: 0 0 30px; }
+    .hero h1 span { display: block; }
+    .hero-sub { font-size: clamp(1.25rem, 3vw, 2rem); color: #E9E2D7; margin-bottom: 32px; }
+    .challenge { color: var(--muted); font-size: clamp(1rem, 2vw, 1.3rem); margin-bottom: 50px; }
+    .scroll-cue { color: var(--gold); text-transform: uppercase; letter-spacing: .33em; font-size: .75rem; }
+
+    section { padding: 110px 0; }
+    .section-head { text-align: center; max-width: 800px; margin: 0 auto 48px; }
+    .section-head p { color: var(--muted); font-size: 1.1rem; }
+
+    .doors-section { background: linear-gradient(180deg, rgba(138,125,107,0), rgba(138,125,107,.12)); }
+
+    .doors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    .door-card {
+      position: relative; overflow: hidden; min-height: 530px; border-radius: 24px; border: 1px solid var(--line);
+      background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease;
+    }
+    .door-card:hover { transform: translateY(-6px); border-color: rgba(85,99,87,.66); }
+    .door-art {
+      position: relative; height: 285px; overflow: hidden; display: grid; place-items: center;
+      background: radial-gradient(circle at 50% 35%, rgba(233,226,215,.12), rgba(138,125,107,0) 60%), linear-gradient(160deg, #242824, #1E211E);
+    }
+    .door-art::before { content: attr(data-initial); font-family: Impact, sans-serif; font-size: 7rem; color: rgba(255,255,255,.14); letter-spacing: .04em; }
+    .door-art img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+    .door-art img.is-broken { display: none; }
+    .door-card.locked .door-art { filter: grayscale(1) brightness(.5); transform: scale(1.06); }
+    .door-card.locked::after { content: "TRUST NOT EARNED"; position: absolute; top: 126px; left: 0; right: 0; text-align: center; color: var(--gold); letter-spacing: .24em; font-size: .78rem; font-weight: 700; }
+    .door-card.neighbor::after,
+    .door-card.locked[data-min-tier="neighbor"]::after { content: "NEIGHBOR EXCLUSIVE"; }
+    .door-copy { padding: 25px 25px 28px; }
+    .door-status { color: var(--pink); letter-spacing: .3em; text-transform: uppercase; font-size: .72rem; font-weight: 700; }
+    .locked .door-status { color: var(--gold); }
+    .door-name { font-size: 2.1rem; margin: 8px 0 5px; }
+    .door-title { color: var(--gold); text-transform: uppercase; letter-spacing: .28em; font-size: .72rem; margin-bottom: 14px; }
+    .door-copy p { color: var(--muted); margin-bottom: 0; }
+
+    .trial-banner { margin-top: 42px; text-align: center; padding: 42px 25px; border: 1px solid rgba(233,226,215,.18); border-radius: 22px; background: linear-gradient(110deg, #556357, #3a453b); color: #E9E2D7; }
+    .trial-banner h3 { font-size: clamp(2rem, 5vw, 3.6rem); margin-bottom: 8px; }
+    .trial-banner p { margin: 0; font-weight: 650; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 0; cursor: pointer; text-decoration: none; border-radius: 999px; padding: 14px 23px; font-weight: 800; color: #E9E2D7; background: #556357; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+    .button:hover { filter: brightness(1.1); }
+    .button.dark { background: #F1E4C8; color: #E9E2D7; border: 1px solid var(--line); box-shadow: none; }
+    .trial-banner .button { margin-top: 20px; background: #E9E2D7; color: white; }
+
+    .hallway { margin-top: 78px; min-height: 420px; display: grid; place-items: center; text-align: center; border-radius: 25px; overflow: hidden; background: linear-gradient(180deg, rgba(21,23,21,.15), rgba(21,23,21,.8)), url('/assets/dakota.jpg?v=4') center/cover; border: 1px solid var(--line); }
+    .hallway h2 { margin-bottom: 10px; }
+    .hallway { color: #E9E2D7; } .hallway p { color: rgba(30,33,30,.88); font-size: 1.1rem; }
+
+
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    .step { padding: 30px 26px; border-top: 2px solid var(--pink); background: rgba(30,33,30,.94); border-radius: 0 0 18px 18px; }
+    .number { font-size: 3.2rem; color: var(--gold); }
+    .step h3 { font-size: 1.55rem; margin: 8px 0 12px; }
+    .step p { color: var(--muted); }
+    .group-image { margin-top: 45px; height: 360px; border-radius: 24px; background: linear-gradient(180deg, rgba(21,23,21,.05), rgba(21,23,21,.7)), url('/assets/dakota.jpg?v=4') center/cover; border: 1px solid var(--line); display: grid; place-items: end center; padding: 28px; text-align: center; }
+    .group-image h3 { font-size: 2.8rem; margin: 0; }
+    .group-image { color: #E9E2D7; } .group-image p { margin: 4px 0 0; color: rgba(30,33,30,.88); }
+
+    .plans { background: linear-gradient(180deg, rgba(138,125,107,0), rgba(138,125,107,.12)); }
+    .plan-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; } /* 4 cols when Neighbor returns */
+    .plan { display: flex; flex-direction: column; padding: 28px 23px; border: 1px solid var(--line); border-radius: 21px; background: rgba(30, 33, 30, .95); }
+    .plan.featured { border-color: var(--pink); box-shadow: 0 0 0 1px rgba(138,125,107,.15), 0 22px 60px rgba(138,125,107,.1); }
+    .plan h3 { font-size: 1.5rem; margin-bottom: 10px; }
+    .price { font-size: 2.2rem; font-weight: 850; margin-bottom: 18px; }
+    .price small { color: var(--muted); font-size: .85rem; font-weight: 500; }
+    .plan p { color: var(--muted); min-height: 70px; }
+    .plan ul { padding-left: 18px; color: var(--muted); flex: 1; }
+    .plan li { margin: 9px 0; }
+    .plan .button { width: 100%; margin-top: 20px; }
+    .extras { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+    .extra { padding: 25px; border: 1px solid var(--line); border-radius: 18px; background: rgba(30,33,30,.94); }
+    .extra h3 { margin-bottom: 8px; }
+    .extra p { color: var(--muted); margin: 0; }
+
+    .merch { background: rgba(12, 8, 24, .74); }
+    .merch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 900px; margin: 0 auto; }
+    .audit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 900px; margin: 0 auto; }
+    .audit-card { overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: var(--shadow); }
+    .audit-card img { width: 100%; display: block; }
+    .audit-card figcaption { padding: 20px 24px 24px; color: var(--muted); }
+    .audit-card figcaption strong { color: var(--white); }
+    .merch-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease; }
+    .merch-card:hover { transform: translateY(-6px); border-color: rgba(85,99,87,.66); }
+    .merch-card img { width: 100%; aspect-ratio: 1 / 1; display: block; object-fit: cover; background: rgba(138,125,107,.4); }
+    .merch-body { display: flex; flex-direction: column; gap: 10px; padding: 24px 24px 28px; flex: 1; }
+    .merch-body h3 { font-size: 1.7rem; margin: 0; }
+    .merch-body .price { font-size: 1.6rem; margin: 0; }
+    .merch-body p { color: var(--muted); margin: 0; flex: 1; }
+    .merch-row { display: flex; gap: 10px; margin-top: 8px; }
+    .merch-row select { flex: 1; min-width: 0; border-radius: 999px; padding: 12px 16px; font: inherit; color: var(--white); background: rgba(30,33,30,.94); border: 1px solid var(--line); }
+    .merch-row select:focus { outline: none; border-color: rgba(85,99,87,.6); }
+    .merch-row .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .merch-note { text-align: center; color: var(--muted); margin: 0; }
+
+    footer { padding: 50px 0 70px; border-top: 1px solid rgba(218,188,255,.12); color: var(--muted); }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .footer-links { display: flex; gap: 18px; }
+    .footer-links a { color: var(--muted); text-decoration: none; }
+    .footer-links a:hover { color: #E9E2D7; }
+
+    .ai-note { color: rgba(124,107,87,.9); font-size: .78rem; letter-spacing: .04em; }
+    #chat-remaining { display: none !important; } /* message-count display removed; counting logic untouched */
+    .hero .ai-note { margin: 26px 0 0; }
+
+    .door-card.open { cursor: pointer; }
+    .door-card.open .door-cta { display: inline-flex; margin-top: 16px; }
+    .door-cta { display: none; }
+
+    .chat-backdrop {
+      position: fixed; inset: 0; z-index: 80; display: none;
+      background: rgba(21, 23, 21, .72); backdrop-filter: blur(4px);
+    }
+    .chat-backdrop.is-open { display: grid; place-items: center; padding: 20px; }
+    .chat-panel {
+      width: min(560px, 100%); height: min(680px, 92vh); display: flex; flex-direction: column;
+      border: 1px solid var(--line); border-radius: 22px; background: #151715; box-shadow: var(--shadow); overflow: hidden;
+    }
+    /* iMessage-style layout: avatar + name header, tailed bubbles, pill composer. */
+    .chat-panel { --bubble-her: #2a2d2a; --bubble-me: #556357; --panel: #151715; }
+    .chat-head { position: relative; display: flex; align-items: center; gap: 18px; padding: 18px 22px 8px 72px; }
+    .chat-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex: none; background: linear-gradient(160deg, #556357, #8A7D6B); color: transparent; border: 2px solid rgba(255,255,255,.08); }
+    .chat-head .who { flex: 1; min-width: 0; }
+    .chat-head .who strong { display: block; font-size: 1.55rem; font-weight: 700; letter-spacing: -.01em; }
+    .chat-head .who div { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+    .chat-close { position: absolute; left: 14px; top: 16px; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255,255,255,.06); color: var(--white); font-size: 1.5rem; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+    .chat-close:hover { background: rgba(255,255,255,.12); }
+    .chat-service { text-align: center; color: var(--muted); font-size: .7rem; font-weight: 600; letter-spacing: .02em; padding: 6px 0 0; }
+    .chat-service small { display: block; font-weight: 400; font-size: .68rem; opacity: .85; }
+    .chat-log { flex: 1; overflow-y: auto; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 4px; }
+    .msg { position: relative; max-width: 78%; padding: 9px 14px; border-radius: 18px; font-size: 1rem; line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+    .msg.her, .msg.me { margin-top: 2px; }
+    .msg.her { align-self: flex-start; background: var(--bubble-her); color: var(--white); border-bottom-left-radius: 18px; }
+    .msg.me { align-self: flex-end; background: var(--bubble-me); color: #E9E2D7; }
+    /* tails */
+    .msg.her::before, .msg.me::before { content: ''; position: absolute; bottom: 0; width: 20px; height: 22px; z-index: -1; }
+    .msg.her::after, .msg.me::after { content: ''; position: absolute; bottom: 0; width: 26px; height: 22px; background: var(--panel); }
+    .msg.her::before { left: -7px; background: var(--bubble-her); border-bottom-right-radius: 16px 14px; }
+    .msg.her::after { left: -26px; border-bottom-right-radius: 10px; }
+    .msg.me::before { right: -7px; background: var(--bubble-me); border-bottom-left-radius: 16px 14px; }
+    .msg.me::after { right: -26px; border-bottom-left-radius: 10px; }
+    .msg.her, .msg.me { z-index: 0; }
+    .msg.note, .msg.stamp { align-self: center; max-width: 100%; text-align: center; color: var(--muted); font-size: .74rem; background: none; padding: 8px 0 4px; margin: 0; }
+    .msg.stamp b { font-weight: 600; }
+    .msg.receipt { align-self: flex-end; max-width: 100%; color: var(--muted); font-size: .72rem; background: none; padding: 0 4px; margin: -2px 0 8px; }
+    .msg.receipt b { font-weight: 600; }
+    .msg.error { align-self: center; max-width: 100%; text-align: center; color: #e9d3b8; border: 1px solid rgba(138,125,107,.4); background: rgba(138,125,107,.08); font-size: .84rem; }
+    .typing { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; margin: 4px 0 8px; }
+    .chat-foot { padding: 10px 12px 14px; }
+    .chat-form { display: flex; align-items: flex-end; gap: 10px; }
+    .chat-form textarea {
+      flex: 1; min-width: 0; border-radius: 22px; padding: 11px 44px 11px 16px; font: inherit; font-size: 1rem; line-height: 1.3;
+      color: var(--white); background: rgba(255,255,255,.05); border: 1px solid var(--line); resize: none; max-height: 110px;
+    }
+    .chat-form textarea::placeholder { color: rgba(199,185,202,.6); }
+    .chat-form textarea:focus { outline: none; border-color: rgba(255,255,255,.28); }
+    .chat-form .field { flex: 1; min-width: 0; position: relative; display: flex; }
+    .chat-form .field textarea { width: 100%; overflow-y: auto; scrollbar-width: none; }
+    .chat-form .field textarea::-webkit-scrollbar { display: none; }
+    .auth-panel { width: min(420px, 100%); height: auto; padding: 26px 26px 22px; gap: 12px; }
+    .auth-panel h2 { font-size: 1.4rem; margin: 0 0 4px; }
+    .auth-panel .auth-sub { color: var(--muted); font-size: .9rem; margin: 0 0 8px; }
+    .auth-panel form { display: flex; flex-direction: column; gap: 10px; }
+    .auth-panel input { border-radius: 12px; padding: 12px 14px; font: inherit; color: var(--white); background: rgba(30,33,30,.94); border: 1px solid var(--line); }
+    .auth-panel input:focus { outline: none; border-color: rgba(85,99,87,.6); }
+    .auth-panel .button { justify-content: center; }
+    .auth-switch { color: var(--muted); font-size: .84rem; text-align: center; margin: 6px 0 0; }
+    .auth-switch a, .auth-msg a { color: var(--gold); cursor: pointer; text-decoration: underline; }
+    .auth-msg { min-height: 1.2em; font-size: .86rem; text-align: center; color: var(--muted); }
+    .auth-msg.error { color: #9A3B2E; }
+    .auth-msg.ok { color: #1F7A3D; }
+    .auth-close { position: absolute; top: 12px; right: 14px; }
+    .auth-panel { position: relative; }
+    .auth-hidden { display: none !important; }
+    .auth-panel textarea { border-radius: 12px; padding: 12px 14px; font: inherit; color: var(--white); background: rgba(30,33,30,.94); border: 1px solid var(--line); width: 100%; resize: vertical; }
+    .auth-panel textarea:focus { outline: none; border-color: rgba(85,99,87,.6); }
+    #avatar-create-step, #avatar-preview-step { display: flex; flex-direction: column; gap: 10px; }
+    .avatar-preview { width: 100%; max-width: 280px; margin: 0 auto; border-radius: 16px; border: 1px solid var(--line); display: block; }
+    .avatar-disclosure { color: var(--muted); font-size: .78rem; text-align: center; margin: 2px 0 6px; }
+    .nav-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); vertical-align: middle; }
+    .contest-toggle { display: flex; align-items: center; gap: 10px; color: var(--white); font-size: .92rem; cursor: pointer; margin-top: 4px; }
+    .contest-toggle input { width: 18px; height: 18px; accent-color: #556357; }
+    #profile-avatar-wrap.auth-hidden, #profile-no-avatar.auth-hidden { display: none; }
+    /* Preset face picker (companion creation + avatar setup) */
+    .face-picker-label { font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px; }
+    .face-picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-height: 280px; overflow-y: auto; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.18); box-sizing: border-box; }
+    @media (max-width: 480px) {
+      .face-picker { grid-template-columns: repeat(3, 1fr); }
+    }
+    .face-pick { border: 2px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; padding: 0; background: none; box-sizing: border-box; }
+    .face-pick img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; border-radius: 8px; }
+    .face-pick.selected { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+    .face-seg { display: flex; gap: 6px; margin-bottom: 8px; }
+    .face-seg button { flex: 1; padding: 6px 4px; font-size: 0.8rem; border-radius: 8px; border: 1px solid var(--line); background: rgba(233,226,215,.08); color: var(--white); cursor: pointer; }
+    .face-seg button.active { background: var(--gold); color: #E9E2D7; border-color: var(--gold); font-weight: bold; }
+    .preset-consent { display: flex; align-items: flex-start; gap: 10px; color: var(--white); font-size: 0.82rem; cursor: pointer; line-height: 1.35; }
+    .preset-consent input { width: 18px; height: 18px; margin-top: 1px; accent-color: #556357; flex-shrink: 0; }
+    /* send arrow lives inside the pill and only shows once there is text */
+    .chat-form .button#chat-send {
+      position: absolute; right: 5px; bottom: 5px; width: 34px; height: 34px; padding: 0; border-radius: 50%;
+      display: none; place-items: center; font-size: 1.1rem; line-height: 1;
+    }
+    .chat-form.has-text .button#chat-send { display: grid; }
+    .chat-form .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .chat-photo { flex: none; width: min(78%, 320px); border-radius: 18px; overflow: hidden; align-self: flex-start; border: 1px solid var(--line); margin-bottom: 8px; }
+    .chat-photo img { display: block; width: 100%; height: auto; }
+    .chat-photo figcaption { padding: 6px 10px; color: var(--muted); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; background: rgba(21,23,21,.7); }
+    #chat-photo-btn, #chat-audit-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: var(--white); font: inherit; font-size: 1.7rem; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0 0 3px; }
+    #chat-audit-btn { font-size: 1.2rem; padding: 0; }
+    #chat-photo-btn:hover:not([disabled]), #chat-audit-btn:hover:not([disabled]) { background: rgba(255,255,255,.14); }
+    #chat-photo-btn[disabled], #chat-audit-btn[disabled] { opacity: .5; cursor: not-allowed; }
+    #chat-photo-btn[hidden], #chat-audit-btn[hidden] { display: none; }
+    #companion-actions-bar { display: flex; }
+    #companion-actions-bar[hidden], #comp-propose-btn[hidden], #comp-remember-btn[hidden] { display: none; }
+    .msg.audit { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.05); border: 1px solid var(--line); font-size: .92rem; line-height: 1.45; padding: 14px 16px; margin: 6px 0 10px; }
+    .chat-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 0 6px; }
+    /* picture request sheet, opened from the + button */
+    .pic-sheet { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; font-size: .9rem; margin: 6px 0 10px; }
+    .pic-sheet h4 { margin: 0 0 4px; font-size: 1rem; }
+    .pic-sheet p { margin: 0 0 10px; color: var(--muted); font-size: .84rem; }
+    .pic-sheet .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pic-sheet .button { padding: 9px 16px; font-size: .86rem; }
+    .pic-sheet .button[disabled] { opacity: .5; cursor: not-allowed; }
+    .pic-sheet .ghost { background: none; border: 1px solid var(--line); color: var(--muted); }
+
+    /* Light chat theme (iMessage look): white panel, grey bubbles for her, pink for you. */
+    .chat-panel {
+      --panel: #151715; --bubble-her: #2a2d2a; --bubble-me: #556357;
+      --chat-ink: #E9E2D7; --chat-muted: #8A7D6B; --chat-line: rgba(233,226,215,.14);
+      background: var(--panel); color: var(--chat-ink);
+    }
+    .chat-head .who strong { color: var(--chat-ink); }
+    .chat-head .who div, .chat-service, .msg.note, .msg.stamp, .msg.receipt, .typing, .chat-meta .ai-note { color: var(--chat-muted); }
+    .chat-head img { border-color: rgba(255,255,255,.08); }
+    .chat-close { background: rgba(255,255,255,.06); color: var(--chat-ink); }
+    .chat-close:hover { background: rgba(255,255,255,.12); }
+    .msg.her { color: var(--chat-ink); }
+    .msg.error { color: #f0a8a0; border-color: rgba(138,125,107,.35); background: rgba(138,125,107,.06); }
+    .chat-form textarea { color: var(--chat-ink); background: #1E211E; border-color: var(--chat-line); }
+    .chat-form textarea::placeholder { color: var(--chat-muted); }
+    .chat-form textarea:focus { border-color: rgba(233,226,215,.3); }
+    #chat-photo-btn, #chat-audit-btn { background: rgba(255,255,255,.08); color: var(--chat-ink); }
+    #chat-photo-btn:hover:not([disabled]), #chat-audit-btn:hover:not([disabled]) { background: rgba(255,255,255,.14); }
+    .msg.audit { background: #1E211E; border-color: var(--chat-line); color: var(--chat-ink); }
+    .chat-photo { border-color: var(--chat-line); }
+    .chat-photo figcaption { color: var(--chat-muted); background: rgba(21,23,21,.7); }
+    .pic-sheet { background: #1E211E; border-color: var(--chat-line); color: var(--chat-ink); }
+    .pic-sheet p { color: var(--chat-muted); }
+    .pic-sheet .ghost { border-color: var(--chat-line); color: var(--chat-muted); }
+    .auth-panel { --panel: #151715; background: #151715; color: var(--white); }
+
+    @media (max-width: 900px) {
+      .doors, .plan-grid { grid-template-columns: repeat(2, 1fr); }
+      .steps { grid-template-columns: 1fr; }
+      .plan p { min-height: auto; }
+    }
+    @media (max-width: 620px) {
+      .wrap { width: min(100% - 26px, 520px); }
+      nav a:not(.nav-cta) { display: none; }
+      .hero { min-height: 720px; }
+      section { padding: 76px 0; }
+      .doors, .plan-grid, .extras, .merch-grid, .audit-grid { grid-template-columns: 1fr; }
+      .door-card { min-height: auto; }
+      .door-art { height: 300px; }
+      .hallway { min-height: 330px; }
+      .group-image { height: 290px; }
+      .footer-inner { flex-direction: column; text-align: center; }
+      /* Full-screen panel sized to the *visible* viewport (--vvh, kept in sync from
+         visualViewport by JS), so when the on-screen keyboard opens the panel shrinks
+         and the composer, in normal flow at the bottom, stays above the keyboard. */
+      #chat.is-open { place-items: start center; grid-template-rows: 100%; padding: 0; background: #151715; backdrop-filter: none; }
+      #chat .chat-panel { height: var(--vvh, 100%); position: relative; width: 100%; border: 0; border-radius: 0; box-shadow: none; }
+      #chat .chat-head { padding-top: calc(14px + env(safe-area-inset-top, 0px)); flex: none; }
+      #chat .chat-log { scrollbar-width: none; min-height: 0; overscroll-behavior: contain; }
+      #chat .chat-log::-webkit-scrollbar { display: none; }
+      #chat .chat-foot { flex: none; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); background: rgba(255, 255, 255, .7); }
+      #chat .chat-head { padding-left: 64px; gap: 14px; }
+      #chat .chat-head img { width: 72px; height: 72px; }
+      body.chat-locked { overflow: hidden; position: fixed; width: 100%; }
+    }
+  
+    }
+    .hall-card .button, .founders-coupon .button, .step .button, .plan .button,
+    .audit-card .button, .merch-card .button, .photo-card .button, .auth-panel .button {
+      background: #E9E2D7; color: #556357; box-shadow: none;
+    }
+    .founders-coupon .coupon-code { background: #556357; color: #E9E2D7; }
+    .auth-panel input, .auth-panel textarea, .auth-panel select,
+    .merch-card select, .merch-card input { color: #E9E2D7; }
+    .sandalwood-text { color: #8A7D6B; }
+    
+    /* ===== Dark scheme: #151715 bg -> #1E211E sections -> #E9E2D7 text ===== */
+    .button { background: #556357; color: #E9E2D7; box-shadow: 0 12px 28px rgba(0,0,0,.30); }
+    .button.hero-cta { background: #556357; color: #E9E2D7; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+    .door-card, .founders-coupon, .step, .plan, .profile-card, .trial-banner,
+, .merch-card, .auth-panel {
+      background: #1E211E; border-color: rgba(233,226,215,.14); color: #E9E2D7;
+      --white: #E9E2D7; --muted: #8A7D6B; --line: rgba(233,226,215,.14);
+      --pink: #8A7D6B; --gold: #8A7D6B;
+    }
+    .door-card .button, .founders-coupon .button, .step .button, .plan .button,
+    .audit-card .button, .merch-card .button, .auth-panel .button {
+      background: #556357; color: #E9E2D7; box-shadow: none;
+    }
+    .founders-coupon .coupon-code { background: #556357; color: #E9E2D7; }
+    .auth-panel input, .auth-panel textarea, .auth-panel select,
+    .merch-card select, .merch-card input { color: #E9E2D7; background: #151715; }
+    .sandalwood-text { color: #8A7D6B; }
+    </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&display=swap" rel="stylesheet">
+<style id="rl-redesign">
+/* ===== God's Companions cinematic redesign: same layout as reference, our content ===== */
+:root { --serif: 'Playfair Display', Georgia, 'Times New Roman', serif; }
+
+/* ---------- top bar ---------- */
+.rl-topbar { position: sticky; top: 0; z-index: 60; background: rgba(21,23,21,.94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(233,226,215,.09); }
+.rl-topbar-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 13px; padding-bottom: 13px; }
+.rl-brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: #E9E2D7; font-weight: 700; letter-spacing: .22em; font-size: .92rem; white-space: nowrap; }
+.rl-brand img { border-radius: 8px; display: block; }
+.rl-nav { display: flex; gap: 28px; }
+.rl-nav a { color: #c9c2b4; text-decoration: none; font-size: .95rem; }
+.rl-nav a.rl-nav-godtown { font-family: 'Times New Roman', Times, serif; letter-spacing: .18em; }
+.rl-nav a:hover { color: #E9E2D7; }
+.rl-topbar-actions { display: flex; align-items: center; gap: 14px; }
+.rl-nav-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
+.rl-nav-link { color: #c9c2b4; text-decoration: none; font-size: .95rem; }
+.rl-nav-link:hover { color: #E9E2D7; }
+
+/* ---------- buttons ---------- */
+.rl-btn { display: inline-block; text-decoration: none; font-weight: 600; border-radius: 999px; padding: 14px 32px; font-size: 1rem; line-height: 1; cursor: pointer; border: 1px solid transparent; text-align: center; font-family: inherit; }
+.rl-btn-primary { background: #556357; color: #fff; }
+.rl-btn-primary:hover { background: #5f6f61; color: #fff; }
+.rl-btn-ghost { border-color: rgba(233,226,215,.55); color: #E9E2D7; background: transparent; }
+.rl-btn-ghost:hover { border-color: #E9E2D7; color: #fff; }
+.rl-btn-sm { padding: 10px 22px; font-size: .9rem; }
+
+/* ---------- type ---------- */
+.rl-eyebrow { text-transform: uppercase; letter-spacing: .3em; font-size: .74rem; color: #8A7D6B; margin: 0 0 18px; font-weight: 700; }
+.rl-section { padding: 96px 0; }
+.rl-section-head { margin-bottom: 40px; max-width: 720px; }
+.rl-section-head h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(2.1rem, 4.6vw, 3.1rem); line-height: 1.08; margin: 0; color: #E9E2D7; }
+.rl-section-sub { color: #a9a294; margin: 14px 0 0; font-size: 1.06rem; line-height: 1.6; }
+
+/* ---------- hero ---------- */
+.rl-hero { min-height: 92vh; display: flex; align-items: flex-end; }
+.rl-hero-inner { padding-top: 150px; padding-bottom: 100px; max-width: 780px; }
+.rl-hero h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(2.9rem, 7.6vw, 5.6rem); line-height: 1.04; margin: 0 0 20px; color: #E9E2D7; letter-spacing: 0; }
+.rl-hero h1 em { font-style: italic; }
+.rl-hero-sub { font-size: 1.16rem; color: #d8d1c2; max-width: 580px; margin: 0 0 34px; line-height: 1.6; }
+.rl-hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+
+/* ---------- resident carousel ---------- */
+.rl-carousel-wrap { position: relative; }
+.rl-carousel { display: flex; gap: 22px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 4px 20px; scrollbar-width: thin; scrollbar-color: #556357 transparent; }
+.rl-carousel::-webkit-scrollbar { height: 8px; }
+.rl-carousel::-webkit-scrollbar-thumb { background: #556357; border-radius: 4px; }
+.door-card { flex: 0 0 274px; scroll-snap-align: start; background: #1E211E; border: 1px solid rgba(233,226,215,.08); border-radius: 16px; overflow: hidden; cursor: pointer; transition: transform .25s ease, border-color .25s ease; min-height: 0; }
+.door-card:hover { transform: translateY(-5px); border-color: rgba(138,125,107,.6); }
+.door-card.companion-card { flex: none; width: 100%; max-width: 460px; scroll-snap-align: none; }
+.door-art { aspect-ratio: 4 / 4.4; height: auto; }
+.door-copy { padding: 20px 20px 22px; }
+.door-name { font-family: var(--serif); font-weight: 600; font-size: 1.5rem; letter-spacing: 0; text-transform: none; color: #E9E2D7; margin: 0 0 3px; }
+.door-title { color: #8A7D6B; text-transform: uppercase; letter-spacing: .2em; font-size: .68rem; margin-bottom: 11px; }
+.door-copy p { color: #b6ae9f; font-size: .93rem; line-height: 1.55; margin: 0 0 14px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.door-card.open .door-cta { display: inline-flex; margin-top: 0; color: #8A7D6B; font-size: .92rem; font-weight: 600; }
+.door-card:hover .door-cta { color: #E9E2D7; }
+.rl-car-arrow { position: absolute; top: 34%; width: 48px; height: 48px; border-radius: 50%; border: 1px solid rgba(233,226,215,.28); background: rgba(21,23,21,.88); color: #E9E2D7; font-size: 1.6rem; line-height: 1; cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 0 0 3px; }
+.rl-car-arrow:hover { border-color: #8A7D6B; }
+.rl-car-prev { left: -10px; }
+.rl-car-next { right: -10px; }
+
+/* ---------- features ---------- */
+.rl-features { background: #121411; }
+.rl-feature-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 30px; }
+.rl-feature-icon { width: 54px; height: 54px; border-radius: 50%; border: 1px solid rgba(138,125,107,.55); display: flex; align-items: center; justify-content: center; color: #8A7D6B; margin-bottom: 20px; }
+.rl-feature-icon svg { width: 26px; height: 26px; }
+.rl-feature h3 { font-size: 1.06rem; margin: 0 0 9px; color: #E9E2D7; font-weight: 600; }
+.rl-feature p { color: #a9a294; font-size: .93rem; line-height: 1.6; margin: 0; }
+
+/* ---------- plans ---------- */
+.rl-plans-grid { display: grid; grid-template-columns: 1fr 250px; gap: 40px; align-items: start; }
+.rl-plan-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.rl-plan { background: #1E211E; border: 1px solid rgba(233,226,215,.09); border-radius: 18px; padding: 36px 30px 32px; position: relative; display: flex; flex-direction: column; }
+.rl-plan-featured { border-color: rgba(138,125,107,.75); }
+.rl-plan-badge { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: #8A7D6B; color: #151715; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; padding: 6px 15px; border-radius: 999px; white-space: nowrap; }
+.rl-plan h3 { margin: 0 0 4px; font-size: 1.04rem; color: #E9E2D7; font-weight: 600; }
+.rl-price { font-family: var(--serif); font-weight: 600; font-size: 2.7rem; color: #E9E2D7; margin: 8px 0 4px; line-height: 1; }
+.rl-price small { font-size: 1rem; font-family: inherit; color: #a9a294; font-weight: 400; }
+.rl-plan-tag { color: #a9a294; font-size: .93rem; margin: 0 0 22px; line-height: 1.5; }
+.rl-plan ul { list-style: none; margin: 0 0 28px; padding: 0; flex: 1; }
+.rl-plan li { color: #c9c2b4; font-size: .93rem; line-height: 1.5; padding: 9px 0 9px 28px; position: relative; border-top: 1px solid rgba(233,226,215,.07); }
+.rl-plan li::before { content: '✓'; position: absolute; left: 3px; top: 9px; color: #8A7D6B; font-weight: 700; }
+.rl-plan .rl-btn { width: 100%; }
+.rl-checklist ul { list-style: none; margin: 0; padding: 8px 0 0; }
+.rl-checklist li { color: #c9c2b4; font-size: .95rem; line-height: 1.5; padding: 11px 0 11px 30px; position: relative; border-bottom: 1px solid rgba(233,226,215,.07); }
+.rl-checklist li::before { content: '✓'; position: absolute; left: 4px; top: 11px; color: #8A7D6B; font-weight: 700; }
+
+/* ---------- footer ---------- */
+.rl-footer { border-top: 1px solid rgba(233,226,215,.09); padding: 66px 0 28px; margin-top: 10px; background: #121411; }
+.rl-footer-grid { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 40px; margin-bottom: 46px; }
+.rl-footer-brand p { color: #a9a294; font-size: .94rem; line-height: 1.65; margin: 18px 0 0; }
+.rl-footer-col h4 { text-transform: uppercase; letter-spacing: .22em; font-size: .7rem; color: #8A7D6B; margin: 0 0 18px; font-weight: 700; }
+.rl-footer-col a { display: block; color: #c9c2b4; text-decoration: none; font-size: .95rem; margin-bottom: 11px; }
+.rl-footer-col a:hover { color: #E9E2D7; }
+.rl-footer-bottom { border-top: 1px solid rgba(233,226,215,.09); padding-top: 24px; color: #8a8478; font-size: .85rem; line-height: 1.6; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 1020px) {
+  .rl-feature-grid { grid-template-columns: repeat(3, 1fr); }
+  .rl-plans-grid { grid-template-columns: 1fr; }
+  .rl-plan-cards { grid-template-columns: repeat(3, 1fr); }
+  .rl-checklist ul { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+}
+@media (max-width: 860px) {
+  .rl-nav { display: none; }
+  .rl-plan-cards { grid-template-columns: 1fr; max-width: 440px; }
+  .rl-car-arrow { display: none; }
+  .rl-footer-grid { grid-template-columns: 1fr 1fr; }
+  .rl-section { padding: 70px 0; }
+}
+@media (max-width: 600px) {
+  .rl-feature-grid { grid-template-columns: 1fr 1fr; gap: 26px 20px; }
+  .rl-checklist ul { grid-template-columns: 1fr; }
+  .rl-hero-inner { padding-top: 110px; padding-bottom: 80px; }
+  .door-card { flex-basis: 240px; }
+}
+</style>
+
+<style>
+#wingman{display:none!important}
+#login-form,#signup-form,#verify-pane{display:none!important}
+#google-signin-wrap{text-align:center;padding:8px 0 4px}
+#google-signin{width:100%;margin:6px 0}
+.roster-divider{flex:0 0 100%;width:100%;margin:26px 0 6px;font-size:.8rem;letter-spacing:.28em;
+ text-transform:uppercase;color:var(--gold,#c9a227);font-weight:700}
+</style>
+</head>
+<body>
+    <header class="rl-topbar">
+    <div class="wrap rl-topbar-inner">
+      <a class="rl-brand" href="#top" aria-label="God's Companions home">
+        <img src="/assets/favicon-32.png" alt="LockedDoor.ai doorway emblem" width="30" height="30" />
+        <span>GOD'S GREEK</span>
+      </a>
+      <nav class="rl-nav">
+        <a href="#town">Residents</a>
+        <a href="#why">Why it works</a>
+        <a href="#plans">Membership</a>
+        <a href="#merch">Merch</a>
+        <a href="https://web-production-ae547.up.railway.app" target="_blank" rel="noopener" class="rl-nav-godtown">God's Town</a>
+      </nav>
+      <div class="rl-topbar-actions">
+        <img id="nav-avatar" class="rl-nav-avatar" alt="Your avatar" hidden />
+        <a href="#" id="nav-profile" class="rl-nav-link" hidden>Profile</a>
+        <a href="#" id="nav-auth" class="rl-btn rl-btn-ghost rl-btn-sm">Sign in</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="rl-hero" style="background: linear-gradient(180deg, rgba(21,23,21,.25) 0%, rgba(21,23,21,.55) 55%, rgba(21,23,21,1) 100%), url('/assets/hero-water-tower.jpg') center/cover;">
+      <div class="wrap rl-hero-inner">
+        <p class="rl-eyebrow">At the end of a dirt road, deep in the pines.</p>
+        <h1>Always earned, <em>never given</em>.</h1>
+        <p class="rl-hero-sub">Persistent AI residents. Talk to all of them free — trust takes real days, and there's no pay-to-skip.</p>
+        <div class="rl-hero-ctas">
+          <a class="rl-btn rl-btn-primary" href="#town">Start free trial</a>
+          <a class="rl-btn rl-btn-ghost" href="town.html">Come into town ↓</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="town" class="rl-section rl-residents">
+      <div class="wrap">
+        <p class="rl-eyebrow">Meet the residents</p>
+        <div class="rl-section-head">
+          <h2>The heart of God's Companions.</h2>
+          <p class="rl-section-sub">Every door opens the same way — real talk, over real days.</p>
+        </div>
+        <div id="companion-section" style="margin-bottom: 26px;">
+          <div id="companion-card-container"></div>
+        </div>
+        <!-- Fallback cards: GET /roster replaces them with whatever the house holds now. -->
+        <div class="rl-carousel-wrap">
+          <button class="rl-car-arrow rl-car-prev" type="button" aria-label="Previous residents">‹</button>
+          <div class="rl-carousel" id="doors-grid">
+            <article id="door-dakota" class="door-card open" data-girl="dakota" data-min-tier="visitor" data-name="Dakota" data-title="The gatekeeper" data-avatar="/assets/dakota.jpg?v=4">
+              <div class="door-art" data-initial="D"><img src="/assets/dakota.jpg?v=4" alt="Portrait of Dakota" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Dakota</div><div class="door-title">The gatekeeper</div><p>Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm — but trust is earned slowly.</p><span class="door-cta">Talk to Dakota →</span></div>
+            </article>
+            <article id="door-zoe" class="door-card open" data-girl="zoe" data-min-tier="visitor" data-name="Zoe" data-title="The mirage" data-avatar="/assets/zoe.jpg?v=4">
+              <div class="door-art" data-initial="Z"><img src="/assets/zoe.jpg?v=4" alt="Portrait of Zoe" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><span class="door-cta">Talk to Zoe →</span></div>
+            </article>
+            <article id="door-willow" class="door-card open" data-girl="willow" data-min-tier="visitor" data-name="Willow" data-title="The quiet lock" data-avatar="/assets/willow.jpg?v=4">
+              <div class="door-art" data-initial="W"><img src="/assets/willow.jpg?v=4" alt="Willow's portrait" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p><span class="door-cta">Talk to Willow →</span></div>
+            </article>
+            <article id="door-brittany" class="door-card open" data-girl="brittany" data-min-tier="visitor" data-name="Brittany" data-title="The sweet trap" data-avatar="/assets/brittany.jpg?v=3">
+              <div class="door-art" data-initial="B"><img src="/assets/brittany.jpg?v=3" alt="Brittany's portrait" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p><span class="door-cta">Talk to Brittany →</span></div>
+            </article>
+            <article id="door-sasha" class="door-card open" data-girl="sasha" data-min-tier="visitor" data-name="Sasha" data-title="The wildcard" data-avatar="/assets/sasha.webp?v=3">
+              <div class="door-art" data-initial="S"><img src="/assets/sasha.webp?v=3" alt="Sasha's portrait" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p><span class="door-cta">Talk to Sasha →</span></div>
+            </article>
+            <article id="door-piper" class="door-card open" data-girl="piper" data-min-tier="visitor" data-name="Piper" data-title="The closed book" data-avatar="/assets/piper.jpg?v=4">
+              <div class="door-art" data-initial="P"><img src="/assets/piper.jpg?v=4" alt="Piper's portrait" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p><span class="door-cta">Talk to Piper →</span></div>
+            </article>
+            <article id="door-veronica" class="door-card open" data-girl="veronica" data-min-tier="visitor" data-name="Veronica" data-title="The host" data-avatar="/assets/veronica.webp?v=3">
+              <div class="door-art" data-initial="V"><img src="/assets/veronica.webp?v=3" alt="Veronica's portrait" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Veronica</div><div class="door-title">The host</div><p>The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted.</p><span class="door-cta">Talk to Veronica →</span></div>
+            </article>
+            <article id="door-matt" class="door-card open" data-girl="matt" data-min-tier="visitor" data-name="Matt" data-title="The sheriff" data-avatar="/assets/matt.jpg?v=4">
+              <div class="door-art" data-initial="M"><img src="/assets/matt.jpg?v=4" alt="Portrait of Matt" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Matt</div><div class="door-title">The sheriff</div><p>Sheriff of God's Greek. Fixes your taillight instead of writing the ticket; carries the town's weight quietly.</p><span class="door-cta">Talk to Matt →</span></div>
+            </article>
+            <article id="door-dean" class="door-card open" data-girl="dean" data-min-tier="visitor" data-name="Dean" data-title="The doctor" data-avatar="/assets/dean.jpg?v=4">
+              <div class="door-art" data-initial="D"><img src="/assets/dean.jpg?v=4" alt="Portrait of Dean" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Dean</div><div class="door-title">The doctor</div><p>The town doctor. The man God's Greek trusts with its worst days — calm under pressure, kind when it counts.</p><span class="door-cta">Talk to Dean →</span></div>
+            </article>
+            <article id="door-ty" class="door-card open" data-girl="ty" data-min-tier="visitor" data-name="Ty" data-title="The hardware guy" data-avatar="/assets/ty.jpg?v=4">
+              <div class="door-art" data-initial="T"><img src="/assets/ty.jpg?v=4" alt="Portrait of Ty" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Ty</div><div class="door-title">The hardware guy</div><p>Hardware store owner. The young man who can find anything in the store — handy, honest, easy to talk to.</p><span class="door-cta">Talk to Ty →</span></div>
+            </article>
+            <article id="door-billy" class="door-card open" data-girl="billy" data-min-tier="visitor" data-name="Billy" data-title="The grill" data-avatar="/assets/billy.jpg?v=4">
+              <div class="door-art" data-initial="B"><img src="/assets/billy.jpg?v=4" alt="Portrait of Billy" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Billy</div><div class="door-title">The grill</div><p>Diner cook. The man behind the grill who never lets a plate go out wrong — gruff, loyal, softer than he looks.</p><span class="door-cta">Talk to Billy →</span></div>
+            </article>
+            <article id="door-kristen" class="door-card open" data-girl="kristen" data-min-tier="visitor" data-name="Kristen" data-title="The gentle hands" data-avatar="/assets/kristen.jpg?v=4">
+              <div class="door-art" data-initial="K"><img src="/assets/kristen.jpg?v=4" alt="Portrait of Kristen" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Kristen</div><div class="door-title">The gentle hands</div><p>The town veterinarian. The woman the animals trust first — gentle hands, sharp eyes, quiet confidence.</p><span class="door-cta">Talk to Kristen →</span></div>
+            </article>
+            <article id="door-ryan" class="door-card open" data-girl="ryan" data-min-tier="visitor" data-name="Ryan" data-title="The truth keeper" data-avatar="/assets/ryan.jpg?v=4">
+              <div class="door-art" data-initial="R"><img src="/assets/ryan.jpg?v=4" alt="Portrait of Ryan" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Ryan</div><div class="door-title">The truth keeper</div><p>Town lawyer. The man the town tells the truth to — sharp, discreet, harder to read than he looks.</p><span class="door-cta">Talk to Ryan →</span></div>
+            </article>
+            <article id="door-darwin" class="door-card open" data-girl="darwin" data-min-tier="visitor" data-name="Darwin" data-title="The quiet room" data-avatar="/assets/darwin.jpg?v=4">
+              <div class="door-art" data-initial="D"><img src="/assets/darwin.jpg?v=4" alt="Portrait of Darwin" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Darwin</div><div class="door-title">The quiet room</div><p>The town librarian. Keeper of the quietest room in God's Greek — remembers every book and every borrower.</p><span class="door-cta">Talk to Darwin →</span></div>
+            </article>
+            <article id="door-jordan" class="door-card open" data-girl="jordan" data-min-tier="visitor" data-name="Jordan" data-title="The true believer" data-avatar="/assets/jordan.jpg?v=4">
+              <div class="door-art" data-initial="J"><img src="/assets/jordan.jpg?v=4" alt="Portrait of Jordan" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Jordan</div><div class="door-title">The true believer</div><p>Deputy sheriff. The law's youngest true believer — earnest, brave, and still proving herself.</p><span class="door-cta">Talk to Jordan →</span></div>
+            </article>
+            <article id="door-mia" class="door-card open" data-girl="mia" data-min-tier="visitor" data-name="Mia" data-title="The first to know" data-avatar="/assets/mia.jpg?v=4">
+              <div class="door-art" data-initial="M"><img src="/assets/mia.jpg?v=4" alt="Portrait of Mia" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Mia</div><div class="door-title">The first to know</div><p>News reporter. The woman who knows everything first — curious, quick, always chasing the real story.</p><span class="door-cta">Talk to Mia →</span></div>
+            </article>
+            <article id="door-anna" class="door-card open" data-girl="anna" data-min-tier="visitor" data-name="Anna" data-title="The steady hands" data-avatar="/assets/anna.jpg?v=4">
+              <div class="door-art" data-initial="A"><img src="/assets/anna.jpg?v=4" alt="Portrait of Anna" loading="lazy" /></div>
+              <div class="door-copy"><div class="door-name">Anna</div><div class="door-title">The steady hands</div><p>EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together.</p><span class="door-cta">Talk to Anna →</span></div>
+            </article>
+          </div>
+          <button class="rl-car-arrow rl-car-next" type="button" aria-label="Next residents">›</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="why" class="rl-section rl-features">
+      <div class="wrap">
+        <p class="rl-eyebrow">Why players stay</p>
+        <div class="rl-section-head">
+          <h2>Trust is earned, not bought.</h2>
+        </div>
+        <div class="rl-feature-grid">
+          <article class="rl-feature">
+            <span class="rl-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+            <h3>Real days, real trust</h3>
+            <p>Doors open over actual days. No rushing it, no shortcuts.</p>
+          </article>
+          <article class="rl-feature">
+            <span class="rl-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+            <h3>No pay-to-skip</h3>
+            <p>There's no price tag on what's behind a locked door.</p>
+          </article>
+          <article class="rl-feature">
+            <span class="rl-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9.5 11l2 2 3.5-4"/></svg></span>
+            <h3>Psychological audits</h3>
+            <p>No flattery. Your audits quote your own words back at you.</p>
+          </article>
+          <article class="rl-feature">
+            <span class="rl-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span>
+            <h3>A town that remembers</h3>
+            <p>They talk to each other — and remember everything you tell them.</p>
+          </article>
+          <article class="rl-feature">
+            <span class="rl-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="8" r="3.5"/><path d="M4 20c0-3.3 2.7-6 6-6s6 2.7 6 6M18 8v6M15 11h6"/></svg></span>
+            <h3>Your own companion</h3>
+            <p>Create a custom companion that's yours alone — same trust, same rules.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="plans" class="rl-section rl-plans">
+      <div class="wrap">
+        <p class="rl-eyebrow">Plans that fit</p>
+        <div class="rl-section-head">
+          <h2>Choose your plan.</h2>
+          <p class="rl-section-sub">Step into God's Companions. They get the last word.</p>
+        </div>
+        <div class="rl-plans-grid">
+          <div class="rl-plan-cards">
+            <article class="rl-plan">
+              <h3>Visitor</h3>
+              <div class="rl-price">Free</div>
+              <p class="rl-plan-tag">A first taste of the town.</p>
+              <ul>
+                <li>First hellos with everyone in town</li>
+                <li>2 free psychological audits</li>
+                <li>No card required</li>
+              </ul>
+              <a class="rl-btn rl-btn-ghost" href="#town">Start the trial</a>
+            </article>
+            <article class="rl-plan">
+              <h3>Community Member</h3>
+              <div class="rl-price">$7.99 <small>/mo</small></div>
+              <p class="rl-plan-tag">A light way in.</p>
+              <ul>
+                <li>4 free psychological audits</li>
+                <li>They remember what you tell them</li>
+              </ul>
+              <a class="rl-btn rl-btn-ghost" href="https://buy.stripe.com/6oUfZh1jradL0he4098AE00" target="_blank" rel="noopener">Get Starter</a>
+            </article>
+            <article class="rl-plan rl-plan-featured">
+              <span class="rl-plan-badge">Most popular</span>
+              <h3>Resident</h3>
+              <div class="rl-price">$14.99 <small>/mo</small></div>
+              <p class="rl-plan-tag">The full challenge, at your own pace.</p>
+              <ul>
+                <li>8 free psychological audits</li>
+                <li>They remember everything you tell them</li>
+              </ul>
+              <a class="rl-btn rl-btn-primary" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">Take the challenge</a>
+            </article>
+          </div>
+          <aside class="rl-checklist">
+            <ul>
+              <li>Free trial — no card required</li>
+              <li>All residents open to every tier</li>
+              <li>No pay-to-skip, ever</li>
+              <li>Psychological audits on every plan</li>
+              <li>Cancel anytime — secure Stripe checkout</li>
+            </ul>
+          </aside>
+        </div>
+        <a class="founders-coupon" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">
+          <p class="coupon-kicker">Founders Day</p>
+          <p class="coupon-offer">$7 off Resident every month for your first year</p>
+          <span class="coupon-code">FOUNDERS</span>
+          <p class="coupon-fine">Use the code at checkout. Then it's $14.99/mo — the doors stay the same either way.</p>
+        </a>
+        <p class="plans-note">Checkout is by Stripe. Use the same email as your account and access opens on the site, the app and Telegram.</p>
+      </div>
+    </section>
+
+    <section id="merch" class="merch">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">Town merch</p><h2>Wear the town.</h2><p>Limited runs, straight from God's Greek. Pick a size and check out securely through Shopify.</p></div>
+        <div class="merch-grid" id="merch-grid"><p class="merch-note">Loading the drop…</p></div>
+      </div>
+    </section>
+
+    <section id="wingman" class="wingman">
+      <div class="wrap">
+        <div class="section-head"><p class="eyebrow">Spread the word</p><h2>Become a <span class="sandalwood-text">Wingman</span>.</h2><p>Love God's Greek? Share your link and earn $4.99 for every Resident signup ($14.99/mo).</p></div>
+        <div class="extras">
+          <div class="extra"><h3>Your link, your money</h3><p>Every Resident signup through your personal link earns you $4.99. Free to join — sign up in seconds and get your link.</p><p style="margin-top:16px"><a class="button" id="wingman-cta" href="https://affitor.com/marketplace/wingman" target="_blank" rel="noopener">Get your referral link</a></p></div>
+          <div class="extra"><h3>How it counts</h3><p>Only paid tier checkouts through your link count — one per customer, so renewals never double-count. First purchase only. You get a 60-day window from click to checkout.</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="rl-footer">
+    <div class="wrap">
+      <div class="rl-footer-grid">
+        <div class="rl-footer-brand">
+          <a class="rl-brand" href="#top" aria-label="God's Companions home">
+            <img src="/assets/favicon-32.png" alt="LockedDoor.ai doorway emblem" width="30" height="30" />
+            <span>GOD'S GREEK</span>
+          </a>
+          <p>AI townspeople. Trust takes real days.<br />No pay-to-skip.</p>
+        </div>
+        <nav class="rl-footer-col" aria-label="Explore">
+          <h4>Explore</h4>
+          <a href="#town">Meet the residents</a>
+          <a href="#plans">Membership</a>
+          <a href="#merch">Merch</a>
+          <a href="town.html">Town guide</a>
+        </nav>
+        <nav class="rl-footer-col" aria-label="Account">
+          <h4>Account</h4>
+          <a href="#" id="footer-profile" hidden>Profile</a>
+          <a href="#" id="footer-auth">Sign in</a>
+          <a href="#top">Back to top ↑</a>
+        </nav>
+      </div>
+      <div class="rl-footer-bottom">
+        <span>© 2026 God's Companions · The people of God's Companions are AI characters. Conversations are fiction.</span>
+      </div>
+    </div>
+  </footer>
+
+
+  <div class="chat-backdrop" id="auth" role="dialog" aria-modal="true" aria-labelledby="auth-heading">
+    <div class="chat-panel auth-panel">
+      <button class="chat-close auth-close" id="auth-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="auth-heading">Sign in</h2>
+      <p class="auth-sub" id="auth-sub">Your trial and progress are tied to your account.</p>
+
+      <form id="login-form" autocomplete="on">
+        <input id="login-email" type="email" placeholder="Email" required autocomplete="email" />
+        <input id="login-password" type="password" placeholder="Password" required autocomplete="current-password" />
+        <button class="button" type="submit">Sign in</button>
+        <p class="auth-switch">New here? <a id="to-signup">Create an account</a></p>
+      </form>
+
+      <form id="signup-form" class="auth-hidden" autocomplete="on">
+        <input id="signup-name" type="text" placeholder="Display name" maxlength="40" required autocomplete="nickname" />
+        <input id="signup-email" type="email" placeholder="Email" required autocomplete="email" />
+        <input id="signup-password" type="password" placeholder="Password (8+ characters)" minlength="8" required autocomplete="new-password" />
+        <button class="button" type="submit">Create account</button>
+        <p class="auth-switch">Already have one? <a id="to-login">Sign in</a></p>
+      </form>
+
+      <div id="verify-pane" class="auth-hidden">
+        <p class="auth-sub">We sent a confirmation link to <strong id="verify-email"></strong>. Click it, then come back and sign in. The link expires in 24 hours.</p>
+        <button class="button dark" type="button" id="resend-btn">Resend email</button>
+        <p class="auth-switch"><a id="verify-to-login">Back to sign in</a></p>
+      </div>
+
+      <div id="google-signin-wrap">
+        <button class="button dark" type="button" id="google-signin">Continue with Google</button>
+        <p class="auth-sub" style="margin-top:8px">Google sign-in only &mdash; no passwords, ever.</p>
+      </div>
+      <div class="auth-msg" id="auth-msg" aria-live="polite"></div>
+    </div>
+  </div>
+  <div class="chat-backdrop" id="avatar-setup" role="dialog" aria-modal="true" aria-labelledby="avatar-setup-heading">
+    <div class="chat-panel auth-panel">
+      <h2 id="avatar-setup-heading">Who are you in God's Companions?</h2>
+      <p class="auth-sub">Describe your character &mdash; a grizzled fisherman, a retired ballerina, anything. We&rsquo;ll paint your portrait in the town&rsquo;s graphic-novel style. This is how the town sees you.</p>
+      <div id="avatar-create-step">
+        <textarea id="avatar-desc" rows="3" maxlength="300" placeholder="A few words is fine&hellip;"></textarea>
+        <button class="button" type="button" id="avatar-generate-btn">Paint my portrait</button>
+        <p class="auth-sub" style="text-align:center; margin: 2px 0;">or pick a face</p>
+        <div class="face-seg" id="avatar-face-seg">
+          <button type="button" data-g="all" class="active">All</button>
+          <button type="button" data-g="female">Girls</button>
+          <button type="button" data-g="male">Boys</button>
+        </div>
+        <div id="avatar-face-picker" class="face-picker"></div>
+        <input type="hidden" id="avatar-face-preset" value="" />
+        <button class="button dark" type="button" id="avatar-preset-btn">Use this face</button>
+        <p class="auth-switch"><a id="avatar-skip">Skip for now</a></p>
+      </div>
+      <div id="avatar-preview-step" class="auth-hidden">
+        <img id="avatar-preview-img" class="avatar-preview" alt="Your God's Companions portrait" />
+        <p class="avatar-disclosure">AI-generated image</p>
+        <button class="button" type="button" id="avatar-keep-btn">Looks right</button>
+        <button class="button dark" type="button" id="avatar-regen-btn">Regenerate</button>
+        <p class="auth-switch"><a id="avatar-skip-2">Skip for now</a></p>
+      </div>
+      <div class="auth-msg" id="avatar-msg" aria-live="polite"></div>
+    </div>
+  </div>
+  <!-- Companion Creation Modal -->
+  <div class="chat-backdrop" id="companion-modal" role="dialog" aria-modal="true" aria-labelledby="companion-modal-heading">
+    <div class="chat-panel auth-panel" style="max-width: 550px; max-height: 90vh; overflow-y: auto;">
+      <button class="chat-close auth-close" id="companion-modal-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="companion-modal-heading">Create Your Custom Companion</h2>
+      <p class="auth-sub">Design someone to talk to in God's Companions. This companion is strictly private to your account.</p>
+
+      <form id="companion-create-form" style="display: flex; flex-direction: column; gap: 12px; margin-top: 15px; text-align: left;">
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">First Name</label>
+          <input id="comp-name" type="text" placeholder="e.g. Maya" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Girl or Boy</label>
+          <select id="comp-gender" style="width: 100%; padding: 8px; border-radius: 8px; background: #1E211E; color: #E9E2D7; border: 1px solid rgba(138,125,107,.35);">
+            <option value="female" selected>Girl</option>
+            <option value="male">Boy</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Upload Photo (File)</label>
+          <input id="comp-photo-file" type="file" accept="image/*" style="width: 100%; padding: 8px; border-radius: 8px; background: #1E211E; color: #E9E2D7; border: 1px solid rgba(138,125,107,.35);" />
+        </div>
+        <div>
+          <label class="face-picker-label">Or pick a preset face</label>
+          <div id="comp-face-picker" class="face-picker"></div>
+          <input type="hidden" id="comp-face-preset" value="" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Looks & Appearance</label>
+          <input id="comp-looks" type="text" placeholder="e.g. Dark wavy hair, amber eyes, oversized wool sweater" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Personality & Vibe</label>
+          <textarea id="comp-personality" rows="2" placeholder="e.g. Witty, sarcastic humor, fiercely loyal, quiet observer" required style="width: 100%;"></textarea>
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Backstory</label>
+          <textarea id="comp-backstory" rows="2" placeholder="e.g. Grew up in a small coastal town, left her job to find peace" required style="width: 100%;"></textarea>
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Pet Peeves</label>
+          <input id="comp-peeves" type="text" placeholder="e.g. Being interrupted, fake promises, lukewarm coffee" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">What matters most (Non-negotiables)</label>
+          <input id="comp-nonneg" type="text" placeholder="e.g. Absolute honesty, keeping word, standing by loved ones" required style="width: 100%;" />
+        </div>
+        <div>
+          <label style="font-size: 0.85rem; color: var(--gold); display: block; margin-bottom: 4px;">Defense (How they act when untrusting)</label>
+          <input id="comp-defense" type="text" placeholder="e.g. Cool politeness, keeping conversations light and surface-level" required style="width: 100%;" />
+        </div>
+
+        <label class="preset-consent"><input type="checkbox" id="comp-consent" required /> <span>I understand this photo is a starting reference &mdash; the final portrait is AI-painted in the God's Companions style.</span></label>
+        <label class="preset-consent"><input type="checkbox" id="comp-attestation" required /> <span>I attest that the subject in the photo is at least 18 years old and I have full rights to use this image.</span></label>
+
+        <button class="button" type="submit" style="margin-top: 10px;">Create Companion</button>
+      </form>
+      <div class="auth-msg" id="companion-msg" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div class="chat-backdrop" id="profile" role="dialog" aria-modal="true" aria-labelledby="profile-heading">
+    <div class="chat-panel auth-panel">
+      <button class="chat-close auth-close" id="profile-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="profile-heading">Your profile</h2>
+      <div id="profile-avatar-wrap">
+        <img id="profile-avatar-img" class="avatar-preview" alt="Your God's Companions portrait" />
+        <p class="avatar-disclosure">AI-generated image</p>
+      </div>
+      <div id="profile-no-avatar">
+        <p class="auth-sub">You don&rsquo;t have a portrait yet. Describe your character and we&rsquo;ll paint it.</p>
+      </div>
+      <textarea id="profile-avatar-desc" rows="2" maxlength="300" placeholder="Describe your character&hellip;"></textarea>
+      <button class="button" type="button" id="profile-generate-btn">Paint my portrait</button>
+      <p class="auth-sub" style="text-align:center; margin: 8px 0 2px;">or pick a face</p>
+      <div class="face-seg" id="profile-face-seg">
+        <button type="button" data-g="all" class="active">All</button>
+        <button type="button" data-g="female">Girls</button>
+        <button type="button" data-g="male">Boys</button>
+      </div>
+      <div id="profile-face-picker" class="face-picker"></div>
+      <input type="hidden" id="profile-face-preset" value="" />
+      <button class="button dark" type="button" id="profile-preset-btn">Use this face</button>
+      <label class="contest-toggle"><input type="checkbox" id="contest-toggle" /> Enter my avatar in this month&rsquo;s contest</label>
+      <div class="auth-msg" id="profile-msg" aria-live="polite"></div>
+    </div>
+  </div>
+  <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
+    <div class="chat-panel">
+      <div class="chat-head">
+        <button class="chat-close" id="chat-close" type="button" aria-label="Back">&lsaquo;</button>
+        <img id="chat-avatar" src="" alt="" />
+        <div class="who">
+          <strong id="chat-name"></strong>
+          <div id="chat-title"></div>
+        </div>
+        <div id="companion-actions-bar" style="margin-left: auto; gap: 6px;" hidden>
+          <button class="button dark" id="comp-propose-btn" type="button" style="font-size: 0.75rem; padding: 4px 8px;" hidden>Propose Marriage</button>
+          <button class="button dark" id="comp-remember-btn" type="button" style="font-size: 0.75rem; padding: 4px 8px;" hidden>Remember Person</button>
+        </div>
+      </div>
+      <div class="chat-service">AI Message<small>Private &middot; AI companion</small></div>
+      <div class="chat-log" id="chat-log" aria-live="polite"></div>
+      <div class="chat-foot">
+        <div class="chat-form" id="chat-form">
+          <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
+          <button id="chat-audit-btn" type="button" aria-label="Run a psychological audit" title="Psychological audit" hidden>&#9998;</button>
+          <div class="field">
+            <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
+            <button class="button" id="chat-send" type="button" aria-label="Send">&uarr;</button>
+          </div>
+        </div>
+        <div class="chat-meta">
+          <span class="ai-note"></span>
+          <span class="ai-note" id="chat-remaining"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Website backend URL hosted on Railway.
+    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    window.SORORITY_HOUSE_API_URL = API_BASE_URL;
+
+    // Account auth: the backend issues a bearer token on login; chat/audit/image
+    // are keyed to that token (no more anonymous user_id trials).
+    const TOKEN_KEY = 'sorority_house_token';
+    // God's Companions: Google OAuth lands back here with #token=...
+    (function () {
+      const m = /#token=([A-Za-z0-9_\-]+)/.exec(location.hash || '');
+      if (m) {
+        try { localStorage.setItem(TOKEN_KEY, m[1]); } catch (_) {}
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    })();
+    function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+    function isLoggedIn() { return !!getToken(); }
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      const t = getToken();
+      if (t) h['Authorization'] = 'Bearer ' + t;
+      return h;
+    }
+
+    const authBox = document.getElementById('auth');
+    const loginForm = document.getElementById('login-form');
+    const signupForm = document.getElementById('signup-form');
+    const verifyPane = document.getElementById('verify-pane');
+    const authMsg = document.getElementById('auth-msg');
+    const authHeading = document.getElementById('auth-heading');
+    const authSub = document.getElementById('auth-sub');
+    let pendingVerifyEmail = '';
+
+    function setAuthMsg(text, kind) {
+      authMsg.textContent = text || '';
+      authMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+    function showAuthPane(which) {
+      loginForm.classList.toggle('auth-hidden', which !== 'login');
+      signupForm.classList.toggle('auth-hidden', which !== 'signup');
+      verifyPane.classList.toggle('auth-hidden', which !== 'verify');
+      authSub.classList.toggle('auth-hidden', which === 'verify');
+      authHeading.textContent = which === 'signup' ? 'Create your account'
+        : which === 'verify' ? 'Check your email' : 'Sign in';
+      setAuthMsg('');
+    }
+    function openAuth(which, msg) {
+      showAuthPane(which || 'login');
+      if (msg) setAuthMsg(msg);
+      authBox.classList.add('is-open');
+      const first = authBox.querySelector('form:not(.auth-hidden) input');
+      if (first) first.focus();
+    }
+    function closeAuth() { authBox.classList.remove('is-open'); }
+    function showVerifyPane(email, msg) {
+      pendingVerifyEmail = email;
+      document.getElementById('verify-email').textContent = email;
+      showAuthPane('verify');
+      if (msg) setAuthMsg(msg, 'ok');
+    }
+
+    function updateAuthLinks() {
+      const label = isLoggedIn() ? 'Sign out' : 'Sign in';
+      document.getElementById('nav-auth').textContent = label;
+      document.getElementById('footer-auth').textContent = label;
+    }
+    let picStatus = null;   // picture entitlements for the signed-in account (see /image)
+    function signOut() {
+      const t = getToken();
+      localStorage.removeItem(TOKEN_KEY);
+      picStatus = null;
+      updateAuthLinks(); closeChat(); refreshState();
+      if (t) fetch(API_BASE_URL + '/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } }).catch(() => {});
+    }
+    function onAuthLink(event) {
+      event.preventDefault();
+      if (isLoggedIn()) signOut(); else openAuth('login');
+    }
+    document.getElementById('nav-auth').addEventListener('click', onAuthLink);
+    document.getElementById('google-signin').addEventListener('click', () => {
+      const base = location.hostname === 'godscompanions.lockeddoor.ai'
+        ? 'https://godscompanions.lockeddoor.ai/'
+        : location.origin + '/app/';
+      location.href = API_BASE_URL + '/auth/google?next=' + encodeURIComponent(base);
+    });
+    document.getElementById('footer-auth').addEventListener('click', onAuthLink);
+    document.getElementById('auth-close').addEventListener('click', closeAuth);
+    authBox.addEventListener('click', (event) => { if (event.target === authBox) closeAuth(); });
+    document.getElementById('to-signup').addEventListener('click', () => showAuthPane('signup'));
+    document.getElementById('to-login').addEventListener('click', () => showAuthPane('login'));
+    document.getElementById('verify-to-login').addEventListener('click', () => showAuthPane('login'));
+    updateAuthLinks();
+
+    // ---------- Player avatars: private graphic-novel portrait per account ----------
+    const avatarSetupBox = document.getElementById('avatar-setup');
+    const profileBox = document.getElementById('profile');
+    const avatarMsg = document.getElementById('avatar-msg');
+    const profileMsg = document.getElementById('profile-msg');
+    let myAvatar = null;      // cached GET /avatar/me result
+    let pendingAvatarEmail = '';
+
+    function setAvatarMsg(text, kind) {
+      avatarMsg.textContent = text || '';
+      avatarMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+    function setProfileMsg(text, kind) {
+      profileMsg.textContent = text || '';
+      profileMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+    function avatarSkipped(email) {
+      try { return localStorage.getItem('avatar_skipped_' + email) === '1'; } catch (_) { return false; }
+    }
+    function markAvatarSkipped(email) {
+      try { localStorage.setItem('avatar_skipped_' + email, '1'); } catch (_) {}
+    }
+    function avatarDataUrl(a) {
+      return a && a.image_b64 ? 'data:' + (a.mime || 'image/png') + ';base64,' + a.image_b64 : '';
+    }
+    async function fetchMyAvatar() {
+      try {
+        const res = await fetch(API_BASE_URL + '/avatar/me', { headers: authHeaders() });
+        if (!res.ok) return null;
+        myAvatar = await res.json();
+        return myAvatar;
+      } catch (_) { return null; }
+    }
+    function refreshAvatarThumb() {
+      const thumb = document.getElementById('nav-avatar');
+      const url = avatarDataUrl(myAvatar);
+      if (url) { thumb.src = url; thumb.hidden = false; }
+      else thumb.hidden = true;
+    }
+    function openAvatarSetup() {
+      document.getElementById('avatar-create-step').classList.remove('auth-hidden');
+      document.getElementById('avatar-preview-step').classList.add('auth-hidden');
+      setAvatarMsg('');
+      avatarSetupBox.classList.add('is-open');
+      const d = document.getElementById('avatar-desc');
+      if (d) d.focus();
+    }
+    function closeAvatarSetup() { avatarSetupBox.classList.remove('is-open'); }
+    function skipAvatarSetup() {
+      if (pendingAvatarEmail) markAvatarSkipped(pendingAvatarEmail);
+      try { fetch(API_BASE_URL + '/avatar/skip', { method: 'POST', headers: authHeaders() }); } catch (_) {}
+      closeAvatarSetup();
+    }
+    // After any successful sign-in: one-time avatar prompt for users without one.
+    async function maybePromptAvatar(email) {
+      if (!isLoggedIn()) return;
+      pendingAvatarEmail = email || '';
+      if (pendingAvatarEmail && avatarSkipped(pendingAvatarEmail)) return;
+      const a = await fetchMyAvatar();
+      refreshAvatarThumb();
+      if (a && a.avatar_skipped) return;
+      if (a && !a.has_avatar) openAvatarSetup();
+    }
+    async function generateAvatar(desc, msgFn, btn) {
+      desc = (desc || '').trim();
+      if (!desc) { msgFn('Describe the character you want to be.', 'error'); return null; }
+      btn.disabled = true; msgFn('Painting your portrait\u2026');
+      try {
+        const res = await fetch(API_BASE_URL + '/avatar', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ description: desc }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.image_b64) {
+          msgFn((data && (data.detail || data.error)) || 'Could not paint it. Try again.', 'error');
+          return null;
+        }
+        myAvatar = { has_avatar: true, mime: data.mime, image_b64: data.image_b64, disclosure: data.disclosure,
+                       avatar_contest: !!(myAvatar && myAvatar.avatar_contest) };
+        refreshAvatarThumb();
+        msgFn('');
+        return myAvatar;
+      } catch (_) {
+        msgFn('Could not reach the house. Check your connection.', 'error');
+        return null;
+      } finally { btn.disabled = false; }
+    }
+    document.getElementById('avatar-generate-btn').addEventListener('click', async (event) => {
+      const a = await generateAvatar(document.getElementById('avatar-desc').value, setAvatarMsg, event.currentTarget);
+      if (a) {
+        document.getElementById('avatar-preview-img').src = avatarDataUrl(a);
+        document.getElementById('avatar-create-step').classList.add('auth-hidden');
+        document.getElementById('avatar-preview-step').classList.remove('auth-hidden');
+      }
+    });
+    document.getElementById('avatar-regen-btn').addEventListener('click', () => {
+      document.getElementById('avatar-preview-step').classList.add('auth-hidden');
+      document.getElementById('avatar-create-step').classList.remove('auth-hidden');
+      setAvatarMsg('');
+    });
+    document.getElementById('avatar-keep-btn').addEventListener('click', () => {
+      skipAvatarSetup();   // counts as done: they have an avatar now
+    });
+const PRESET_FACES = {
+  male: ["/assets/presets/m01.jpg","/assets/presets/m02.jpg","/assets/presets/m03.jpg","/assets/presets/m04.jpg","/assets/presets/m05.jpg","/assets/presets/m06.jpg","/assets/presets/m07.jpg","/assets/presets/m08.jpg","/assets/presets/m09.jpg","/assets/presets/m10.jpg","/assets/presets/m11.jpg","/assets/presets/m12.jpg","/assets/presets/m13.jpg","/assets/presets/m14.jpg","/assets/presets/m15.jpg","/assets/presets/m16.jpg","/assets/presets/m17.jpg","/assets/presets/m18.jpg","/assets/presets/m19.jpg","/assets/presets/m20.jpg","/assets/presets/m21.jpg","/assets/presets/m22.jpg","/assets/presets/m23.jpg","/assets/presets/m24.jpg","/assets/presets/m25.jpg","/assets/presets/m26.jpg","/assets/presets/m27.jpg","/assets/presets/m28.jpg","/assets/presets/m29.jpg","/assets/presets/m30.jpg","/assets/presets/m31.jpg","/assets/presets/m32.jpg","/assets/presets/m33.jpg","/assets/presets/m34.jpg","/assets/presets/m35.jpg","/assets/presets/m36.jpg","/assets/presets/m37.jpg","/assets/presets/m38.jpg"],
+  female: ["/assets/presets/f01.jpg","/assets/presets/f02.jpg","/assets/presets/f03.jpg","/assets/presets/f04.jpg","/assets/presets/f05.jpg","/assets/presets/f06.jpg","/assets/presets/f07.jpg","/assets/presets/f08.jpg","/assets/presets/f09.jpg","/assets/presets/f10.jpg","/assets/presets/f11.jpg","/assets/presets/f12.jpg","/assets/presets/f13.jpg","/assets/presets/f14.jpg","/assets/presets/f15.jpg","/assets/presets/f16.jpg","/assets/presets/f17.jpg","/assets/presets/f18.jpg","/assets/presets/f19.jpg","/assets/presets/f20.jpg","/assets/presets/f21.jpg","/assets/presets/f22.jpg","/assets/presets/f23.jpg","/assets/presets/f24.jpg","/assets/presets/f25.jpg","/assets/presets/f26.jpg","/assets/presets/f27.jpg","/assets/presets/f28.jpg","/assets/presets/f29.jpg","/assets/presets/f30.jpg","/assets/presets/f31.jpg","/assets/presets/f32.jpg","/assets/presets/f33.jpg","/assets/presets/f34.jpg","/assets/presets/f35.jpg","/assets/presets/f36.jpg","/assets/presets/f37.jpg","/assets/presets/f38.jpg","/assets/presets/f39.jpg","/assets/presets/f40.jpg","/assets/presets/f41.jpg","/assets/presets/f42.jpg","/assets/presets/f43.jpg","/assets/presets/f44.jpg","/assets/presets/f45.jpg","/assets/presets/f46.jpg","/assets/presets/f47.jpg","/assets/presets/f48.jpg","/assets/presets/f49.jpg","/assets/presets/f50.jpg","/assets/presets/f51.jpg","/assets/presets/f52.jpg","/assets/presets/f53.jpg","/assets/presets/f54.jpg","/assets/presets/f55.jpg","/assets/presets/f56.jpg","/assets/presets/f57.jpg","/assets/presets/f58.jpg","/assets/presets/f59.jpg","/assets/presets/f60.jpg","/assets/presets/f61.jpg","/assets/presets/f62.jpg","/assets/presets/f63.jpg","/assets/presets/f64.jpg","/assets/presets/f65.jpg","/assets/presets/f66.jpg","/assets/presets/f67.jpg","/assets/presets/f68.jpg","/assets/presets/f69.jpg","/assets/presets/f70.jpg","/assets/presets/f71.jpg","/assets/presets/f72.jpg","/assets/presets/f73.jpg","/assets/presets/f74.jpg","/assets/presets/f75.jpg","/assets/presets/f76.jpg","/assets/presets/f77.jpg","/assets/presets/f78.jpg","/assets/presets/f79.jpg","/assets/presets/h01.jpg","/assets/presets/h02.jpg","/assets/presets/h03.jpg","/assets/presets/h04.jpg","/assets/presets/h05.jpg","/assets/presets/h06.jpg","/assets/presets/h07.jpg","/assets/presets/h08.jpg","/assets/presets/h09.jpg","/assets/presets/h10.jpg","/assets/presets/h11.jpg","/assets/presets/h12.jpg","/assets/presets/h13.jpg","/assets/presets/h14.jpg","/assets/presets/h15.jpg","/assets/presets/h16.jpg","/assets/presets/h17.jpg","/assets/presets/h18.jpg","/assets/presets/h19.jpg","/assets/presets/h20.jpg","/assets/presets/h21.jpg","/assets/presets/h22.jpg","/assets/presets/h23.jpg","/assets/presets/h24.jpg","/assets/presets/h25.jpg","/assets/presets/h26.jpg","/assets/presets/h27.jpg","/assets/presets/h28.jpg","/assets/presets/h29.jpg","/assets/presets/h30.jpg"],
+};
+
+    renderFacePicker('avatar-face-picker', 'avatar-face-preset', 'all');
+    bindFaceSeg('avatar-face-seg', 'avatar-face-picker', 'avatar-face-preset');
+    document.getElementById('avatar-preset-btn').addEventListener('click', async (event) => {
+      const a = await setAvatarFromPreset(document.getElementById('avatar-face-preset').value, setAvatarMsg, event.currentTarget);
+      if (a) {
+        document.getElementById('avatar-preview-img').src = avatarDataUrl(a);
+        document.getElementById('avatar-create-step').classList.add('auth-hidden');
+        document.getElementById('avatar-preview-step').classList.remove('auth-hidden');
+      }
+    });
+    document.getElementById('avatar-skip').addEventListener('click', skipAvatarSetup);
+    document.getElementById('avatar-skip-2').addEventListener('click', skipAvatarSetup);
+    avatarSetupBox.addEventListener('click', (event) => { if (event.target === avatarSetupBox) skipAvatarSetup(); });
+
+    // ---------- Profile modal ----------
+    function openProfile() {
+      setProfileMsg('');
+      const a = myAvatar;
+      const has = !!(a && a.has_avatar);
+      document.getElementById('profile-avatar-wrap').classList.toggle('auth-hidden', !has);
+      document.getElementById('profile-no-avatar').classList.toggle('auth-hidden', has);
+      if (has) document.getElementById('profile-avatar-img').src = avatarDataUrl(a);
+      document.getElementById('contest-toggle').checked = !!(a && a.avatar_contest);
+      profileBox.classList.add('is-open');
+    }
+    function closeProfile() { profileBox.classList.remove('is-open'); }
+    document.getElementById('profile-close').addEventListener('click', closeProfile);
+    profileBox.addEventListener('click', (event) => { if (event.target === profileBox) closeProfile(); });
+    async function openProfileFresh() {
+      await fetchMyAvatar();
+      refreshAvatarThumb();
+      openProfile();
+    }
+    document.getElementById('nav-profile').addEventListener('click', (e) => { e.preventDefault(); openProfileFresh(); });
+    document.getElementById('footer-profile').addEventListener('click', (e) => { e.preventDefault(); openProfileFresh(); });
+    document.getElementById('profile-generate-btn').addEventListener('click', async (event) => {
+      const a = await generateAvatar(document.getElementById('profile-avatar-desc').value, setProfileMsg, event.currentTarget);
+      if (a) {
+        document.getElementById('profile-avatar-img').src = avatarDataUrl(a);
+        document.getElementById('profile-avatar-wrap').classList.remove('auth-hidden');
+        document.getElementById('profile-no-avatar').classList.add('auth-hidden');
+        setProfileMsg('Portrait updated.', 'ok');
+      }
+    });
+    renderFacePicker('profile-face-picker', 'profile-face-preset', 'all');
+    bindFaceSeg('profile-face-seg', 'profile-face-picker', 'profile-face-preset');
+    document.getElementById('profile-preset-btn').addEventListener('click', async (event) => {
+      const a = await setAvatarFromPreset(document.getElementById('profile-face-preset').value, setProfileMsg, event.currentTarget);
+      if (a) {
+        document.getElementById('profile-avatar-img').src = avatarDataUrl(a);
+        document.getElementById('profile-avatar-wrap').classList.remove('auth-hidden');
+        document.getElementById('profile-no-avatar').classList.add('auth-hidden');
+        setProfileMsg('Portrait updated.', 'ok');
+      }
+    });
+    document.getElementById('contest-toggle').addEventListener('change', async (event) => {
+      const enter = event.currentTarget.checked;
+      setProfileMsg(enter ? 'Entering you in this month\u2019s contest\u2026' : 'Leaving the contest\u2026');
+      try {
+        const res = await fetch(API_BASE_URL + '/avatar/contest', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ enter }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.ok) {
+          event.currentTarget.checked = !enter;
+          setProfileMsg((data && (data.detail || data.error)) || 'Could not update the contest entry.', 'error');
+        } else {
+          setProfileMsg(enter ? 'You\u2019re in this month\u2019s contest.' : 'Left the contest.', 'ok');
+        }
+      } catch (_) {
+        event.currentTarget.checked = !enter;
+        setProfileMsg('Could not reach the house. Check your connection.', 'error');
+      }
+    });
+
+    // Show/hide the profile entry points with the auth state.
+    const _updateAuthLinks = updateAuthLinks;
+    updateAuthLinks = function () {
+      _updateAuthLinks();
+      const logged = isLoggedIn();
+      document.getElementById('nav-profile').hidden = !logged;
+      document.getElementById('footer-profile').hidden = !logged;
+      if (!logged) { myAvatar = null; refreshAvatarThumb(); }
+    };
+    updateAuthLinks();
+
+    async function postJson(path, body, withAuth) {
+      const response = await fetch(API_BASE_URL + path, {
+        method: 'POST',
+        headers: withAuth ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => null);
+      return { response, data };
+    }
+    function affitorClickId() {
+      try { return (window.affitor && window.affitor.getClickId()) || ''; } catch (_) { return ''; }
+    }
+    function affitorSignup(userId, email) {
+      try {
+        if (window.affitor && userId) window.affitor.signup(userId, email).catch(() => {});
+      } catch (_) {}
+    }
+    function errText(data, fallback) {
+      if (!data) return fallback;
+      const d = data.detail || data.error;
+      if (Array.isArray(d)) return d.map(x => x.msg || String(x)).join('; ');
+      return d || fallback;
+    }
+
+    signupForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const btn = signupForm.querySelector('button[type=submit]');
+      btn.disabled = true; setAuthMsg('Creating your account…');
+      const email = document.getElementById('signup-email').value.trim();
+      try {
+        const { response, data } = await postJson('/auth/signup', {
+          email,
+          password: document.getElementById('signup-password').value,
+          display_name: document.getElementById('signup-name').value.trim(),
+          affitor_click_id: affitorClickId(),
+        });
+        if (response.ok && data) affitorSignup(data.user_id, email);
+        if (response.ok && data && data.needs_verification) {
+          showVerifyPane(data.email || email, data.email_sent === false
+            ? 'Account created, but the email could not be sent. Hit Resend.'
+            : 'Confirmation email sent.');
+        } else if (response.ok && data && data.token) {   // older backend: instant login
+          localStorage.setItem(TOKEN_KEY, data.token);
+          updateAuthLinks(); closeAuth(); refreshState();
+          maybePromptAvatar(email);
+        } else if (response.status === 409) {
+          setAuthMsg('That email already has an account. Sign in instead.', 'error');
+        } else {
+          setAuthMsg(errText(data, 'Could not create the account. Try again.'), 'error');
+        }
+      } catch (e) {
+        setAuthMsg('Could not reach the house. Check your connection.', 'error');
+      } finally { btn.disabled = false; }
+    });
+
+    loginForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const btn = loginForm.querySelector('button[type=submit]');
+      btn.disabled = true; setAuthMsg('Signing in…');
+      const email = document.getElementById('login-email').value.trim();
+      try {
+        const { response, data } = await postJson('/auth/login', {
+          email, password: document.getElementById('login-password').value,
+          affitor_click_id: affitorClickId(),
+        });
+        if (response.ok && data && data.token) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+          updateAuthLinks(); closeAuth(); refreshState();
+          if (currentGirl) addMessage('note', 'Signed in. Trust earned — go ahead.');
+          maybePromptAvatar(email);
+        } else if (response.status === 403 && String(errText(data, '')).startsWith('email_unverified')) {
+          showVerifyPane(email, 'Confirm your email first — check your inbox (and spam).');
+        } else if (response.status === 401) {
+          setAuthMsg('Wrong email or password.', 'error');
+        } else if (response.status === 429) {
+          setAuthMsg('Too many attempts. Wait a minute and try again.', 'error');
+        } else {
+          setAuthMsg(errText(data, 'Sign in failed. Try again.'), 'error');
+        }
+      } catch (e) {
+        setAuthMsg('Could not reach the house. Check your connection.', 'error');
+      } finally { btn.disabled = false; }
+    });
+
+    document.getElementById('resend-btn').addEventListener('click', async (event) => {
+      const btn = event.currentTarget;
+      if (!pendingVerifyEmail) return;
+      btn.disabled = true; setAuthMsg('Sending…');
+      try {
+        const { response, data } = await postJson('/auth/resend-verification', { email: pendingVerifyEmail });
+        if (response.ok) setAuthMsg('Sent. Check your inbox (and spam).', 'ok');
+        else if (response.status === 429) setAuthMsg('Please wait a minute before resending.', 'error');
+        else setAuthMsg(errText(data, 'Could not resend. Try again shortly.'), 'error');
+      } catch (e) {
+        setAuthMsg('Could not reach the house. Check your connection.', 'error');
+      } finally { setTimeout(() => { btn.disabled = false; }, 3000); }
+    });
+
+    // Back from the confirmation link (?verified=1) — land them on sign in.
+    if (new URLSearchParams(location.search).get('verified') === '1') {
+      history.replaceState(null, '', location.pathname);
+      openAuth('login', 'Email confirmed — sign in to start your trial.');
+    }
+
+    // Called when the API says the token is missing/expired.
+    function handleUnauthorized() {
+      abortStream();   // refreshState runs below, once the token is cleared
+      picStatus = null;
+      if (isLoggedIn()) { localStorage.removeItem(TOKEN_KEY); updateAuthLinks(); refreshState(); }
+      openAuth('login', 'Sign in to keep talking.');
+    }
+
+    const chat = document.getElementById('chat');
+    const chatLog = document.getElementById('chat-log');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const chatSend = document.getElementById('chat-send');
+    const chatRemaining = document.getElementById('chat-remaining');
+    const chatPhotoBtn = document.getElementById('chat-photo-btn');
+    const chatAuditBtn = document.getElementById('chat-audit-btn');
+    let currentGirl = null;
+    let auditStatus = null;   // free_audits_left / audit_credits / audit_price_usd from /state
+    let sending = false;
+
+    function addMessage(kind, text) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + kind;
+      el.textContent = text;
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return el;
+    }
+    // God's Companions paywall: the 1000-message monthly limit is never shown
+    // as a number — the user just gets the door to more.
+    const COMPANIONS_SUB_URL = 'https://buy.stripe.com/14A3co32zfVt3Lh0ZrdjO01';
+    function addPaywallNote() {
+      const el = document.createElement('div');
+      el.className = 'msg note';
+      el.appendChild(document.createTextNode("You've used this month's messages. "));
+      const a = document.createElement('a');
+      a.href = COMPANIONS_SUB_URL;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'Continue for $4.99/month \u2192';
+      el.appendChild(a);
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    // iMessage-style furniture: "Today 7:09 PM" stamps and a Read receipt under
+    // your latest bubble.
+    const timeFmt = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
+    function clockNow() { return timeFmt.format(new Date()); }
+    let lastStampAt = 0;
+    function addStamp(label, force) {
+      const now = Date.now();
+      if (!force && now - lastStampAt < 5 * 60 * 1000) return;
+      lastStampAt = now;
+      const el = document.createElement('div');
+      el.className = 'msg stamp';
+      const b = document.createElement('b');
+      b.textContent = label || 'Today';
+      el.append(b, ' ' + clockNow());
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    let receipt = null;
+    function markRead() {
+      if (receipt) receipt.remove();
+      const me = [...chatLog.querySelectorAll('.msg.me')].pop();
+      if (!me) return;
+      receipt = document.createElement('div');
+      receipt.className = 'msg receipt';
+      const b = document.createElement('b');
+      b.textContent = 'Read';
+      receipt.append(b, ' ' + clockNow());
+      me.after(receipt);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function addPhoto(mime, base64, caption) {
+      const figure = document.createElement('figure');
+      figure.className = 'chat-photo';
+      figure.style.margin = '0';
+      const img = document.createElement('img');
+      img.src = 'data:' + mime + ';base64,' + base64;
+      img.alt = caption;
+      const cap = document.createElement('figcaption');
+      cap.textContent = caption;
+      figure.append(img, cap);
+      chatLog.appendChild(figure);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    const HISTORY_SHOWN = 8;
+    async function loadHistory(girl) {
+      try {
+        const response = await fetch(API_BASE_URL + '/history?girl=' + encodeURIComponent(girl), { headers: authHeaders() });
+        if (response.status === 401) { handleUnauthorized(); return; }
+        if (!response.ok) return;
+        const data = await response.json();
+        if (currentGirl !== girl) return;
+        const recent = (data.messages || []).slice(-HISTORY_SHOWN);
+        if (!recent.length || chatLog.children.length > 1) return;
+        chatLog.innerHTML = '';
+        addMessage('note', 'Where you left off');
+        for (const m of recent) addMessage(m.sender === 'user' ? 'me' : 'her', m.message);
+        if (recent[recent.length - 1].sender === 'user') markRead();
+      } catch (_) { /* history is a nicety; the chat still works without it */ }
+    }
+
+    let lockedScrollY = 0;
+    function openChat(card) {
+      if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her.'); return; }
+      abortStreamAndResync();
+      currentCompanionId = null;
+      currentGirl = card.dataset.girl;
+      document.getElementById('chat-name').textContent = card.dataset.name;
+      document.getElementById('chat-title').textContent = card.dataset.title;
+      const avatar = document.getElementById('chat-avatar');
+      avatar.classList.remove('is-broken');
+      avatar.src = card.dataset.avatar;
+      avatar.alt = card.dataset.name;
+
+      const actionsBar = document.getElementById('companion-actions-bar');
+      const photoBtn = document.getElementById('chat-photo-btn');
+      const auditBtn = document.getElementById('chat-audit-btn');
+      if (actionsBar) actionsBar.hidden = true;
+      if (photoBtn) photoBtn.hidden = false;
+      if (auditBtn) auditBtn.hidden = false;
+
+      chatLog.innerHTML = '';
+      receipt = null;
+      lastStampAt = 0;
+      addMessage('note', 'Trust earned. Say hi.');
+      loadHistory(currentGirl).then(() => showSavedAudit(card.dataset.girl));
+      loadPictureStatus();
+      chat.classList.add('is-open');
+      lockedScrollY = window.scrollY;
+      document.body.classList.add('chat-locked');
+      appliedVvh = appliedTop = -1;
+      applyChatViewport();
+      chatInput.value = '';
+      growChatInput();
+      chatInput.focus();
+    }
+
+    function closeChat() {
+      abortStreamAndResync();
+      chat.classList.remove('is-open');
+      clearTimeout(fitTimer);
+      clearTimeout(settleTimer);
+      fitTimer = settleTimer = 0;
+      chat.style.transform = '';
+      chat.style.removeProperty('--vvh');
+      appliedVvh = appliedTop = -1;
+      if (document.body.classList.contains('chat-locked')) {
+        document.body.classList.remove('chat-locked');
+        window.scrollTo(0, lockedScrollY);
+      }
+      currentGirl = null;
+    }
+
+    // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
+    // viewport and may scroll the page. Size the panel to the visible area and pull it
+    // back up by however far the page was pushed, so nothing hides behind the keyboard.
+    // The keyboard animates for ~250ms and fires a burst of resize/scroll events; laying
+    // out on each one makes the panel visibly step through intermediate sizes. So every
+    // event only re-arms one timer, and the panel is written exactly once, after the
+    // viewport has been still for a moment, and only if the numbers actually changed.
+    const FIT_QUIET_MS = 120;
+    let fitTimer = 0;
+    let settleTimer = 0;
+    let appliedVvh = -1;
+    let appliedTop = -1;
+    const mobileChat = window.matchMedia('(max-width: 620px)');
+    function applyChatViewport() {
+      fitTimer = 0;
+      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      if (!mobileChat.matches) {
+        if (appliedVvh !== -1 || appliedTop !== -1) {
+          chat.style.transform = '';
+          chat.style.removeProperty('--vvh');
+          appliedVvh = appliedTop = -1;
+        }
+        return;
+      }
+      const vv = window.visualViewport;
+      const vvh = Math.round(vv.height);
+      const top = Math.round(vv.offsetTop);
+      if (vvh === appliedVvh && top === appliedTop) return;
+      const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+      appliedVvh = vvh;
+      appliedTop = top;
+      chat.style.setProperty('--vvh', `${vvh}px`);
+      chat.style.transform = top ? `translateY(${top}px)` : '';
+      if (window.scrollY) window.scrollTo(0, 0);
+      if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    function fitChatToViewport() {
+      if (!chat.classList.contains('is-open') || !window.visualViewport) return;
+      clearTimeout(fitTimer);
+      fitTimer = setTimeout(applyChatViewport, FIT_QUIET_MS);
+    }
+    // Safari sometimes fires no viewport event at all around focus/blur; one late
+    // fallback fit after the keyboard animation has certainly finished covers that.
+    // It is a no-op when the resize/scroll path already applied the same numbers.
+    function settleChatViewport() {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(fitChatToViewport, 500);
+    }
+    chatInput.addEventListener('focus', settleChatViewport);
+    chatInput.addEventListener('blur', settleChatViewport);
+
+    // Measure the text in an offscreen twin so the live textarea is only touched when
+    // its height really changes (resizing it mid-keystroke breaks iOS autocorrect).
+    const chatMirror = chatInput.cloneNode();
+    chatMirror.removeAttribute('id');
+    chatMirror.tabIndex = -1;
+    chatMirror.setAttribute('aria-hidden', 'true');
+    Object.assign(chatMirror.style, { position: 'absolute', visibility: 'hidden', height: 'auto',
+                                      top: '0', left: '-9999px', pointerEvents: 'none' });
+    chatInput.parentNode.appendChild(chatMirror);
+    function growChatInput(event) {
+      chatForm.classList.toggle('has-text', chatInput.value.trim().length > 0);
+      if (!(event && event.isComposing)) {
+        chatMirror.style.width = `${chatInput.offsetWidth}px`;
+        chatMirror.value = chatInput.value;
+        const want = Math.min(chatMirror.scrollHeight, 110);
+        if (Math.abs(want - chatInput.offsetHeight) > 1) chatInput.style.height = `${want}px`;
+      }
+      const pinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 8;
+      chat.style.setProperty('--foot-h', `${chatInput.closest('.chat-foot').offsetHeight}px`);
+      if (pinned) chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    chatInput.addEventListener('input', growChatInput);
+    chatInput.addEventListener('compositionend', growChatInput);
+    chatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        sendChatMessage();
+      }
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', fitChatToViewport);
+      window.visualViewport.addEventListener('scroll', fitChatToViewport);
+    }
+
+    // Product law: every resident is immediately accessible — doors are never
+    // locked. Trust is earned emotionally through real days and conduct, not
+    // via an access lock. This just stamps every card open.
+    function setDoors() {
+      document.querySelectorAll('.door-card[data-girl]').forEach((card) => {
+        card.classList.add('open');
+        card.classList.remove('locked');
+        const status = card.querySelector('.door-status');
+        if (status) status.textContent = 'Trust earned';
+      });
+    }
+
+    // The roster is data now: GET /roster is the list of doors, so a sister added
+    // from the admin console shows up on a reload with no deploy. The markup in
+    // the page is only a fallback for when the API cannot be reached.
+    const doorsGrid = document.getElementById('doors-grid');
+    function escapeHtml(text) {
+      return String(text == null ? '' : text).replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+    const ROMAN_SLUGS = new Set(['harlan','ivo','lila','nell','sable','bram','odette','fenwick','maren','tobias','prudence','anselm','delia','imogen','rufus','hazel']);
+    function renderRoster(girls) {
+      doorsGrid.innerHTML = girls.map((g) => {
+        const name = escapeHtml(g.name || g.girl);
+        let rawAvatar = g.avatar_url || '';
+        if (rawAvatar && !/^(https?:|data:|\/)/.test(rawAvatar)) rawAvatar = '/' + rawAvatar;
+        const avatar = escapeHtml(rawAvatar);
+        const isRoman = ROMAN_SLUGS.has(g.girl);
+        const divider = (isRoman && g === girls.find((x) => ROMAN_SLUGS.has(x.girl)))
+          ? '<div class="roster-divider">God\u2019s Town</div>' : '';
+        const card = '<article id="door-' + escapeHtml(g.girl) + '" class="door-card open" data-girl="' + escapeHtml(g.girl) + '"' +
+          ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
+          ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
+          ' data-avatar="' + avatar + '">' +
+          '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
+          (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
+          '<div class="door-copy">' +
+          '<div class="door-name">' + name + '</div>' +
+          '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
+          '<p>' + escapeHtml(g.blurb) + '</p>' +
+          '<span class="door-cta">Talk to ' + name + ' \u2192</span></div>' +
+          '</article>';
+        return divider + card;
+      }).join('');
+    }
+    // A portrait that fails to load leaves the styled door art behind it instead of
+    // the browser's broken-image box.
+    document.addEventListener('error', (event) => {
+      const img = event.target;
+      if (img instanceof HTMLImageElement) img.classList.add('is-broken');
+    }, true);
+    document.addEventListener('load', (event) => {
+      const img = event.target;
+      if (img instanceof HTMLImageElement) img.classList.remove('is-broken');
+    }, true);
+    async function loadCompanions() {
+      const container = document.getElementById('companion-card-container');
+      if (!container) return;
+      const headers = authHeaders();
+      try {
+        const res = await fetch(API_BASE_URL + '/companions', { headers });
+        if (!res.ok) {
+          container.innerHTML = '';
+          return;
+        }
+        const data = await res.json();
+        const comps = data.companions || [];
+        const maxSlots = data.max_slots || 1;
+
+        let html = '';
+
+        if (comps.length > 0) {
+          comps.forEach(c => {
+            const name = escapeHtml(c.first_name);
+            const title = (c.is_married ? 'Married / Spouse' : 'Your Custom Companion') + (c.gender === 'male' ? ' \u00B7 Him' : ' \u00B7 Her');
+            const avatar = c.portrait_url ? (c.portrait_url.startsWith('data:') ? c.portrait_url : 'data:image/png;base64,' + c.portrait_url) : '';
+
+            html += '<article class="door-card open companion-card" style="border: 2px solid var(--gold); background: rgba(30, 33, 30, .96); margin-bottom: 20px;">' +
+              '<div class="door-art" data-initial="' + escapeHtml(name.charAt(0).toUpperCase()) + '">' +
+              (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
+              '<div class="door-copy">' +
+              '<div class="door-status" style="background: var(--gold); color: #151715; font-weight: bold; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; display: inline-block; margin-bottom: 6px;">YOUR COMPANION &middot; YOURS</div>' +
+              '<div class="door-name">' + name + '</div>' +
+              '<div class="door-title" style="color: var(--gold);">' + escapeHtml(title) + '</div>' +
+              '<p>' + escapeHtml(c.personality) + '</p>' +
+              '<button class="button door-cta open-companion-chat-btn" type="button" data-companion-id="' + c.id + '">Talk to ' + name + '</button>' +
+              '</div></article>';
+          });
+        }
+
+        if (comps.length < maxSlots) {
+          html += '<div style="background: rgba(30, 33, 30, .82); border: 1px dashed var(--gold); border-radius: 12px; padding: 20px; text-align: center;">' +
+            '<h3 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 6px;">Create a Custom Companion</h3>' +
+            '<p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 12px;">Build your own private companion with custom traits and full-ratchet trust evolution.</p>' +
+            '<button class="button" type="button" id="open-companion-create-btn">Create Companion (' + comps.length + '/' + maxSlots + ' slots used)</button>' +
+            '</div>';
+        } else {
+          html += '<div style="background: rgba(30, 33, 30, .82); border: 1px solid rgba(138, 125, 107, 0.25); border-radius: 12px; padding: 15px; text-align: center;">' +
+            '<p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 8px;">Want another companion? Unlock an extra slot for $4.99 (one-time).</p>' +
+            '<button class="button dark" type="button" id="buy-companion-slot-btn">Purchase Extra Slot ($4.99)</button>' +
+            '</div>';
+        }
+
+        container.innerHTML = html;
+        bindCompanionEvents();
+      } catch (e) {
+        container.innerHTML = '';
+      }
+    }
+
+    function bindCompanionEvents() {
+      const createBtn = document.getElementById('open-companion-create-btn');
+      if (createBtn) {
+        createBtn.addEventListener('click', () => {
+          setCompanionMsg('');
+          document.getElementById('companion-modal').classList.add('is-open');
+        });
+      }
+      const buySlotBtn = document.getElementById('buy-companion-slot-btn');
+      if (buySlotBtn) {
+        buySlotBtn.addEventListener('click', async () => {
+          if (!getToken()) {
+            openAuth('login');
+            return;
+          }
+          try {
+            const res = await fetch(API_BASE_URL + '/companions/purchase-slot', {
+              method: 'POST',
+              headers: authHeaders()
+            });
+            const data = await res.json();
+            if (res.ok) {
+              alert(data.message || 'Extra slot purchased!');
+              loadCompanions();
+            } else {
+              alert(data.detail || 'Could not purchase slot');
+            }
+          } catch (err) { alert('Purchase failed'); }
+        });
+      }
+    }
+
+    async function loadRoster() {
+      try {
+        const response = await fetch(API_BASE_URL + '/roster');
+        const data = await response.json().catch(() => null);
+        // An empty house is an answer too: retiring everyone must clear the doors,
+        // not fall back to the seven in the markup.
+        if (!response.ok || !data || !Array.isArray(data.girls)) return;
+        renderRoster(data.girls);
+        loadCompanions();
+        scrollToDoorHash();
+      } catch (error) { /* keep the doors already in the page */ }
+    }
+
+    // ---------- Preset face picker (artist grids, cropped) ----------
+    function faceList(gender) {
+      if (gender === 'male') return PRESET_FACES.male;
+      if (gender === 'female') return PRESET_FACES.female;
+      return PRESET_FACES.female.concat(PRESET_FACES.male);
+    }
+    function renderFacePicker(pickerId, hiddenId, gender) {
+      const picker = document.getElementById(pickerId);
+      const hidden = document.getElementById(hiddenId);
+      if (!picker || !hidden) return;
+      picker.innerHTML = '';
+      hidden.value = '';
+      faceList(gender).forEach((src) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'face-pick';
+        const img = document.createElement('img');
+        img.src = src; img.alt = 'Preset face'; img.loading = 'lazy';
+        b.appendChild(img);
+        b.addEventListener('click', () => {
+          picker.querySelectorAll('.face-pick').forEach((el) => el.classList.remove('selected'));
+          b.classList.add('selected');
+          hidden.value = src;
+        });
+        picker.appendChild(b);
+      });
+    }
+    function authHeadersNoCT() {
+      const t = getToken();
+      return t ? { 'Authorization': 'Bearer ' + t } : {};
+    }
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    }
+    async function setAvatarFromPreset(presetPath, msgFn, btn) {
+      if (!presetPath) { msgFn('Pick a face first.', 'error'); return null; }
+      btn.disabled = true; msgFn('Painting your portrait\u2026');
+      try {
+        const blob = await (await fetch(presetPath)).blob();
+        const dataUrl = await blobToDataUrl(blob);
+        const res = await fetch(API_BASE_URL + '/avatar/preset', {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ image_b64: dataUrl, mime: blob.type || 'image/jpeg' }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.image_b64) {
+          msgFn((data && (data.detail || data.error)) || 'Could not paint it. Try again.', 'error');
+          return null;
+        }
+        myAvatar = { has_avatar: true, mime: data.mime, image_b64: data.image_b64, disclosure: data.disclosure,
+                     avatar_contest: !!(myAvatar && myAvatar.avatar_contest) };
+        refreshAvatarThumb();
+        msgFn('');
+        return myAvatar;
+      } catch (_) {
+        msgFn('Could not reach the house. Check your connection.', 'error');
+        return null;
+      } finally { btn.disabled = false; }
+    }
+    function bindFaceSeg(segId, pickerId, hiddenId) {
+      const seg = document.getElementById(segId);
+      if (!seg) return;
+      seg.addEventListener('click', (e) => {
+        const b = e.target.closest('button'); if (!b) return;
+        seg.querySelectorAll('button').forEach((el) => el.classList.remove('active'));
+        b.classList.add('active');
+        renderFacePicker(pickerId, hiddenId, b.dataset.g);
+      });
+    }
+
+    // Companion Creation Form Submission
+    const companionForm = document.getElementById('companion-create-form');
+    const companionModal = document.getElementById('companion-modal');
+    const companionModalClose = document.getElementById('companion-modal-close');
+    const companionMsg = document.getElementById('companion-msg');
+
+    if (companionModalClose) {
+      companionModalClose.addEventListener('click', () => {
+        companionModal.classList.remove('is-open');
+      });
+    }
+    if (companionModal) {
+      companionModal.addEventListener('click', (e) => {
+        if (e.target === companionModal) companionModal.classList.remove('is-open');
+      });
+    }
+
+    function setCompanionMsg(text, kind) {
+      if (!companionMsg) return;
+      companionMsg.textContent = text || '';
+      companionMsg.className = 'auth-msg' + (kind ? ' ' + kind : '');
+    }
+
+    if (companionForm) {
+      const compGender = document.getElementById('comp-gender');
+      renderFacePicker('comp-face-picker', 'comp-face-preset', compGender.value);
+      compGender.addEventListener('change', () => {
+        renderFacePicker('comp-face-picker', 'comp-face-preset', compGender.value);
+      });
+      companionForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!getToken()) {
+          openAuth('login');
+          return;
+        }
+        const fileInput = document.getElementById('comp-photo-file');
+        const preset = document.getElementById('comp-face-preset').value;
+        const photoFile = (fileInput && fileInput.files && fileInput.files[0]) ? fileInput.files[0] : null;
+
+        if (!photoFile && !preset) {
+          setCompanionMsg('Please upload a photo or pick a preset face.', 'error');
+          return;
+        }
+        if (!document.getElementById('comp-consent').checked) {
+          setCompanionMsg('Please confirm the portrait note to continue.', 'error');
+          return;
+        }
+        if (!document.getElementById('comp-attestation').checked) {
+          setCompanionMsg('Please confirm the 18+ age attestation to continue.', 'error');
+          return;
+        }
+        setCompanionMsg('Creating companion...');
+
+        try {
+          const fd = new FormData();
+          fd.append('first_name', document.getElementById('comp-name').value.trim());
+          fd.append('gender', compGender.value);
+          fd.append('looks', document.getElementById('comp-looks').value.trim());
+          fd.append('personality', document.getElementById('comp-personality').value.trim());
+          fd.append('backstory', document.getElementById('comp-backstory').value.trim());
+          fd.append('pet_peeves', document.getElementById('comp-peeves').value.trim());
+          fd.append('non_negotiables', document.getElementById('comp-nonneg').value.trim());
+          fd.append('defense', document.getElementById('comp-defense').value.trim());
+          fd.append('consent', 'true');
+          fd.append('attestation', 'true');
+
+          if (photoFile) {
+            fd.append('photo', photoFile, photoFile.name || 'uploaded-photo.jpg');
+          } else {
+            const photoBlob = await (await fetch(preset)).blob();
+            fd.append('photo', photoBlob, 'preset-face.jpg');
+          }
+
+          const res = await fetch(API_BASE_URL + '/companions/create', {
+            method: 'POST',
+            headers: authHeadersNoCT(),
+            body: fd
+          });
+          const data = await res.json();
+          if (res.ok) {
+            setCompanionMsg('Companion created successfully!', 'ok');
+            companionForm.reset();
+            if (fileInput) fileInput.value = '';
+            renderFacePicker('comp-face-picker', 'comp-face-preset', compGender.value);
+            setTimeout(() => {
+              companionModal.classList.remove('is-open');
+              setCompanionMsg('');
+              loadCompanions();
+            }, 1000);
+          } else {
+            setCompanionMsg(errText(data, 'Could not create companion.'), 'error');
+          }
+        } catch (err) {
+          setCompanionMsg('Creation failed. Please try again.', 'error');
+        }
+      });
+    }
+
+    // Deep links from the area pages (index.html#door-<girl>): the roster
+    // renders after the fetch, so scroll once the cards exist.
+    function scrollToDoorHash() {
+      const m = /^#door-([a-z]+)$/.exec(location.hash || '');
+      if (!m) return;
+      const card = document.getElementById('door-' + m[1]);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scrollToDoorHash);
+    } else {
+      scrollToDoorHash();
+    }
+    // Whoever last wrote the allowance owns it: every send, abort or state read
+    // takes the next turn, and a slower answer for an older turn is dropped
+    // rather than replacing a newer count.
+    let turnSeq = 0;
+    function showRemaining(n) {
+      if (typeof n === 'number') chatRemaining.textContent = n + ' messages left';
+    }
+    function shownRemaining() {
+      const found = /^(\d+)/.exec(chatRemaining.textContent);
+      return found ? parseInt(found[1], 10) : null;
+    }
+
+    let stateSeq = 0;
+    async function refreshState() {
+      const seq = ++stateSeq;
+      turnSeq++;
+      setDoors(); chatRemaining.textContent = '';
+      if (!isLoggedIn()) return;
+      try {
+        const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
+        if (seq !== stateSeq) return;   // a newer sign-in/out happened; drop this response
+        if (response.status === 401) { handleUnauthorized(); return; }
+        const data = await response.json().catch(() => null);
+        if (seq !== stateSeq || !response.ok || !data || !data.girls) return;
+        setDoors();
+        showRemaining(data.remaining);
+        auditStatus = { free_audits_left: data.free_audits_left, audit_credits: data.audit_credits, audit_price_usd: data.audit_price_usd };
+      } catch (error) { /* keep whatever is shown */ }
+    }
+    let currentCompanionId = null;
+
+    function updateCompanionActionBar(milestone, isMarried) {
+      const actionsBar = document.getElementById('companion-actions-bar');
+      const proposeBtn = document.getElementById('comp-propose-btn');
+      const rememberBtn = document.getElementById('comp-remember-btn');
+      if (!actionsBar) return;
+
+      const ms = (typeof milestone === 'number') ? milestone : 0;
+      if (proposeBtn) {
+        proposeBtn.hidden = (ms < 4 || !!isMarried);
+      }
+      if (rememberBtn) {
+        rememberBtn.hidden = (ms < 5);
+      }
+
+      const showPropose = proposeBtn && !proposeBtn.hidden;
+      const showRemember = rememberBtn && !rememberBtn.hidden;
+      actionsBar.hidden = !showPropose && !showRemember;
+    }
+
+    // Delegated so cards rendered from /roster are clickable too.
+    doorsGrid.addEventListener('click', (event) => {
+      const card = event.target.closest('.door-card[data-girl]');
+      if (card) openChat(card);
+    });
+
+    const companionContainer = document.getElementById('companion-card-container');
+    if (companionContainer) {
+      companionContainer.addEventListener('click', (event) => {
+        const btn = event.target.closest('.open-companion-chat-btn');
+        if (btn) {
+          const compId = btn.dataset.companionId;
+          if (compId) openCompanionChat(parseInt(compId, 10));
+        }
+      });
+    }
+
+    async function openCompanionChat(companionId) {
+      if (!isLoggedIn()) { openAuth('signup', 'Create a free account to talk to your companion.'); return; }
+      abortStreamAndResync();
+      currentGirl = null;
+      currentCompanionId = companionId;
+
+      const headers = authHeaders();
+      try {
+        const res = await fetch(API_BASE_URL + '/companions/' + companionId, { headers });
+        if (!res.ok) { alert('Could not load companion'); return; }
+        const data = await res.json();
+        const comp = data.companion;
+
+        // HOME header view if married
+        const playerDisplayName = 'Player';
+        const titleText = comp.is_married ? ('HOME: ' + playerDisplayName + ' & ' + comp.first_name) : 'Your Custom Companion';
+        document.getElementById('chat-name').textContent = comp.first_name;
+        document.getElementById('chat-title').textContent = titleText;
+
+        const avatar = document.getElementById('chat-avatar');
+        avatar.classList.remove('is-broken');
+        avatar.src = comp.portrait_url ? (comp.portrait_url.startsWith('data:') ? comp.portrait_url : 'data:image/png;base64,' + comp.portrait_url) : '';
+        avatar.alt = comp.first_name;
+
+        // Action buttons
+        const actionsBar = document.getElementById('companion-actions-bar');
+        const proposeBtn = document.getElementById('comp-propose-btn');
+        const rememberBtn = document.getElementById('comp-remember-btn');
+        const photoBtn = document.getElementById('chat-photo-btn');
+        const auditBtn = document.getElementById('chat-audit-btn');
+
+        if (photoBtn) photoBtn.hidden = false;
+        if (auditBtn) auditBtn.hidden = false;
+
+
+        updateCompanionActionBar(comp.milestone, comp.is_married);
+
+        if (proposeBtn) {
+          proposeBtn.onclick = async () => {
+            if (!confirm('Propose marriage to ' + comp.first_name + '?')) return;
+            try {
+              const pRes = await fetch(API_BASE_URL + '/companions/' + companionId + '/propose', { method: 'POST', headers: authHeaders() });
+              const pData = await pRes.json();
+              if (pRes.ok) {
+                alert(pData.message);
+                openCompanionChat(companionId);
+              } else alert(pData.detail || 'Proposal failed');
+            } catch (err) { alert('Failed to propose'); }
+          };
+        }
+
+        if (rememberBtn) {
+          rememberBtn.onclick = async () => {
+            const name = prompt('Enter a person\'s name for ' + comp.first_name + ' to remember (e.g. Matt):');
+            if (!name) return;
+            const relation = prompt('Enter their relation to you (e.g. my best friend):');
+            if (!relation) return;
+            try {
+              const rRes = await fetch(API_BASE_URL + '/companions/' + companionId + '/remember', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ name, relation })
+              });
+              const rData = await rRes.json();
+              if (rRes.ok) alert(comp.first_name + ' will now remember ' + name + ' (' + relation + ')!');
+              else alert(rData.detail || 'Could not save memory');
+            } catch (err) { alert('Failed to save memory'); }
+          };
+        }
+
+        chatLog.innerHTML = '';
+        receipt = null;
+        lastStampAt = 0;
+        addMessage('note', 'Companion chat initialized. Say hi.');
+        loadPictureStatus();
+
+        chat.classList.add('is-open');
+        lockedScrollY = window.scrollY;
+        document.body.classList.add('chat-locked');
+        appliedVvh = appliedTop = -1;
+        applyChatViewport();
+        chatInput.value = '';
+        growChatInput();
+        chatInput.focus();
+      } catch (e) {
+        alert('Could not open companion chat');
+      }
+    }
+    loadRoster().then(refreshState);
+    document.getElementById('chat-close').addEventListener('click', closeChat);
+    chat.addEventListener('click', (event) => { if (event.target === chat) closeChat(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeChat(); closeAuth(); } });
+
+    // Pictures: paid tiers start with a free allotment; visitors have 0 by design
+    // (signup ploy). Packs add credits. The + button is always there; /image is
+    // checked each time a chat opens.
+    chatPhotoBtn.hidden = false;
+    chatAuditBtn.hidden = false;
+    async function loadPictureStatus() {
+      if (!isLoggedIn()) return;
+      const token = getToken();
+      try {
+        const r = await fetch(API_BASE_URL + '/image', { headers: authHeaders() });
+        if (r.ok && getToken() === token) picStatus = await r.json();
+      } catch (_) {}
+    }
+    let picSheet = null;
+    function closePicSheet() { if (picSheet) { picSheet.remove(); picSheet = null; } }
+    function openPicSheet() {
+      closePicSheet();
+      const s = picStatus || {};
+      const available = (s.available || 0);
+      picSheet = document.createElement('div');
+      picSheet.className = 'pic-sheet';
+      const h = document.createElement('h4');
+      const compName = currentCompanionId ? document.getElementById('chat-name').textContent : null;
+      const who = compName || 'her';
+      h.textContent = available > 0 ? `Ask ${who} for a picture (${available} ready)` : `Ask ${who} for a picture`;
+      const p = document.createElement('p');
+      const packSize = s.pack_size || 5, price = s.pack_price || '$0.99';
+      let outOf;
+      if (s.next_in) outOf = `You get ${s.free_per} more free every ${s.every} messages — ${s.next_in} to go. Or grab a pack of ${packSize} for ${price}.`;
+      else if (s.free_start) outOf = `You've used your ${s.free_start} free pictures. Grab a pack of ${packSize} for ${price} to keep them coming.`;
+      else outOf = `The visitor tier doesn't include pictures. Paid accounts start with a free allotment, or grab a pack of ${packSize} for ${price}.`;
+      // No status yet (offline, or /image not loaded): don't claim she's out.
+      p.textContent = (!picStatus || available > 0)
+        ? (compName ? `${compName} picks the moment. Same style as their portrait.` : 'She picks the moment. Same girl, same style as her.')
+        : outOf;
+      const row = document.createElement('div');
+      row.className = 'row';
+      const ask = document.createElement('button');
+      ask.type = 'button'; ask.className = 'button'; ask.textContent = 'Request picture';
+      ask.addEventListener('click', () => {
+        closePicSheet();
+        if (!picStatus || available > 0) { requestPicture(); return; }
+        addMessage('note', s.next_in
+          ? `She'll send one after ${s.next_in} more message${s.next_in === 1 ? '' : 's'}.`
+          : (s.free_start
+              ? `You're out of pictures. Grab a pack of ${packSize} for more.`
+              : `The visitor tier doesn't include pictures. Grab a pack of ${packSize} for ${price}, or join a paid membership for a free allotment.`));
+        loadPictureStatus();
+      });
+      const pack = document.createElement('button');
+      pack.type = 'button'; pack.className = 'button ghost';
+      pack.textContent = `${packSize} more · ${price}`;
+      pack.disabled = !(s.pack_ready && s.pack_ref);
+      if (pack.disabled) pack.title = 'Checkout coming soon';
+      pack.addEventListener('click', () => buyPicturePack(s, pack));
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
+      cancel.addEventListener('click', closePicSheet);
+      row.append(ask, pack, cancel);
+      picSheet.append(h, p, row);
+      chatLog.appendChild(picSheet);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    chatPhotoBtn.addEventListener('click', () => {
+      if ((!currentGirl && !currentCompanionId) || chatPhotoBtn.disabled) return;
+      closeAuditSheet();
+      if (picSheet) { closePicSheet(); return; }
+      openPicSheet();
+    });
+
+    // Psychological audit: confirm + price first, then POST /audit and render the
+    // real report (no optimistic render - the report is what was paid for).
+    let auditSheet = null;
+    function closeAuditSheet() { if (auditSheet) { auditSheet.remove(); auditSheet = null; } }
+    function auditPriceLine() {
+      const s = auditStatus;
+      if (!s) return 'Runs against your free monthly allowance first, then bought credits.';
+      const price = typeof s.audit_price_usd === 'number' ? '$' + s.audit_price_usd.toFixed(2) : '$0.99';
+      const free = s.free_audits_left || 0, paid = s.audit_credits || 0;
+      if (free > 0) return `Free - ${free} free audit${free === 1 ? '' : 's'} left this month.`;
+      if (paid > 0) return `Uses 1 credit - ${paid} credit${paid === 1 ? '' : 's'} left.`;
+      return `${price} per audit. You have no free audits or credits left.`;
+    }
+    function openAuditSheet() {
+      closeAuditSheet();
+      auditSheet = document.createElement('div');
+      auditSheet.className = 'pic-sheet';
+      const h = document.createElement('h4');
+      h.textContent = 'Psychological audit';
+      const p = document.createElement('p');
+      p.textContent = 'How she feels about you, what is holding her back, and how long until she trusts you. ' + auditPriceLine();
+      const row = document.createElement('div');
+      row.className = 'row';
+      const run = document.createElement('button');
+      run.type = 'button'; run.className = 'button'; run.textContent = 'Run audit';
+      run.addEventListener('click', () => { closeAuditSheet(); requestAudit(); });
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.className = 'button ghost'; cancel.textContent = 'Not now';
+      cancel.addEventListener('click', closeAuditSheet);
+      row.append(run, cancel);
+      auditSheet.append(h, p, row);
+      chatLog.appendChild(auditSheet);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    chatAuditBtn.addEventListener('click', () => {
+      if (currentCompanionId) {
+        requestCompanionAudit(currentCompanionId);
+        return;
+      }
+      if (!currentGirl || chatAuditBtn.disabled) return;
+      closePicSheet();
+      if (auditSheet && auditSheet.isConnected) { closeAuditSheet(); return; }
+      openAuditSheet();
+    });
+
+    async function requestCompanionAudit(companionId) {
+      if (chatAuditBtn.disabled) return;
+      chatAuditBtn.disabled = true;
+      const pending = addMessage('typing', 'compiling psychological audit…');
+      try {
+        const response = await fetch(API_BASE_URL + '/companions/' + companionId + '/audit', {
+          method: 'POST',
+          headers: authHeaders(),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        if (response.ok && data && data.report) {
+          addMessage('audit', data.report);
+        } else {
+          addMessage('error', (data && (data.error || data.detail)) || 'Could not compile audit right now.');
+        }
+      } catch (err) {
+        pending.remove();
+        addMessage('error', 'Could not reach the backend. Check your connection.');
+      } finally {
+        chatAuditBtn.disabled = false;
+      }
+    }
+    // A report is paid for and delivered once, so a finished audit is kept per girl
+    // (survives closing her room mid-request and a reload) until it has been shown.
+    // Keyed to the signed-in session so another account on this browser cannot read it.
+    function savedAuditKey(girl, token) { return 'sh-audit:' + (token || getToken()).slice(-24) + ':' + girl; }
+    function saveAudit(girl, token, text) {
+      try { localStorage.setItem(savedAuditKey(girl, token), text); } catch (_) {}
+    }
+    function showSavedAudit(girl) {
+      if (!girl || currentGirl !== girl) return;
+      let text = null;
+      try { text = localStorage.getItem(savedAuditKey(girl)); } catch (_) {}
+      if (!text) return;
+      addMessage('note', 'Your audit came back while you were away');
+      addMessage('audit', text);
+      try { localStorage.removeItem(savedAuditKey(girl)); } catch (_) {}
+    }
+    async function requestAudit() {
+      if (!currentGirl || chatAuditBtn.disabled) return;
+      chatAuditBtn.disabled = true;
+      const girl = currentGirl, token = getToken();
+      const pending = addMessage('typing', 'compiling your audit…');
+      try {
+        const response = await fetch(API_BASE_URL + '/audit', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ girl }),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        const delivered = response.ok && data && data.ok !== false && data.audit;
+        if (delivered && auditStatus) {
+          auditStatus.free_audits_left = data.free_left;
+          auditStatus.audit_credits = data.paid_left;
+        }
+        if (currentGirl !== girl || getToken() !== token) {
+          if (delivered) saveAudit(girl, token, data.audit);
+          return;
+        }
+        if (response.status === 401) {
+          handleUnauthorized();
+        } else if (response.status === 402) {
+          const detail = (data && data.detail) || '';
+          addMessage('note', detail.split('|').pop() || 'You are out of audits.');
+        } else if (!delivered) {
+          addMessage('error', (data && (data.error || data.detail)) || 'No audit right now. Try again in a moment.');
+        } else {
+          addMessage('audit', data.audit);
+        }
+      } catch (error) {
+        pending.remove();
+        if (currentGirl === girl) addMessage('error', 'Could not reach the house. Check your connection and try again.');
+      } finally {
+        chatAuditBtn.disabled = false;
+      }
+    }
+    async function requestPicture() {
+      if ((!currentGirl && !currentCompanionId) || chatPhotoBtn.disabled) return;
+      chatPhotoBtn.disabled = true;
+      const who = currentCompanionId ? document.getElementById('chat-name').textContent : 'she';
+      const pending = addMessage('typing', who + '\u2019s finding a photo\u2026');
+      try {
+        const url = currentCompanionId
+          ? API_BASE_URL + '/companions/' + currentCompanionId + '/image'
+          : API_BASE_URL + '/image';
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify(currentCompanionId ? {} : { girl: currentGirl }),
+        });
+        const data = await response.json().catch(() => null);
+        pending.remove();
+        if (response.status === 401) {
+          handleUnauthorized();
+        } else if (data && data.locked) {
+          addMessage('note', data.error);
+        } else if (!response.ok || !data || data.ok === false || !data.image_b64) {
+          addMessage('error', (data && (data.error || data.detail)) || 'No photo right now. Try again in a moment.');
+        } else {
+          addPhoto(data.mime, data.image_b64, data.disclosure || 'AI-generated image');
+        }
+        if (data && data.status) picStatus = data.status;
+      } catch (error) {
+        pending.remove();
+        addMessage('error', 'Could not reach the house. Check your connection and try again.');
+      } finally {
+        chatPhotoBtn.disabled = false;
+      }
+    }
+
+    // She types: POST /chat/stream sends her reply as SSE, already paced by the
+    // backend, so the bubble just grows as the events land. Older backends have
+    // no /chat/stream, so a 404 (or any pre-reply failure) falls back to /chat.
+    // Leaving her room while a reply is in flight has to cut the connection, or
+    // what is left of it lands in whatever chat replaced it - and the backend
+    // goes on generating text nobody is reading. Both paths share the handle.
+    let streamAbort = null;
+    function abortStream() {
+      if (!streamAbort) return false;
+      streamAbort.abort();
+      streamAbort = null;
+      return true;
+    }
+
+    // A cut-off reply is still charged, but 'done' never arrives to carry the new
+    // count, so the header would keep showing the pre-send number. The backend
+    // only logs the typed part once it notices the drop, and does it on a worker,
+    // so there is no one moment to ask at: poll until the charge shows up.
+    async function resyncRemaining(seq, before) {
+      for (const delay of [400, 1200, 2500]) {
+        await new Promise((done) => setTimeout(done, delay));
+        if (seq !== turnSeq || !isLoggedIn()) return;
+        let data = null;
+        try {
+          const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
+          data = await response.json().catch(() => null);
+        } catch (error) { return; }
+        if (seq !== turnSeq) return;   // a newer turn owns the count now
+        if (!data || typeof data.remaining !== 'number') return;
+        showRemaining(data.remaining);
+        if (before === null || data.remaining < before) return;
+      }
+    }
+
+    function abortStreamAndResync() {
+      if (abortStream()) resyncRemaining(++turnSeq, shownRemaining());
+    }
+
+    let streamSupported = true;
+    async function streamReply(message, typing) {
+      const girl = currentGirl;
+      turnSeq++;            // this reply's count supersedes any pending resync
+      abortStream();
+      const controller = new AbortController();
+      streamAbort = controller;
+      const response = await fetch(API_BASE_URL + '/chat/stream', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ girl: girl, message: message }),
+        signal: controller.signal,
+      });
+      if (response.status === 404 || response.status === 405) {
+        streamSupported = false;
+        return false;
+      }
+      if (response.status === 401) { typing.remove(); addMessage('note', 'Your session ended. Sign in to keep talking.'); handleUnauthorized(); return true; }
+      if (response.status === 402) {
+        typing.remove();
+        addPaywallNote();
+        return true;
+      }
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
+        typing.remove();
+        addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+        return true;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = '';
+      let bubble = null;
+      let failed = null;
+
+      const handle = (event, data) => {
+        if (girl !== currentGirl) return;   // her room is gone; drop the rest
+        if (event === 'delta' && data.t) {
+          if (!bubble) { typing.remove(); markRead(); bubble = addMessage('her', ''); }
+          bubble.textContent += data.t;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        } else if (event === 'done') {
+          showRemaining(data.remaining);
+          if (data.picture_due) requestPicture();
+        } else if (event === 'error') {
+          failed = data.detail || 'She did not answer. Try again in a moment.';
+        }
+      };
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        raw += decoder.decode(value, { stream: true });
+        const blocks = raw.split('\n\n');
+        raw = blocks.pop();
+        for (const block of blocks) {
+          let event = 'message', payload = '';
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) payload += line.slice(5).trim();
+          }
+          if (!payload) continue;
+          try { handle(event, JSON.parse(payload)); } catch (e) { /* ignore a partial frame */ }
+        }
+      }
+      if (streamAbort === controller) streamAbort = null;
+      if (!bubble && girl === currentGirl) {
+        typing.remove();
+        addMessage('error', failed === 'she_did_not_answer' ? 'She went quiet. Try again in a moment.' : (failed || 'She did not answer. Try again in a moment.'));
+      }
+      return true;
+    }
+
+    async function sendReply(message, typing) {
+      const girl = currentGirl;
+      turnSeq++;
+      abortStream();
+      const controller = new AbortController();
+      streamAbort = controller;
+      const response = await fetch(API_BASE_URL + '/chat', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ girl: girl, message: message }),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => null);
+      if (streamAbort === controller) streamAbort = null;
+      typing.remove();
+      if (girl !== currentGirl) return;   // her room is gone; drop the reply
+      if (response.status === 401) {
+        addMessage('note', 'Your session ended. Sign in to keep talking.');
+        handleUnauthorized();
+      } else if (response.status === 402) {
+        addPaywallNote();
+      } else if (!response.ok || !data || data.ok === false) {
+        addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+      } else {
+        markRead();
+        addMessage('her', data.reply);
+        showRemaining(data.remaining);
+        if (data.picture_due) requestPicture();
+      }
+    }
+
+    document.getElementById('chat-send').addEventListener('click', sendChatMessage);
+    async function sendChatMessage() {
+      const message = chatInput.value.trim();
+      if (!message || sending || (!currentGirl && !currentCompanionId)) return;
+
+      sending = true;
+      chatSend.disabled = true;
+      chatInput.value = '';
+      growChatInput();
+      addStamp('Today');
+      addMessage('me', message);
+      const typing = addMessage('typing', 'typing…');
+
+      if (currentCompanionId) {
+        try {
+          const res = await fetch(API_BASE_URL + '/companions/' + currentCompanionId + '/chat', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ message })
+          });
+          typing.remove();
+          const data = await res.json();
+          if (res.ok) {
+            addMessage('her', data.reply);
+            if (typeof data.milestone === 'number') {
+              updateCompanionActionBar(data.milestone, data.is_married);
+            }
+            if (typeof data.remaining === 'number') showRemaining(data.remaining);
+            if (data.picture_due) requestPicture();
+          } else {
+            addMessage('error', data.detail || 'Companion did not answer.');
+          }
+        } catch (err) {
+          typing.remove();
+          addMessage('error', 'Could not reach companion. Try again.');
+        } finally {
+          sending = false;
+          chatSend.disabled = false;
+          chatInput.focus();
+        }
+        return;
+      }
+
+      try {
+        if (!streamSupported || !(await streamReply(message, typing))) {
+          await sendReply(message, typing);
+        }
+      } catch (error) {
+        typing.remove();
+        if (error.name !== 'AbortError') {   // she was cut off on purpose
+          addMessage('error', 'Could not reach the house. Check your connection and try again.');
+        }
+      } finally {
+        sending = false;
+        chatSend.disabled = false;
+        chatInput.focus();
+      }
+    }
+
+    // Merch comes from the Shopify store; checkout is Shopify's hosted cart.
+    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    const SHOPIFY_STOREFRONT_URL = 'https://sororityhouse-zlw64-vet1iva0.myshopify.com/api/2025-07/graphql.json';
+    const SHOPIFY_STOREFRONT_TOKEN = '17478e428d0dbb29bf9a6d161c6c6b65';
+
+    async function shopify(query, variables) {
+      const res = await fetch(SHOPIFY_STOREFRONT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': SHOPIFY_STOREFRONT_TOKEN },
+        body: JSON.stringify({ query, variables }),
+      });
+      const json = await res.json();
+      if (json.errors) throw new Error(json.errors[0].message);
+      return json.data;
+    }
+
+    function money(v) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: v.currencyCode }).format(Number(v.amount));
+    }
+
+    async function buyVariant(variantId, button) {
+      button.disabled = true;
+      button.textContent = 'Opening checkout…';
+      try {
+        const data = await shopify(
+          'mutation($lines:[CartLineInput!]!){ cartCreate(input:{lines:$lines}){ cart{ checkoutUrl } userErrors{ message } } }',
+          { lines: [{ merchandiseId: variantId, quantity: 1 }] }
+        );
+        const err = data.cartCreate.userErrors[0];
+        if (err) throw new Error(err.message);
+        window.location.href = data.cartCreate.cart.checkoutUrl;
+      } catch (e) {
+        button.disabled = false;
+        button.textContent = 'Buy now';
+        alert('Checkout could not open: ' + e.message);
+      }
+    }
+
+    // Picture packs are a Shopify product too; the cart carries the player's id so
+    // the order webhook knows whose credits to top up.
+    async function buyPicturePack(status, button) {
+      if (!status.pack_ready || !status.pack_ref) return;
+      const label = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Opening checkout…';
+      try {
+        const data = await shopify(
+          'query($h:String!){ product(handle:$h){ variants(first:20){ edges{ node{ id sku availableForSale } } } } }',
+          { h: status.pack_handle || 'picture-pack' }
+        );
+        const sku = String(status.pack_sku || '').toUpperCase();
+        const v = ((data.product && data.product.variants.edges) || []).map(e => e.node)
+          .find(n => n.availableForSale && String(n.sku || '').toUpperCase() === sku);
+        if (!v) throw new Error('the picture pack is not in the store yet');
+        const cart = await shopify(
+          'mutation($lines:[CartLineInput!]!,$attrs:[AttributeInput!]!){ cartCreate(input:{lines:$lines,attributes:$attrs}){ cart{ checkoutUrl } userErrors{ message } } }',
+          { lines: [{ merchandiseId: v.id, quantity: 1 }], attrs: [{ key: 'lockeddoor_user', value: String(status.pack_ref) }] }
+        );
+        const err = cart.cartCreate.userErrors[0];
+        if (err) throw new Error(err.message);
+        window.location.href = cart.cartCreate.cart.checkoutUrl;
+      } catch (e) {
+        button.disabled = false;
+        button.textContent = label;
+        alert('Checkout could not open: ' + e.message);
+      }
+    }
+
+    function renderMerch(products) {
+      const grid = document.getElementById('merch-grid');
+      grid.innerHTML = '';
+      if (!products.length) {
+        grid.innerHTML = '<p class="merch-note">The drop is sold out. Check back soon.</p>';
+        return;
+      }
+      products.forEach(({ node }) => {
+        const variants = node.variants.edges.map((e) => e.node);
+        const image = node.images.edges[0]?.node;
+        const card = document.createElement('article');
+        card.className = 'merch-card';
+        card.innerHTML =
+          (image && /^https:\/\//.test(image.url) ? `<img src="${esc(image.url)}" alt="${esc(image.altText || node.title)}" loading="lazy" />` : '') +
+          '<div class="merch-body">' +
+            `<h3>${esc(node.title)}</h3>` +
+            `<div class="price">${esc(money(variants[0].price))}</div>` +
+            `<p>${esc(node.description)}</p>` +
+            '<div class="merch-row"><select aria-label="Size"></select><button class="button" type="button">Buy now</button></div>' +
+          '</div>';
+        const select = card.querySelector('select');
+        const price = card.querySelector('.price');
+        const button = card.querySelector('button');
+        variants.forEach((v) => {
+          const opt = document.createElement('option');
+          opt.value = v.id;
+          opt.textContent = v.availableForSale ? v.title : `${v.title} — sold out`;
+          opt.disabled = !v.availableForSale;
+          select.appendChild(opt);
+        });
+        const firstOpen = variants.find((v) => v.availableForSale);
+        if (firstOpen) select.value = firstOpen.id; else button.disabled = true;
+        select.addEventListener('change', () => {
+          const v = variants.find((x) => x.id === select.value);
+          if (v) price.textContent = money(v.price);
+        });
+        button.addEventListener('click', () => buyVariant(select.value, button));
+        grid.appendChild(card);
+      });
+    }
+
+    shopify(
+      '{ products(first: 12, query: "product_type:Hoodie") { edges { node { title description images(first: 1) { edges { node { url altText } } } variants(first: 20) { edges { node { id title availableForSale price { amount currencyCode } } } } } } } }'
+    )
+      .then((data) => renderMerch(data.products.edges))
+      .catch(() => {
+        document.getElementById('merch-grid').innerHTML =
+          '<p class="merch-note">The shop couldn\'t load right now. Try again in a moment.</p>';
+      });
+
+    document.querySelectorAll('a[href="/auth"]').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        document.getElementById('doors').scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+
+  </script>
+<script>
+(function(){
+  document.querySelectorAll('.rl-carousel-wrap').forEach(function(w){
+    var track = w.querySelector('.rl-carousel');
+    var prev = w.querySelector('.rl-car-prev');
+    var next = w.querySelector('.rl-car-next');
+    if (prev) prev.addEventListener('click', function(){ track.scrollBy({left: -600, behavior: 'smooth'}); });
+    if (next) next.addEventListener('click', function(){ track.scrollBy({left: 600, behavior: 'smooth'}); });
+  });
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
+
