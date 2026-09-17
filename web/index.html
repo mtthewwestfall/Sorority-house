@@ -70,8 +70,14 @@
 </head>
 <body>
 <script>
-  // Resident deep links (../index.html#door-<slug>) now live in the Companions app.
+  // On the Companions subdomain, the app lives at /app/ — forward there,
+  // preserving any hash (OAuth #token=... or #door-<slug>).
   (function () {
+    if (location.hostname === 'godscompanions.lockeddoor.ai') {
+      location.replace('/app/' + location.hash);
+      return;
+    }
+    // Resident deep links (../index.html#door-<slug>) now live in the Companions app.
     var m = /^#door-([a-z]+)$/.exec(location.hash || '');
     if (m) location.replace('./app/index.html#door-' + m[1]);
   })();
