@@ -249,13 +249,22 @@
     .door-cta { display: none; }
 
     .chat-backdrop {
-      position: fixed; inset: 0; z-index: 80; display: none;
-      background: rgba(21, 23, 21, .72); backdrop-filter: blur(4px);
+      position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px;
+      background: rgba(21, 23, 21, .72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      opacity: 0; pointer-events: none;
+      transition: opacity .35s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .chat-backdrop.is-open { display: grid; place-items: center; padding: 20px; }
+    .chat-backdrop.is-open {
+      opacity: 1; pointer-events: auto;
+    }
     .chat-panel {
       width: min(560px, 100%); height: min(680px, 92vh); display: flex; flex-direction: column;
       border: 1px solid var(--line); border-radius: 22px; background: #151715; box-shadow: var(--shadow); overflow: hidden;
+      transform: scale(0.92) translateY(20px);
+      transition: transform .35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .chat-backdrop.is-open .chat-panel {
+      transform: scale(1) translateY(0);
     }
     /* iMessage-style layout: avatar + name header, tailed bubbles, pill composer. */
     .chat-panel { --bubble-her: #2a2d2a; --bubble-me: #556357; --panel: #151715; }
@@ -269,7 +278,14 @@
     .chat-service { text-align: center; color: var(--muted); font-size: .7rem; font-weight: 600; letter-spacing: .02em; padding: 6px 0 0; }
     .chat-service small { display: block; font-weight: 400; font-size: .68rem; opacity: .85; }
     .chat-log { flex: 1; overflow-y: auto; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 4px; }
-    .msg { position: relative; max-width: 78%; padding: 9px 14px; border-radius: 18px; font-size: 1rem; line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+    .msg {
+      position: relative; max-width: 78%; padding: 9px 14px; border-radius: 18px; font-size: 1rem; line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px;
+      animation: msgPop .25s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    @keyframes msgPop {
+      0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
     .msg.her, .msg.me { margin-top: 2px; }
     .msg.her { align-self: flex-start; background: var(--bubble-her); color: var(--white); border-bottom-left-radius: 18px; }
     .msg.me { align-self: flex-end; background: var(--bubble-me); color: #E9E2D7; }
@@ -497,8 +513,49 @@
 .rl-carousel { display: flex; gap: 22px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 4px 20px; scrollbar-width: thin; scrollbar-color: #556357 transparent; }
 .rl-carousel::-webkit-scrollbar { height: 8px; }
 .rl-carousel::-webkit-scrollbar-thumb { background: #556357; border-radius: 4px; }
-.door-card { flex: 0 0 274px; scroll-snap-align: start; background: #1E211E; border: 1px solid rgba(233,226,215,.08); border-radius: 16px; overflow: hidden; cursor: pointer; transition: transform .25s ease, border-color .25s ease; min-height: 0; }
-.door-card:hover { transform: translateY(-5px); border-color: rgba(138,125,107,.6); }
+.door-card {
+  flex: 0 0 274px;
+  scroll-snap-align: start;
+  background: #1E211E;
+  border: 1px solid rgba(233,226,215,.08);
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform .35s cubic-bezier(0.16, 1, 0.3, 1), border-color .35s ease, box-shadow .35s ease;
+  min-height: 0;
+  position: relative;
+  animation: cardDealIn .6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.door-card::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(60deg, transparent 30%, rgba(233,226,215,.08) 50%, transparent 70%);
+  transform: translateX(-100%) rotate(25deg);
+  transition: transform .7s ease;
+  pointer-events: none;
+}
+.door-card:hover::after {
+  transform: translateX(100%) rotate(25deg);
+}
+.door-card:hover {
+  transform: translateY(-8px) scale(1.02);
+  border-color: rgba(138,125,107,.8);
+  box-shadow: 0 16px 36px rgba(0,0,0,.45), 0 0 20px rgba(138,125,107,.22);
+}
+@keyframes cardDealIn {
+  0% {
+    opacity: 0;
+    transform: translateY(30px) scale(0.92) rotate(-2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
 .door-card.companion-card { flex: none; width: 100%; max-width: 460px; scroll-snap-align: none; }
 .door-art { aspect-ratio: 4 / 4.4; height: auto; }
 .door-copy { padding: 20px 20px 22px; }
