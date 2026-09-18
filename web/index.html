@@ -1050,6 +1050,20 @@
     </div>
   </div>
 
+  <!-- Townsmen Gathering Overlay -->
+  <div id="townsmen-overlay" class="gazette-overlay" role="dialog" aria-modal="true" aria-labelledby="townsmen-title">
+    <div class="gazette-card" id="townsmen-card" style="width: min(520px, 94vw);">
+      <button type="button" class="gazette-close" id="townsmen-close" aria-label="Close">&times;</button>
+      <div class="gazette-header">God's Greek</div>
+      <h2 id="townsmen-title" class="gazette-title" style="margin-bottom: 12px;">Townsmen Gathering</h2>
+      <div style="border-radius: 12px; overflow: hidden; border: 1px solid var(--gold); margin-bottom: 16px;">
+        <img src="assets/group-guys-pines.jpg" alt="Townsmen gathering in the pines" style="width: 100%; display: block; height: auto;" />
+      </div>
+      <p style="font-size: 0.92rem; color: rgba(233,226,215,0.82); font-style: italic; margin-bottom: 18px;">A small group of townsmen gathering deep in the pines.</p>
+      <button type="button" class="gazette-action" id="townsmen-action">Continue &rarr;</button>
+    </div>
+  </div>
+
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
     <div class="chat-panel">
       <div class="chat-head">
@@ -2760,6 +2774,16 @@ const PRESET_FACES = {
       }, 35);
     }
 
+    function showTownsmenOverlay() {
+      const overlay = document.getElementById('townsmen-overlay');
+      if (overlay) overlay.classList.add('is-active');
+    }
+
+    function dismissTownsmenOverlay() {
+      const overlay = document.getElementById('townsmen-overlay');
+      if (overlay) overlay.classList.remove('is-active');
+    }
+
     function dismissGazetteCard() {
       const overlay = document.getElementById('gazette-overlay');
       if (overlay) overlay.classList.remove('is-active');
@@ -2767,12 +2791,19 @@ const PRESET_FACES = {
         clearInterval(gazetteTypeInterval);
         gazetteTypeInterval = null;
       }
+      showTownsmenOverlay();
     }
 
     document.getElementById('gazette-close')?.addEventListener('click', dismissGazetteCard);
     document.getElementById('gazette-action')?.addEventListener('click', dismissGazetteCard);
     document.getElementById('gazette-overlay')?.addEventListener('click', (e) => {
       if (e.target === document.getElementById('gazette-overlay')) dismissGazetteCard();
+    });
+
+    document.getElementById('townsmen-close')?.addEventListener('click', dismissTownsmenOverlay);
+    document.getElementById('townsmen-action')?.addEventListener('click', dismissTownsmenOverlay);
+    document.getElementById('townsmen-overlay')?.addEventListener('click', (e) => {
+      if (e.target === document.getElementById('townsmen-overlay')) dismissTownsmenOverlay();
     });
 
     window.showGazetteCard = showGazetteCard;
