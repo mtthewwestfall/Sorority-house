@@ -567,6 +567,59 @@
   .rl-hero-inner { padding-top: 110px; padding-bottom: 80px; }
   .door-card { flex-basis: 240px; }
 }
+
+/* ---------- gazette card overlay & keyframes ---------- */
+.gazette-overlay {
+  position: fixed; inset: 0; z-index: 100; display: none;
+  background: rgba(15, 17, 15, 0.82); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  place-items: center; padding: 20px;
+}
+.gazette-overlay.is-active { display: grid; }
+.gazette-card {
+  position: relative; width: min(440px, 92vw); background: #1a1d1a;
+  border: 1px solid var(--gold); border-radius: 20px; padding: 28px 24px;
+  box-shadow: 0 0 30px rgba(138, 125, 107, 0.25), 0 20px 60px rgba(0, 0, 0, 0.7);
+  color: var(--white); font-family: var(--serif); text-align: center;
+  transform: translateY(30px) scale(0.95); opacity: 0;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease;
+}
+.gazette-overlay.is-active .gazette-card {
+  animation: gazetteCardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.gazette-header {
+  text-transform: uppercase; letter-spacing: 0.25em; font-size: 0.78rem;
+  color: var(--gold); font-family: Inter, sans-serif; font-weight: 700; margin-bottom: 12px;
+}
+.gazette-title {
+  font-size: 1.8rem; font-weight: 600; line-height: 1.2; margin: 0 0 16px; color: var(--white);
+}
+.gazette-body {
+  font-size: 1.02rem; line-height: 1.6; color: rgba(233, 226, 215, 0.88); margin-bottom: 24px;
+  font-style: italic; min-height: 3.2em;
+}
+.gazette-action {
+  display: inline-block; padding: 12px 28px; background: #556357; color: #E9E2D7;
+  border-radius: 999px; text-decoration: none; font-family: Inter, sans-serif;
+  font-weight: 600; font-size: 0.92rem; border: 1px solid rgba(233, 226, 215, 0.2);
+  cursor: pointer; transition: background 0.2s ease, box-shadow 0.2s ease;
+  animation: gazetteGlowPulse 2s infinite ease-in-out;
+}
+.gazette-action:hover { background: #627264; color: #fff; }
+.gazette-close {
+  position: absolute; top: 12px; right: 16px; background: none; border: none;
+  color: var(--muted); font-size: 1.4rem; cursor: pointer; line-height: 1; padding: 4px;
+}
+.gazette-close:hover { color: var(--white); }
+
+@keyframes gazetteCardEntrance {
+  0% { transform: translateY(40px) scale(0.92); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes gazetteGlowPulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(138, 125, 107, 0.3); }
+  50% { box-shadow: 0 0 24px rgba(138, 125, 107, 0.65); }
+}
 </style>
 
 <style>
@@ -998,6 +1051,31 @@
       <div class="auth-msg" id="profile-msg" aria-live="polite"></div>
     </div>
   </div>
+  <!-- The Gazette Card Overlay (animated clip recreation) -->
+  <div id="gazette-overlay" class="gazette-overlay" role="dialog" aria-modal="true" aria-labelledby="gazette-title">
+    <div class="gazette-card" id="gazette-card">
+      <button type="button" class="gazette-close" id="gazette-close" aria-label="Close">&times;</button>
+      <div class="gazette-header">The Town of Verville</div>
+      <h2 id="gazette-title" class="gazette-title">A Town Deep in the Pines</h2>
+      <div id="gazette-body" class="gazette-body"></div>
+      <button type="button" class="gazette-action" id="gazette-action">Step Into Verville &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Townsmen Gathering Overlay -->
+  <div id="townsmen-overlay" class="gazette-overlay" role="dialog" aria-modal="true" aria-labelledby="townsmen-title">
+    <div class="gazette-card" id="townsmen-card" style="width: min(520px, 94vw);">
+      <button type="button" class="gazette-close" id="townsmen-close" aria-label="Close">&times;</button>
+      <div class="gazette-header">God's Companions</div>
+      <h2 id="townsmen-title" class="gazette-title" style="margin-bottom: 12px;">Townsmen Gathering</h2>
+      <div style="border-radius: 12px; overflow: hidden; border: 1px solid var(--gold); margin-bottom: 16px;">
+        <img src="../assets/group-guys-pines.jpg" alt="Townsmen gathering in the pines" style="width: 100%; display: block; height: auto;" />
+      </div>
+      <p style="font-size: 0.92rem; color: rgba(233,226,215,0.82); font-style: italic; margin-bottom: 18px;">A small group of townsmen gathering deep in the pines.</p>
+      <button type="button" class="gazette-action" id="townsmen-action">Continue &rarr;</button>
+    </div>
+  </div>
+
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
     <div class="chat-panel">
       <div class="chat-head">
@@ -2791,6 +2869,72 @@ const PRESET_FACES = {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
       });
     }
+
+    // Gazette card recreation & typewriter animation
+    let gazetteTypeInterval = null;
+    function showGazetteCard(messageText) {
+      const overlay = document.getElementById('gazette-overlay');
+      const bodyEl = document.getElementById('gazette-body');
+      if (!overlay || !bodyEl) return;
+
+      const fullText = messageText || "Welcome to Verville. Every door is earned over real days through honest conversation.";
+      bodyEl.textContent = '';
+      overlay.classList.add('is-active');
+
+      if (gazetteTypeInterval) clearInterval(gazetteTypeInterval);
+      let idx = 0;
+      gazetteTypeInterval = setInterval(() => {
+        if (idx < fullText.length) {
+          bodyEl.textContent += fullText.charAt(idx);
+          idx++;
+        } else {
+          clearInterval(gazetteTypeInterval);
+          gazetteTypeInterval = null;
+        }
+      }, 35);
+    }
+
+    function showTownsmenOverlay() {
+      const overlay = document.getElementById('townsmen-overlay');
+      if (overlay) overlay.classList.add('is-active');
+    }
+
+    function dismissTownsmenOverlay() {
+      const overlay = document.getElementById('townsmen-overlay');
+      if (overlay) overlay.classList.remove('is-active');
+    }
+
+    function dismissGazetteCard() {
+      const overlay = document.getElementById('gazette-overlay');
+      if (overlay) overlay.classList.remove('is-active');
+      if (gazetteTypeInterval) {
+        clearInterval(gazetteTypeInterval);
+        gazetteTypeInterval = null;
+      }
+      showTownsmenOverlay();
+    }
+
+    document.getElementById('gazette-close')?.addEventListener('click', dismissGazetteCard);
+    document.getElementById('gazette-action')?.addEventListener('click', dismissGazetteCard);
+    document.getElementById('gazette-overlay')?.addEventListener('click', (e) => {
+      if (e.target === document.getElementById('gazette-overlay')) dismissGazetteCard();
+    });
+
+    document.getElementById('townsmen-close')?.addEventListener('click', dismissTownsmenOverlay);
+    document.getElementById('townsmen-action')?.addEventListener('click', dismissTownsmenOverlay);
+    document.getElementById('townsmen-overlay')?.addEventListener('click', (e) => {
+      if (e.target === document.getElementById('townsmen-overlay')) dismissTownsmenOverlay();
+    });
+
+    window.showGazetteCard = showGazetteCard;
+    window.dismissGazetteCard = dismissGazetteCard;
+
+    // Trigger on page load if ?gazette=1 query param is present
+    document.addEventListener('DOMContentLoaded', () => {
+      if (new URLSearchParams(window.location.search).get('gazette') === '1') {
+        setTimeout(() => showGazetteCard(), 400);
+      }
+    });
 
   </script>
 <script>
