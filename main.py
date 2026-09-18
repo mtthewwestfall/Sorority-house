@@ -1,5 +1,5 @@
 """
-GREEK HOLLOW — main.py
+Gods Greeks — main.py
 Chat/AI backend for the companion website (FastAPI on Railway, Supabase/Postgres).
 
 Built to this spec (verified Sept 2026):
@@ -15,7 +15,7 @@ Built to this spec (verified Sept 2026):
                the girl's full personality). Identical prefix = provider caches it and
                bills cache hits at a big discount, so never mutate this block.
       LAYER 2  ONE short rolling "memory summary" per user PER GIRL, injected as a
-               single small block. Rewritten only at milestones / every N messages,
+               single small block. Rewritten only at milestones / every N messages,h
                never on every message (that would churn the cache + cost tokens).
       LAYER 3  Only the last WINDOW raw messages of the ACTIVE conversation, scoped
                to that girl. Input size never grows.
@@ -390,41 +390,21 @@ ROSTER_SEED = [
     ("bailey",   "visitor", 180, "assets/bailey.jpg",
      "Potter at the edge of town. Sharp, funny, deliberately too much — she dares you to dislike her so she controls the rejection. Outlast the dare."),
     ("sarah",    "visitor", 190, "assets/sarah.jpg",
-     "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real answer."),
-    # --- God's Town (Roman) residents: God's Companions cast ---
-    ("harlan",   "visitor", 200, "assets/portraits/harlan.jpg",
-     "Cairn-keeper at the crossing. He counts the stones the way other men count sins — and finds himself short."),
-    ("ivo",      "visitor", 210, "assets/portraits/ivo.jpg",
-     "Lamplighter of God's Town. Every lamp, every night, no matter the weather — somebody has to keep the dark back."),
-    ("lila",     "visitor", 220, "assets/portraits/lila.jpg",
-     "Toll-keeper at the crossing. Everything has a price and she'll tell you yours with a smile. Fastest to warm, fastest to bill."),
-    ("nell",     "visitor", 230, "assets/portraits/nell.jpg",
-     "Millwright. Best hands on the river — she'll fix what's broken, but pity her and the door slams."),
-    ("sable",    "visitor", 240, "assets/portraits/sable.jpg",
-     "Baker. Her oven never cools and her bread has kept more travelers than the cairns. Sweet until she tests you."),
-    ("bram",     "visitor", 250, "assets/portraits/bram.jpg",
-     "Ferryman. He carries everyone across the river. He couldn't carry the one who mattered."),
-    ("odette",   "visitor", 260, "assets/portraits/odette.jpg",
-     "Chandler. She makes the candles that light the town's windows — quiet shop, quieter woman, nothing missed."),
-    ("fenwick",  "visitor", 270, "assets/portraits/fenwick.jpg",
-     "Blacksmith. The forge never lies to him. Rush him and the metal knows."),
-    ("maren",    "visitor", 280, "assets/portraits/maren.jpg",
-     "Teacher. She keeps the town's slates straight and its lessons straighter — quiz her and you'll get schooled."),
-    ("tobias",   "visitor", 290, "assets/portraits/tobias.jpg",
-     "Shepherd. Lives on the ridge with his flock. Summon him and he leaves; earn him and he stays."),
-    ("prudence", "visitor", 300, "assets/portraits/prudence.jpg",
-     "Healer. She mends what the town breaks — bodies, mostly. Reorganizes her drawers when she's worried."),
-    ("anselm",   "visitor", 310, "assets/portraits/anselm.jpg",
-     "Mason. He laid half the town's stone and remembers which block went where. Every wall he builds is a promise."),
-    ("delia",    "visitor", 320, "assets/portraits/delia.jpg",
-     "Fisher. She reads the water like scripture and touches the knot at her wrist when she's thinking. Mock her rituals and the river hears."),
-    ("imogen",   "visitor", 330, "assets/portraits/imogen.jpg",
-     "Orchard keeper. Prunes trees and people with the same care — what's dead gets cut, what's living gets room."),
-    ("rufus",    "visitor", 340, "assets/portraits/rufus.jpg",
-     "Cooper. His barrels hold the town's drink and half its secrets. Taps the stave when he's deciding about you."),
-    ("hazel",    "visitor", 350, "assets/portraits/hazel.jpg",
-     "Midwife. She has caught every baby born in God's Town for thirty years. Panic near her and she goes colder."),
-]
+     "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real                   "verbatim from read_file output (without the line-number prefix).",
+                  {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}},
+                  ["path", "old", "new"]),
+    "write_file": (t_write_file, "Create a new file or fully overwrite an existing one.",
+                   {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
+    "delete_file": (t_delete_file, "Delete a file in the repo (e.g. a scratch script you created).",
+                    {"path": {"type": "string"}}, ["path"]),
+    "run": (t_run, "Run a shell command in the repo root (tests, py_compile, curl, git diff...). "
+            "Commits/pushes are done for you later; don't run them.",
+            {"command": {"type": "string"}, "timeout": {"type": "integer"}}, ["command"]),
+    "finish": (None, "Call when the task is complete and verified. `summary` is a short PR-style "
+               "description of what changed and why; `title` is a one-line PR title.",
+               {"title": {"type": "string"}, "summary": {"type": "string"}}, ["title", "summary"]),
+}
+
 
 # Fallback personas used only until you seed full docs via /admin/persona.
 # The FULL personality texts (the Canvas character docs) are what you paste there —
