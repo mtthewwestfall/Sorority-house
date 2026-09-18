@@ -63,8 +63,56 @@
     .hero { background: var(--wash); text-align: center; padding: 3.5rem 1.5rem 4rem; border-bottom: 1px solid var(--line); }
     .hero-logo { display: flex; flex-direction: column; align-items: center; margin-bottom: 1.5rem; }
     .hero-logo svg { width: 74px; height: 84px; margin-bottom: 0.8rem; }
-    .hero-logo .wordmark { font-family: var(--serif); font-size: clamp(2rem, 6vw, 2.8rem); color: var(--navy); font-weight: 700; }
+    .hero-white-logo { max-width: 280px; width: 100%; height: auto; margin: 0 auto 1.2rem; display: block; filter: drop-shadow(0 4px 12px rgba(14,30,61,0.15)); }
+    .wordmark-container {
+      position: relative;
+      display: inline-block;
+    }
+    .hero-logo .wordmark { font-family: var(--serif); font-size: clamp(2rem, 6vw, 2.8rem); color: var(--navy); font-weight: 700; position: relative; display: inline-block; z-index: 1; }
     .hero-logo .wordmark em { font-style: normal; color: var(--gold); }
+    .char-peek {
+      position: absolute;
+      top: -24px;
+      right: -45px;
+      width: 70px;
+      height: 70px;
+      object-fit: cover;
+      object-position: center;
+      border-radius: 50%;
+      border: 3px solid var(--gold);
+      box-shadow: 0 6px 16px rgba(14, 30, 61, 0.2);
+      z-index: 2;
+      transition: transform 0.25s ease;
+    }
+    .char-peek:hover {
+      transform: scale(1.15) rotate(6deg);
+    }
+
+    .mission-statement {
+      max-width: 680px; margin: 0 auto 2rem; padding: 1.5rem 1.8rem;
+      background: #ffffff; border: 1px solid var(--line); border-left: 4px solid var(--gold);
+      border-radius: 12px; box-shadow: 0 4px 16px rgba(14, 30, 61, 0.06); text-align: center;
+    }
+    .mission-statement h2 { font-family: var(--serif); font-size: 1.35rem; color: var(--navy); margin-bottom: 0.5rem; }
+    .mission-statement p { color: var(--muted); font-size: 1rem; margin-bottom: 0.8rem; }
+    .contact-email-badge {
+      display: inline-block; padding: 0.4rem 1rem; background: var(--wash);
+      border: 1px solid var(--line); border-radius: 20px; font-weight: 600;
+      color: var(--navy); font-size: 0.9rem; text-decoration: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .contact-email-badge:hover { background: #e7dfc9; border-color: var(--gold); }
+
+    .side-by-side-logos {
+      display: flex; justify-content: center; align-items: center; gap: 1.5rem;
+      max-width: 840px; margin: 1.5rem auto 2.5rem; flex-wrap: wrap;
+    }
+    .brand-logo-card {
+      flex: 1 1 340px; max-width: 400px; width: 100%; height: auto;
+      border-radius: 12px; border: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(14, 30, 61, 0.08); transition: transform 0.2s ease;
+    }
+    .brand-logo-card:hover { transform: translateY(-3px); }
     .hero h1 {
       font-family: var(--serif); font-size: clamp(1.6rem, 4.5vw, 2.3rem);
       color: var(--navy); line-height: 1.2; margin-bottom: 1rem; font-weight: 400; font-style: italic;
@@ -176,6 +224,22 @@
     .price-amt { font-family: var(--serif); font-size: 1.9rem; color: var(--navy); font-weight: 700; white-space: nowrap; }
     .price-amt small { display: block; font-family: var(--sans); font-size: 0.8rem; color: var(--muted); font-weight: 400; text-align: right; }
 
+    /* What's Next */
+    .whats-next { padding: 5rem 0; text-align: center; background: var(--wash); border-top: 1px solid var(--line); }
+    .next-grid { display: grid; gap: 1.5rem; text-align: left; max-width: 960px; margin: 2.5rem auto 0; }
+    .next-card {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px;
+      padding: 1.8rem; box-shadow: 0 8px 20px rgba(14, 30, 61, 0.05);
+      position: relative; overflow: hidden;
+    }
+    .next-card::before {
+      content: "Upcoming"; position: absolute; top: 12px; right: 16px;
+      font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--gold); background: rgba(201, 162, 39, 0.12); padding: 0.25rem 0.65rem; border-radius: 20px;
+    }
+    .next-card h3 { font-size: 1.2rem; color: var(--navy); margin-bottom: 0.5rem; }
+    .next-card p { color: var(--muted); font-size: 0.96rem; }
+
     /* Footer */
     .footer {
       background: var(--wash); border-top: 1px solid var(--line);
@@ -190,6 +254,7 @@
       .hero-visual { grid-template-columns: 1fr 1fr 1fr; }
       .hero-visual .offset-down { margin-top: 3.5rem; }
       .price-grid { grid-template-columns: 1fr 1fr; }
+      .next-grid { grid-template-columns: repeat(3, 1fr); }
       .hero { padding: 4.5rem 1.5rem 5rem; }
       .intake { padding: 3rem 3rem; }
     }
@@ -212,13 +277,26 @@
   <!-- Hero -->
   <section class="hero">
     <div class="hero-logo">
-      <svg viewBox="0 0 60 68" aria-hidden="true">
-        <path d="M30 2 L56 12 V34 C56 50 44 60 30 66 C16 60 4 50 4 34 V12 Z" fill="#0e1e3d" stroke="#c9a227" stroke-width="3"/>
-        <path d="M30 8 L50 16 V34 C50 46 41 54 30 59 C19 54 10 46 10 34 V16 Z" fill="none" stroke="#c9a227" stroke-width="1.5" opacity="0.6"/>
-        <text x="30" y="42" text-anchor="middle" font-family="Georgia, serif" font-size="24" font-weight="700" fill="#e3c565">SR</text>
-      </svg>
-      <div class="wordmark">Served<em>Right</em></div>
+      <img src="assets/servedright/IMG_3178.png" alt="ServedRight White Logo Header" class="hero-white-logo">
+      <div class="wordmark-container">
+        <div class="wordmark">Served<em>Right</em></div>
+        <img src="assets/servedright/IMG_3022.jpeg" alt="Character pointing and waving behind T" class="char-peek" title="Hello from ServedRight!">
+      </div>
     </div>
+
+    <!-- Mission Statement Section -->
+    <div class="mission-statement">
+      <h2>Our Mission</h2>
+      <p>ServedRight empowers property owners, managers, and individuals with fast, precise, and professional legal document preparation. We eliminate expensive legal hourly fees while ensuring accuracy and peace of mind.</p>
+      <a class="contact-email-badge" href="mailto:support@servedright.com">📩 Contact Us: support@servedright.com</a>
+    </div>
+
+    <!-- Side-by-side logos -->
+    <div class="side-by-side-logos">
+      <img src="assets/servedright/IMG_2893.jpeg" alt="ServedRight Purple Emblem" class="brand-logo-card">
+      <img src="assets/servedright/IMG_2992.jpeg" alt="ServedRight Wooden Seal" class="brand-logo-card">
+    </div>
+
     <h1>Eviction notices, done right.</h1>
     <p class="hero-sub">Professional legal documents from your answers — no law office, no hourly billing. Just the document you need.</p>
 
@@ -388,6 +466,29 @@
         <div class="price-card">
           <div><h3>Therapy relationship audit</h3><p>The most truthful and blunt audit based on communications between partners and spouses.</p></div>
           <div class="price-amt">$79.99</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What's Next -->
+  <section class="whats-next">
+    <div class="wrap">
+      <p class="kicker">Roadmap</p>
+      <h2>What's Next for ServedRight</h2>
+      <p class="section-lead">We are constantly expanding our automated document ecosystem to better serve landlords, tenants, and property managers.</p>
+      <div class="next-grid">
+        <div class="next-card">
+          <h3>Direct E-Filing Integration</h3>
+          <p>Seamlessly submit notice filings directly to local court systems and process servers in participating jurisdictions.</p>
+        </div>
+        <div class="next-card">
+          <h3>Multi-State Compliance Engine</h3>
+          <p>Dynamic clause adjustments tailored to specific county and municipal tenant law variations across all 50 states.</p>
+        </div>
+        <div class="next-card">
+          <h3>AI Document Verification</h3>
+          <p>Automated pre-flight audits to check every lease and eviction notice against jurisdictional statutory deadlines.</p>
         </div>
       </div>
     </div>
