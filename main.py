@@ -390,20 +390,8 @@ ROSTER_SEED = [
     ("bailey",   "visitor", 180, "assets/bailey.jpg",
      "Potter at the edge of town. Sharp, funny, deliberately too much — she dares you to dislike her so she controls the rejection. Outlast the dare."),
     ("sarah",    "visitor", 190, "assets/sarah.jpg",
-     "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real                   "verbatim from read_file output (without the line-number prefix).",
-                  {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}},
-                  ["path", "old", "new"]),
-    "write_file": (t_write_file, "Create a new file or fully overwrite an existing one.",
-                   {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
-    "delete_file": (t_delete_file, "Delete a file in the repo (e.g. a scratch script you created).",
-                    {"path": {"type": "string"}}, ["path"]),
-    "run": (t_run, "Run a shell command in the repo root (tests, py_compile, curl, git diff...). "
-            "Commits/pushes are done for you later; don't run them.",
-            {"command": {"type": "string"}, "timeout": {"type": "integer"}}, ["command"]),
-    "finish": (None, "Call when the task is complete and verified. `summary` is a short PR-style "
-               "description of what changed and why; `title` is a one-line PR title.",
-               {"title": {"type": "string"}, "summary": {"type": "string"}}, ["title", "summary"]),
-}
+     "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real answer."),
+]
 
 
 # Fallback personas used only until you seed full docs via /admin/persona.
