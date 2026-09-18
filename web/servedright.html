@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServedRight — Eviction notices, done right.</title>
+  <meta name="description" content="ServedRight prepares professional eviction notices from your answers. Clear documents, ready to download and print.">
+  <style>
+    :root {
+      --navy: #0e1e3d;
+      --navy-deep: #091429;
+      --gold: #c9a227;
+      --gold-light: #e3c565;
+      --paper: #ffffff;
+      --wash: #f6f4ec;
+      --ink: #1c2333;
+      --muted: #5d6578;
+      --line: #e7dfc9;
+      --serif: Georgia, "Times New Roman", Times, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem; }
+
+    /* Nav */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.8rem 1.5rem;
+      background: rgba(255, 255, 255, 0.97);
+      border-bottom: 2px solid var(--gold);
+    }
+    .nav-brand {
+      font-family: var(--serif); font-size: 1.35rem; font-weight: 700;
+      color: var(--navy); text-decoration: none; letter-spacing: 0.01em;
+    }
+    .nav-brand span { color: var(--gold); }
+    .nav-link { color: var(--muted); text-decoration: none; font-size: 0.92rem; font-weight: 600; }
+    .nav-link:hover { color: var(--navy); }
+
+    /* Buttons */
+    .btn {
+      display: inline-block; padding: 0.85rem 2rem; border-radius: 999px;
+      font-weight: 700; font-size: 1rem; text-decoration: none; letter-spacing: 0.02em;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-navy { background: var(--navy); color: #fff; box-shadow: 0 4px 14px rgba(14, 30, 61, 0.25); }
+    .btn-navy:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(14, 30, 61, 0.35); }
+    .btn-gold { background: linear-gradient(180deg, var(--gold-light), var(--gold)); color: var(--navy-deep); }
+
+    /* Hero */
+    .hero { background: var(--wash); text-align: center; padding: 4.5rem 1.5rem 5rem; border-bottom: 1px solid var(--line); }
+    .hero-inner { max-width: 720px; margin: 0 auto; }
+    .kicker {
+      text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.78rem;
+      font-weight: 700; color: var(--gold); margin-bottom: 1rem;
+    }
+    .hero h1 {
+      font-family: var(--serif); font-size: clamp(2.2rem, 6vw, 3.4rem);
+      color: var(--navy); line-height: 1.12; margin-bottom: 1.2rem;
+    }
+    .hero-sub { font-size: 1.12rem; color: var(--muted); max-width: 580px; margin: 0 auto 2.2rem; }
+    .hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .hero-note { margin-top: 1.4rem; font-size: 0.88rem; color: var(--muted); }
+
+    /* Steps */
+    .steps { padding: 5rem 0; text-align: center; }
+    .steps h2, .points h2, .cta h2 {
+      font-family: var(--serif); font-size: clamp(1.9rem, 5vw, 2.7rem);
+      color: var(--navy); margin-bottom: 1rem; line-height: 1.15;
+    }
+    .section-lead { color: var(--muted); max-width: 620px; margin: 0 auto 3rem; font-size: 1.08rem; }
+    .step-grid { display: grid; gap: 1.5rem; text-align: left; }
+    .step {
+      background: var(--wash); border: 1px solid var(--line); border-radius: 14px;
+      padding: 2rem 1.8rem;
+    }
+    .step-num {
+      font-family: var(--serif); font-size: 1.4rem; color: #fff;
+      background: var(--navy); border-radius: 50%;
+      width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1.1rem;
+    }
+    .step h3 { font-size: 1.2rem; color: var(--navy); margin-bottom: 0.5rem; }
+    .step p { color: var(--muted); }
+
+    /* Points */
+    .points { padding: 5rem 0; background: var(--navy-deep); color: #fff; text-align: center; }
+    .points h2 { color: #fff; }
+    .points .section-lead { color: rgba(255, 255, 255, 0.7); }
+    .point-grid { display: grid; gap: 1.5rem; text-align: left; }
+    .point {
+      border: 1px solid rgba(227, 197, 101, 0.35); border-radius: 14px;
+      padding: 2rem 1.8rem; background: rgba(255, 255, 255, 0.03);
+    }
+    .point h3 { font-family: var(--serif); color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.5rem; }
+    .point p { color: rgba(255, 255, 255, 0.75); }
+
+    /* Samples */
+    .samples { padding: 5rem 0; text-align: center; background: var(--wash); border-top: 1px solid var(--line); }
+    .samples h2 {
+      font-family: var(--serif); font-size: clamp(1.9rem, 5vw, 2.7rem);
+      color: var(--navy); margin-bottom: 1rem; line-height: 1.15;
+    }
+    .sample-grid { display: grid; gap: 1.5rem; margin-top: 2.5rem; text-align: left; }
+    .sample-card {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px;
+      overflow: hidden; box-shadow: 0 12px 34px rgba(14, 30, 61, 0.08);
+    }
+    .sample-card img { width: 100%; height: auto; display: block; }
+    .sample-cap { padding: 1.2rem 1.5rem; }
+    .sample-cap h3 { font-size: 1.1rem; color: var(--navy); margin-bottom: 0.3rem; }
+    .sample-cap p { color: var(--muted); font-size: 0.95rem; }
+    .sample-soon {
+      border: 2px dashed var(--gold); border-radius: 14px;
+      min-height: 280px; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-weight: 600; padding: 2rem; text-align: center;
+      background: rgba(201, 162, 39, 0.05);
+    }
+
+    /* CTA */
+    .cta { padding: 5rem 0 6rem; text-align: center; }
+    .cta .section-lead { margin-bottom: 2rem; }
+    .soon {
+      display: inline-block; margin-top: 1.5rem; padding: 0.7rem 1.6rem;
+      border: 2px dashed var(--gold); border-radius: 999px;
+      color: var(--navy); font-weight: 600; font-size: 0.95rem;
+    }
+
+    /* Footer */
+    .footer {
+      background: var(--wash); border-top: 1px solid var(--line);
+      text-align: center; padding: 2.5rem 1.5rem; color: var(--muted); font-size: 0.88rem;
+    }
+    .footer p { max-width: 720px; margin: 0 auto 0.6rem; }
+    .footer .copyright { color: #9aa0b0; font-size: 0.82rem; }
+
+    @media (min-width: 860px) {
+      .step-grid, .point-grid { grid-template-columns: repeat(3, 1fr); }
+      .sample-grid { grid-template-columns: 1fr 1fr; }
+      .hero { padding: 6rem 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="nav">
+    <a class="nav-brand" href="/">Served<span>Right</span></a>
+    <a class="nav-link" href="/">lockeddoor.ai</a>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-inner">
+      <p class="kicker">Legal document preparation</p>
+      <h1>Eviction notices, done right.</h1>
+      <p class="hero-sub">Answer a few questions about your situation and get a professional eviction notice &mdash; clear, complete, and ready to serve.</p>
+      <div class="hero-cta">
+        <a class="btn btn-navy" href="#start">Start your notice</a>
+      </div>
+      <p class="hero-note">No law office. No hourly billing. Just the document you need.</p>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="steps">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2>Three steps. One document.</h2>
+      <p class="section-lead">Built for landlords and property managers who need it handled correctly, without the runaround.</p>
+      <div class="step-grid">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Answer a few questions</h3>
+          <p>Property, tenant, lease terms, what's owed. Plain language &mdash; no legal background needed.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Review your notice</h3>
+          <p>Your answers become a clean, professional document. Read it over and make sure every detail is right.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Download and serve</h3>
+          <p>Get a print-ready document you can serve with confidence and keep on file.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Why -->
+  <section class="points">
+    <div class="wrap">
+      <p class="kicker">Why ServedRight</p>
+      <h2>Done right means done completely.</h2>
+      <p class="section-lead">A notice with a missing detail is a notice that doesn't hold. We make sure nothing's missing.</p>
+      <div class="point-grid">
+        <div class="point">
+          <h3>Complete every time</h3>
+          <p>Every field your notice needs &mdash; parties, property, amounts, dates, deadlines &mdash; checked before you download.</p>
+        </div>
+        <div class="point">
+          <h3>Plain language in, professional out</h3>
+          <p>You describe the situation like you'd tell a friend. The document comes out like a professional prepared it.</p>
+        </div>
+        <div class="point">
+          <h3>Private by default</h3>
+          <p>Your information stays yours. Nothing shared, nothing sold.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Samples -->
+  <section class="samples">
+    <div class="wrap">
+      <p class="kicker">Sample documents</p>
+      <h2>See what you get.</h2>
+      <p class="section-lead">Real documents, professionally formatted &mdash; generated from a few answers.</p>
+      <div class="sample-grid">
+        <div class="sample-card">
+          <img src="assets/servedright/notice-sample.jpg" alt="Sample eviction notice — Notice of Lease Termination for Non-Payment of Rent">
+          <div class="sample-cap">
+            <h3>Notice of Lease Termination</h3>
+            <p>Non-payment of rent &mdash; professional formatting, every detail in place.</p>
+          </div>
+        </div>
+        <div class="sample-soon">Another sample document<br>on its way.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta" id="start">
+    <div class="wrap">
+      <p class="kicker">Get started</p>
+      <h2>Your notice is a few answers away.</h2>
+      <p class="section-lead">ServedRight is opening soon. The eviction notice builder launches first.</p>
+      <a class="btn btn-gold" href="#start">Start your notice</a>
+      <div><span class="soon">Launching soon</span></div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p>ServedRight is a document preparation service, not a law firm, and does not provide legal advice. For advice about your specific situation, consult a licensed attorney.</p>
+    <p class="copyright">&copy; 2026 LockedDoor.ai</p>
+  </footer>
+
+</body>
+</html>
