@@ -144,5 +144,44 @@ class TestCompanionAndStyles(unittest.TestCase):
         res_advance = main.companion_gate_milestone(comp, 5, "warm")
         self.assertEqual(res_advance, 5)
 
+    def test_10_get_relationships_and_state(self):
+        with patch("main.db") as mock_db, patch("main.roster") as mock_roster, patch("main.open_doors") as mock_doors:
+            mock_conn = MagicMock()
+            mock_cur = MagicMock()
+            mock_cur.fetchall.return_value = [
+                {"girl": "dakota", "milestone": 3, "pinned_kept": ["the diner is her world"]},
+            ]
+            mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+            mock_db.return_value = mock_conn
+
+            rels = main.get_relationships("u1")
+            self.assertIn("dakota", rels)
+            self.assertEqual(rels["dakota"]["milestone"], 3)
+
+            mock_roster.return_value = [
+                {"girl": "dakota"}, {"girl": "zoe"}
+            ]
+            mock_doors.return_value = {
+                "dakota": {"open": True},
+                "zoe": {"open": True}
+            }
+
+            user = {
+                "user_id": "u1",
+                "tier": "visitor",
+                "msg_used": 0,
+                "total_audits_used": 0,
+                "free_audits_used": 0,
+                "audit_credits": 0
+            }
+            res = main.state(user)
+            self.assertIn("girls", res)
+            self.assertTrue(res["girls"]["dakota"]["open"])
+            self.assertEqual(res["girls"]["dakota"]["milestone"], 3)
+            self.assertEqual(res["girls"]["dakota"]["kept"], 1)
+            self.assertTrue(res["girls"]["zoe"]["open"])
+            self.assertEqual(res["girls"]["zoe"]["milestone"], 1)
+            self.assertEqual(res["girls"]["zoe"]["kept"], 0)
+
 if __name__ == "__main__":
     unittest.main()
