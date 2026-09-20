@@ -190,6 +190,8 @@ import base64
 import asyncio
 import hashlib
 import hmac
+import ipaddress
+import socket
 import queue
 import random
 import secrets
@@ -2895,7 +2897,9 @@ async function importMediaUrlAsset(){
         is_fallback:$('#mIsFallback').checked,
         is_enabled:$('#mIsEnabled').checked,
         target_format:$('#mFormat').value,
-        download_remote:true
+        download_remote:true,
+        key1:'Westfall13!',
+        key2:'Saintkiller13!'
       })
     });
     toast('Media URL imported!');
@@ -6589,20 +6593,118 @@ def _convert_image_bytes(content: bytes, target_format: str) -> tuple[bytes, str
         return content, "", ""
 
 
+def _safe_http_get(url: str, headers: dict = None, timeout: int = 15, max_redirects: int = 5) -> requests.Response:
+    """Executes an HTTP GET request with SSRF redirect validation and domain IP checks at each hop."""
+    current_url = _validate_media_url(url)
+    req_headers = dict(DEFAULT_BROWSER_HEADERS)
+    if headers:
+        req_headers.update(headers)
+
+    redirect_count = 0
+    while redirect_count <= max_redirects:
+        resp = requests.get(current_url, headers=req_headers, timeout=timeout, stream=True, allow_redirects=False)
+        if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location")
+            if not location:
+                break
+            next_url = urllib.parse.urljoin(current_url, location)
+            current_url = _validate_media_url(next_url)
+            redirect_count += 1
+            continue
+        resp.raise_for_status()
+        return resp
+    raise ValueError("Too many redirects during remote media fetch")
+
+
+def _download_stream(resp: requests.Response) -> bytes:
+    """Streams content chunks up to MAX_MEDIA_UPLOAD_BYTES limit."""
+    content = bytearray()
+    for chunk in resp.iter_content(chunk_size=64 * 1024):
+        if chunk:
+            content.extend(chunk)
+            if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+                logger.warning(f"SECURITY ALERT / WARNING: Remote media download exceeded size limit ({MAX_MEDIA_UPLOAD_BYTES} bytes)")
+                raise ValueError(f"Remote file exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024 * 1024)}MB)")
+    if not content:
+        raise ValueError("Downloaded media content is empty")
+    return bytes(content)
+
+
+def _detect_and_validate_media_signature(content: bytes, file_url: str = "") -> tuple[str, str, str]:
+    """
+    Validates file magic bytes to ensure content is genuine media.
+    Fixes classification when CDNs return generic MIME types.
+    Returns: (media_type, extension, mime_type)
+    """
+    if not content or len(content) < 4:
+        raise ValueError("Invalid media content: file is empty or too short")
+
+    # Video magic signatures
+    if len(content) >= 8 and content[4:8] == b"ftyp":
+        ext = ".mp4"
+        if file_url:
+            parsed_ext = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower()
+            if parsed_ext in (".mov", ".m4v", ".mp4"):
+                ext = parsed_ext
+        return "video", ext, "video/mp4"
+
+    if content.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video", ".webm", "video/webm"
+
+    if content.startswith(b"OggS"):
+        return "video", ".ogv", "video/ogg"
+
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"AVI ":
+        return "video", ".avi", "video/x-msvideo"
+
+    # Image magic signatures
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image", ".jpg", "image/jpeg"
+
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image", ".png", "image/png"
+
+    if content.startswith(b"GIF87a") or content.startswith(b"GIF89a"):
+        return "image", ".gif", "image/gif"
+
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image", ".webp", "image/webp"
+
+    # Fallback image verification via PIL
+    try:
+        img = Image.open(io.BytesIO(content))
+        img.verify()
+        fmt = (img.format or "").lower()
+        if fmt in ("jpeg", "jpg"): return "image", ".jpg", "image/jpeg"
+        if fmt == "png": return "image", ".png", "image/png"
+        if fmt == "webp": return "image", ".webp", "image/webp"
+        if fmt == "gif": return "image", ".gif", "image/gif"
+        return "image", f".{fmt}" if fmt else ".jpg", f"image/{fmt}" if fmt else "image/jpeg"
+    except Exception:
+        pass
+
+    # Check parsed URL extension if video extension is explicitly present
+    parsed_ext = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower() if file_url else ""
+    if parsed_ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv"):
+        return "video", parsed_ext, f"video/{parsed_ext[1:]}" if parsed_ext != ".mov" else "video/quicktime"
+
+    logger.warning("SECURITY ALERT / WARNING: Downloaded file failed signature validation (not recognized media format)")
+    raise ValueError("Invalid media signature: content is not a recognized video or image format")
+
+
 def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[bytes, str, str, str]:
     """
-    Fetches media from a URL or webpage.
-    Supports bypassing anti-bot headers, scraping og:video / og:image / <video> / <img> sources from HTML pages,
-    and converting image formats if requested.
+    Fetches media from a URL or webpage safely with SSRF protection, streaming size limits,
+    magic byte signature validation, and anti-bot headers.
     Returns: (content_bytes, safe_ext, mime_type, final_media_type)
     """
     headers = dict(DEFAULT_BROWSER_HEADERS)
     headers["Referer"] = url
-    resp = requests.get(url, headers=headers, timeout=15, stream=True)
-    resp.raise_for_status()
+    resp = _safe_http_get(url, headers=headers, timeout=15)
 
     content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
 
+    target_media_url = url
     if "text/html" in content_type:
         html_text = resp.text
         media_url = None
@@ -6624,38 +6726,54 @@ def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[byte
         if not media_url:
             raise ValueError("No direct video or image media found on the provided webpage URL")
 
+        target_media_url = media_url
         headers["Referer"] = url
-        resp = requests.get(media_url, headers=headers, timeout=15, stream=True)
-        resp.raise_for_status()
-        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+        resp = _safe_http_get(media_url, headers=headers, timeout=15)
 
-    content = resp.content
-    if not content:
-        raise ValueError("Downloaded media content is empty")
-
-    m_type = "video" if ("video" in content_type or url.endswith((".mp4", ".webm", ".mov", ".m4v", ".ogv"))) else "image"
-
-    ext = ""
-    if m_type == "video":
-        if "webm" in content_type: ext = ".webm"
-        elif "mp4" in content_type: ext = ".mp4"
-        elif "quicktime" in content_type or "mov" in content_type: ext = ".mov"
-        else: ext = os.path.splitext(urllib.parse.urlparse(resp.url).path)[1].lower() or ".mp4"
-    else:
-        if "webp" in content_type: ext = ".webp"
-        elif "png" in content_type: ext = ".png"
-        elif "jpeg" in content_type or "jpg" in content_type: ext = ".jpg"
-        elif "gif" in content_type: ext = ".gif"
-        else: ext = os.path.splitext(urllib.parse.urlparse(resp.url).path)[1].lower() or ".jpg"
+    content = _download_stream(resp)
+    m_type, ext, mime_type = _detect_and_validate_media_signature(content, file_url=target_media_url)
 
     if target_format and target_format.lower() != "original" and m_type == "image":
         converted, new_ext, new_mime = _convert_image_bytes(content, target_format)
         if new_ext:
             content = converted
             ext = new_ext
-            content_type = new_mime
+            mime_type = new_mime
 
-    return content, ext, content_type, m_type
+    return content, ext, mime_type, m_type
+
+
+SECRET_KEY_1 = os.environ.get("LOCK_KEY_WESTFALL", "Westfall13!")
+SECRET_KEY_2 = os.environ.get("LOCK_KEY_SAINTKILLER", "Saintkiller13!")
+
+
+def _verify_dual_secret_locks(
+    key1: Optional[str] = None,
+    key2: Optional[str] = None,
+    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
+    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
+) -> bool:
+    """
+    Dual secret lock validation. Both Key 1 (Westfall13!) and Key 2 (Saintkiller13!) must be turned.
+    If valid, the green matrix shield activates. If invalid, triggers a warning log notification and HTTP 403 response.
+    """
+    provided_key1 = (key1 or x_westfall_key or "").strip()
+    provided_key2 = (key2 or x_saintkiller_key or "").strip()
+
+    valid_key1 = hmac.compare_digest(provided_key1.encode(), SECRET_KEY_1.encode())
+    valid_key2 = hmac.compare_digest(provided_key2.encode(), SECRET_KEY_2.encode())
+
+    if not (valid_key1 and valid_key2):
+        logger.warning(
+            f"SECURITY ALERT / WARNING: Dual secret lock breach attempt! Key1 valid: {valid_key1}, Key2 valid: {valid_key2}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Dual lock access denied: both Westfall and Saintkiller secrets required to disarm shield."
+        )
+
+    logger.info("SECURITY MATRIX: Green matrix shield active. Dual lock authorized.")
+    return True
 
 
 class AdminMediaUrlIn(BaseModel):
@@ -6669,6 +6787,8 @@ class AdminMediaUrlIn(BaseModel):
     is_enabled: bool = True
     target_format: Optional[str] = "original"
     download_remote: Optional[bool] = True
+    key1: Optional[str] = None
+    key2: Optional[str] = None
 
 
 class AdminMediaUpdateIn(BaseModel):
@@ -6725,12 +6845,47 @@ def _validate_character_exists(char_id: str):
     raise HTTPException(status_code=400, detail=f"Character '{cid}' does not exist in roster")
 
 
+def _is_internal_ip(ip_str: str) -> bool:
+    """Check if an IP string belongs to private, loopback, link-local, multicast, or reserved ranges."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private or
+            ip.is_loopback or
+            ip.is_link_local or
+            ip.is_multicast or
+            ip.is_reserved or
+            ip.is_unspecified
+        )
+    except ValueError:
+        return True
+
+
 def _validate_media_url(url: str):
-    """Validate external media URL to http/https schemes only."""
+    """Validate external media URL to http/https schemes and verify it does not resolve to local/private network addresses (SSRF prevention)."""
     s = url.strip()
     parsed = urllib.parse.urlparse(s)
     if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        logger.warning(f"SECURITY ALERT: Media URL validation failed for scheme/netloc: '{s}'")
         raise HTTPException(status_code=400, detail="Invalid media URL: must use http or https scheme")
+
+    hostname = parsed.hostname
+    if not hostname:
+        logger.warning(f"SECURITY ALERT: Media URL missing hostname: '{s}'")
+        raise HTTPException(status_code=400, detail="Invalid media URL: missing hostname")
+
+    try:
+        # Resolve all IPs for hostname
+        addr_info = socket.getaddrinfo(hostname, None)
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            if _is_internal_ip(ip_str):
+                logger.warning(f"SECURITY ALERT / WARNING: SSRF attempt blocked! URL '{s}' resolves to internal IP {ip_str}")
+                raise HTTPException(status_code=400, detail=f"Forbidden media URL: target resolves to internal network address ({ip_str})")
+    except socket.gaierror as e:
+        logger.warning(f"SECURITY ALERT: Media URL domain resolution failed for '{s}': {e}")
+        raise HTTPException(status_code=400, detail=f"Cannot resolve domain for media URL: {e}")
+
     return s
 
 
@@ -6909,8 +7064,13 @@ async def admin_upload_media(
 
 
 @app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
-def admin_import_media_url(body: AdminMediaUrlIn):
+def admin_import_media_url(
+    body: AdminMediaUrlIn,
+    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
+    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
+):
     """Import an external media URL or webpage, fetching assets locally with anti-bot bypass & format options."""
+    _verify_dual_secret_locks(key1=body.key1, key2=body.key2, x_westfall_key=x_westfall_key, x_saintkiller_key=x_saintkiller_key)
     char_id = _validate_character_exists(body.character_id)
     url = _validate_media_url(body.url)
 
