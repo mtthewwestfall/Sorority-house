@@ -5061,14 +5061,33 @@ def public_roster():
 def state(user=Depends(current_user)):
     house = roster()
     doors = open_doors(user["user_id"], user["tier"], house)
+
+    # OPTIMIZATION (Bolt ⚡): Batch fetch all user relationships in 1 DB query instead of loop calls to get_relationship()
+    # Batch query cuts DB connections/roundtrips from 35+ down to 1 when building state.
+    rel_by_girl = {}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM relationships WHERE user_id=%s", (user["user_id"],))
+            for r in cur.fetchall():
+                rel_by_girl[r["girl"]] = r
+    finally:
+        conn.close()
+
     girls = {}
     for row in house:
         door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
         if door["open"]:
-            rel = get_relationship(user["user_id"], row["girl"])
-            band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
-            girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
-                                  "kept": len(rel.get("pinned_kept") or [])}
+            rel = rel_by_girl.get(row["girl"])
+            if rel is not None:
+                milestone = rel["milestone"]
+                kept = len(rel.get("pinned_kept") or [])
+            else:
+                milestone = 1
+                kept = 0
+            band, _ball = STAGE_META.get(int(milestone), STAGE_META[1])
+            girls[row["girl"]] = {"open": True, "milestone": milestone, "band": band,
+                                  "kept": kept}
         else:
             # locked girls still show so the frontend can render the shut doors
             girls[row["girl"]] = {"open": False, "milestone": 0, "band": "", "kept": 0,
