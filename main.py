@@ -794,11 +794,19 @@ DIFFICULTY = {
     "ice":    {"label": "Ice queen - barely thaws",    "days": 3.0},
 }
 DIFFICULTY_DEFAULT = "normal"
+_DIFFICULTY_CACHE = {}  # In-memory cache mapping girl slug -> (timestamp, difficulty)
+_DIFFICULTY_CACHE_TTL = 60.0  # seconds
 
 
 def difficulty_for(girl):
     """Her console-set difficulty, or the default if she has none or the roster is
     unreachable: pacing must never be the thing that breaks a reply."""
+    # OPTIMIZATION (Bolt ⚡): Cache difficulty in-memory with a 60s TTL to prevent repeated DB queries
+    now = time.time()
+    if girl in _DIFFICULTY_CACHE:
+        ts, diff = _DIFFICULTY_CACHE[girl]
+        if now - ts < _DIFFICULTY_CACHE_TTL:
+            return diff
     try:
         conn = db()
         try:
@@ -810,7 +818,9 @@ def difficulty_for(girl):
     except Exception:
         return DIFFICULTY_DEFAULT
     d = (row or {}).get("difficulty") or DIFFICULTY_DEFAULT
-    return d if d in DIFFICULTY else DIFFICULTY_DEFAULT
+    res = d if d in DIFFICULTY else DIFFICULTY_DEFAULT
+    _DIFFICULTY_CACHE[girl] = (now, res)
+    return res
 
 
 # Content moderation for custom companions (sexual violence hard ban)
@@ -5320,6 +5330,7 @@ def avatar_contest_promote(body: AvatarPromoteIn, _=Depends(admin_required)):
                         (girl, body.name, body.door_title, body.persona, body.min_tier,
                          body.sort_order, data_url, body.blurb))
             conn.commit()
+            _DIFFICULTY_CACHE.pop(girl, None)
     finally:
         conn.close()
     return {"ok": True, "girl": girl}
@@ -6468,6 +6479,7 @@ def admin_console_girl(body: AdminGirlIn):
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
                   body.difficulty))
             conn.commit()
+            _DIFFICULTY_CACHE[girl] = (time.time(), body.difficulty)
     finally:
         conn.close()
     return {"ok": True, "girl": girl}

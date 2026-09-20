@@ -5,7 +5,7 @@ from fastapi.exceptions import HTTPException
 import main
 
 EXACT_PROMPT = (
-    ".realistic women with very large busts. only-realistic portrait — a detailed semi-realistic digital illustration "
+    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
     "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
@@ -164,6 +164,26 @@ class TestCompanionAndStyles(unittest.TestCase):
         query = mock_cur.execute.call_args[0][0]
         self.assertIn("FROM companion_chat_logs", query)
         self.assertIn("WHERE user_id=%s AND companion_id=%s", query)
+
+    @patch("main.db")
+    def test_11_difficulty_for_caching(self, mock_db):
+        main._DIFFICULTY_CACHE.clear()
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {"difficulty": "hard"}
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_db.return_value = mock_conn
+
+        # First call should hit the database and populate cache
+        diff1 = main.difficulty_for("zoe")
+        self.assertEqual(diff1, "hard")
+        self.assertEqual(mock_db.call_count, 1)
+
+        # Second call should hit the cache and NOT call db() again
+        diff2 = main.difficulty_for("zoe")
+        self.assertEqual(diff2, "hard")
+        self.assertEqual(mock_db.call_count, 1)
+        self.assertEqual(main._DIFFICULTY_CACHE.get("zoe")[1], "hard")
 
 if __name__ == "__main__":
     unittest.main()
