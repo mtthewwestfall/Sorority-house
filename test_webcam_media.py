@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from fastapi.exceptions import HTTPException
@@ -11,6 +12,7 @@ client = TestClient(main.app)
 class TestWebcamMediaManager(unittest.TestCase):
 
     def setUp(self):
+        os.environ["ADMIN_SECRET"] = "test-admin-secret"
         main.ADMIN_SECRET = "test-admin-secret"
 
     def test_parse_tags_input(self):

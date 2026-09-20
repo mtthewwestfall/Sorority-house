@@ -863,6 +863,20 @@ _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
+@app.middleware("http")
+async def security_matrix_filter(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    if request.url.path.startswith("/admin/"):
+        header_sec = request.headers.get("X-Admin-Secret", "")
+        if admin_sec and not hmac.compare_digest(header_sec.encode(), admin_sec.encode()):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "Invalid admin secret"})
+
+    response = await call_next(request)
+    return response
+
 @app.get("/media/files/{filename}")
 def serve_media_file(filename: str):
     # Sanitize filename to prevent directory traversal
@@ -1274,9 +1288,10 @@ def _check_admin(secret: str, strict: bool = False):
     """If ADMIN_SECRET is set, /admin/* calls must send it. Unset => open (dev/personal),
     EXCEPT strict endpoints (anything that changes money/entitlements), which refuse to
     run at all until ADMIN_SECRET is configured."""
-    if strict and not ADMIN_SECRET:
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    if strict and not admin_sec:
         raise HTTPException(status_code=503, detail="ADMIN_SECRET must be set for this endpoint")
-    if ADMIN_SECRET and not hmac.compare_digest(secret.encode(), ADMIN_SECRET.encode()):
+    if admin_sec and not hmac.compare_digest(secret.encode(), admin_sec.encode()):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
@@ -3625,9 +3640,10 @@ def auth_exchange(body: ExchangeIn):
 
 
 def _telegram_guard(secret: str, telegram_id: int):
-    if not TELEGRAM_BOT_SECRET:
+    bot_sec = os.environ.get("TELEGRAM_BOT_SECRET", "")
+    if not bot_sec:
         raise HTTPException(status_code=503, detail="TELEGRAM_BOT_SECRET must be set")
-    if not hmac.compare_digest(secret.encode(), TELEGRAM_BOT_SECRET.encode()):
+    if not hmac.compare_digest(secret.encode(), bot_sec.encode()):
         raise HTTPException(status_code=401, detail="Bad bot secret")
     if telegram_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid telegram_id")
@@ -6225,7 +6241,8 @@ def admin_end_comp(body: AdminEmailIn):
 @app.post("/admin/console/set-tier", dependencies=[Depends(admin_required)])
 def admin_console_set_tier(body: AdminSetTierIn):
     """Same semantics as /admin/set-tier, authenticated via X-Admin-Secret."""
-    return set_tier(SetTierIn(email=body.email, tier=body.tier, secret=ADMIN_SECRET))
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    return set_tier(SetTierIn(email=body.email, tier=body.tier, secret=admin_sec))
 
 
 @app.post("/admin/console/verify", dependencies=[Depends(admin_required)])
@@ -6249,7 +6266,8 @@ def admin_console_verify(body: AdminEmailIn):
 
 @app.post("/admin/console/grant-audits", dependencies=[Depends(admin_required)])
 def admin_console_grant_audits(body: AdminGrantAuditsIn):
-    return grant_audits(GrantAuditsIn(email=body.email, amount=body.amount, secret=ADMIN_SECRET))
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    return grant_audits(GrantAuditsIn(email=body.email, amount=body.amount, secret=admin_sec))
 
 
 @app.post("/admin/note", dependencies=[Depends(admin_required)])
@@ -6378,8 +6396,9 @@ def admin_personas():
 def admin_console_persona(body: AdminPersonaIn):
     if not body.persona.strip() or not body.name.strip():
         raise HTTPException(status_code=400, detail="name and persona are required")
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
     return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
-                                 persona=body.persona, secret=ADMIN_SECRET))
+                                 persona=body.persona, secret=admin_sec))
 
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
