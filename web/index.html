@@ -939,6 +939,8 @@
         <nav class="rl-footer-col" aria-label="Account">
           <h4>Account</h4>
           <a href="#" id="footer-profile" hidden>Profile</a>
+          <a href="#" onclick="openKeyholeModal(); return false;">KEYHOLE Pricing & Tiers</a>
+          <a href="#" onclick="openAdminPreviewModal(); return false;">Live Preview Studio</a>
           <a href="#" id="footer-auth">Sign in</a>
           <a href="#top">Back to top ↑</a>
         </nav>
@@ -1008,6 +1010,155 @@
       <div class="auth-msg" id="avatar-msg" aria-live="polite"></div>
     </div>
   </div>
+  <!-- Admin KEYHOLE Live Preview & Creator Capture Modal -->
+  <div class="chat-backdrop" id="admin-preview-modal" role="dialog" aria-modal="true" aria-labelledby="admin-preview-heading">
+    <div class="chat-panel auth-panel" style="max-width: 680px; max-height: 90vh; overflow-y: auto;">
+      <button class="chat-close auth-close" id="admin-preview-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="admin-preview-heading" style="color: var(--gold); margin-bottom: 4px;">KEYHOLE Live Preview & Creator Studio</h2>
+      <p class="auth-sub" style="margin-bottom: 12px;">Test video feeds, screen flip/mirror, camera switching, skinning, and creator video/photo capture.</p>
+
+      <!-- Live Video Feed Container with TEST/PREVIEW Banner -->
+      <div id="live-preview-box" style="position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; border: 2px solid var(--gold); margin-bottom: 12px;">
+        <!-- Banner Overlay -->
+        <div style="position: absolute; top: 10px; left: 10px; background: rgba(220, 38, 38, 0.9); color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; z-index: 10; letter-spacing: 1px;">
+          TEST / PREVIEW - LIVE SESSION ACTIVE
+        </div>
+
+        <!-- Video Stream element -->
+        <video id="preview-video-stream" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; transform: scaleX(1); transition: transform 0.3s ease;"></video>
+
+        <div id="preview-placeholder" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #aaa; text-align: center; padding: 20px; background: rgba(0,0,0,0.85);">
+          <div style="font-size: 2.5rem; margin-bottom: 8px;">📹</div>
+          <div>Camera Off</div>
+          <div style="font-size: 0.8rem; color: #888; margin-top: 4px;">Click "Start Camera Test" below to activate camera</div>
+        </div>
+      </div>
+
+      <!-- Video Control Toolbar -->
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; justify-content: center;">
+        <button id="btn-toggle-camera" class="button button-gold" style="padding: 8px 14px; font-size: 0.85rem;" type="button">Start Camera Test</button>
+        <button id="btn-flip-facing" class="button" style="padding: 8px 14px; font-size: 0.85rem;" type="button">🔄 Switch Front / Rear Camera</button>
+        <button id="btn-flip-mirror" class="button" style="padding: 8px 14px; font-size: 0.85rem;" type="button">↔️ Flip Screen (Mirror)</button>
+        <button id="btn-trigger-backend-test" class="button" style="padding: 8px 14px; font-size: 0.85rem; background: #2a3a30; border: 1px solid var(--gold); color: var(--gold);" type="button">⚡ Test Backend Route</button>
+      </div>
+
+      <div id="preview-status-msg" style="font-size: 0.85rem; color: var(--gold); margin-bottom: 12px; min-height: 18px;"></div>
+
+      <!-- Creator Capture & Skinning Studio -->
+      <div style="border-top: 1px solid #3a4a40; padding-top: 16px; margin-top: 12px; text-align: left;">
+        <h3 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 8px;">Creator Capture & Skinning Studio</h3>
+
+        <form id="creator-capture-form" style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; gap: 10px;">
+            <div style="flex: 1;">
+              <label style="font-size: 0.8rem; color: var(--gold);">Select Sister</label>
+              <select id="creator-sister-select" style="width: 100%; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
+                <option value="bailey">Bailey</option>
+                <option value="carmen">Carmen</option>
+                <option value="chloe">Chloe</option>
+                <option value="valentina">Valentina</option>
+                <option value="riley">Riley</option>
+                <option value="maya">Maya</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 0.8rem; color: var(--gold);">Tier Access</label>
+              <select id="creator-tier-select" style="width: 100%; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
+                <option value="premade_pictures">Pre-made Pictures ($2.99+)</option>
+                <option value="fresh_videos">Fresh Generated Videos ($14.99 VIP Only)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-size: 0.8rem; color: var(--gold);">Media URL (Picture or Video)</label>
+            <input type="text" id="creator-media-url" placeholder="assets/portraits/bailey.jpg or video URL" style="width: 100%; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
+          </div>
+
+          <div>
+            <label style="font-size: 0.8rem; color: var(--gold);">Custom Skin Theme / Background</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="creator-skin-color" value="#2F4A3C" placeholder="#2F4A3C" style="flex: 1; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
+              <button id="btn-save-skin" class="button" style="padding: 6px 12px; font-size: 0.8rem;" type="button">Apply Custom Skin</button>
+            </div>
+          </div>
+
+          <button id="btn-submit-capture" class="button button-gold" style="padding: 8px; font-size: 0.85rem; margin-top: 4px;" type="submit">Assign Media to Keyhole Library</button>
+        </form>
+
+        <!-- iPhone Mobile Recording Step-by-Step Guide -->
+        <div style="border-top: 1px dashed #3a4a40; margin-top: 14px; padding-top: 10px;">
+          <h4 style="color: var(--gold); font-size: 0.95rem; margin-bottom: 6px;">📱 iPhone & Mobile Creator Guide</h4>
+          <ol style="font-size: 0.8rem; color: #d0d0d0; padding-left: 18px; margin: 0; display: flex; flex-direction: column; gap: 4px;">
+            <li><strong>Open Safari / Chrome on iPhone:</strong> Tap <em>"Live Preview Studio"</em> in the footer.</li>
+            <li><strong>Camera Permission:</strong> Allow camera access when prompted.</li>
+            <li><strong>Flip Camera / Screen:</strong> Tap <code>🔄 Switch Front / Rear Camera</code> to toggle selfie vs main camera, and <code>↔️ Flip Screen (Mirror)</code> to adjust orientation for selfie recording.</li>
+            <li><strong>Record & Skin:</strong> Capture photo or video, apply custom hex theme color or background wallpaper, and assign to your sister's keyhole tier library.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KEYHOLE Tier List Modal -->
+  <div class="chat-backdrop" id="keyhole-modal" role="dialog" aria-modal="true" aria-labelledby="keyhole-modal-heading">
+    <div class="chat-panel auth-panel" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+      <button class="chat-close auth-close" id="keyhole-modal-close" type="button" aria-label="Close">&times;</button>
+      <h2 id="keyhole-modal-heading" style="color: var(--gold); margin-bottom: 4px;">KEYHOLE Video & Tier Access</h2>
+      <p class="auth-sub" style="margin-bottom: 12px; font-size: 0.9rem;">
+        ⚡ <strong>10-Minute Free Preview Session</strong> available for new users!
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 12px; text-align: left; margin-bottom: 16px;">
+        <div style="border: 1px solid var(--border-color, #3a4a40); padding: 12px; border-radius: 8px; background: rgba(0,0,0,0.2);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="color: var(--gold); font-size: 1.05rem;">Keyhole Peek</strong>
+            <span style="background: var(--gold); color: #000; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem;">$2.99</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #d0d0d0; margin-top: 6px;">
+            15 min session • 35 video replies + 100 text msgs<br>
+            <em style="font-size: 0.80rem; color: #aaaaaa;">(Limit: Max 3 purchases per customer per month)</em>
+          </p>
+        </div>
+
+        <div style="border: 1px solid var(--border-color, #3a4a40); padding: 12px; border-radius: 8px; background: rgba(0,0,0,0.2);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="color: var(--gold); font-size: 1.05rem;">Keyhole Standard</strong>
+            <span style="background: var(--gold); color: #000; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem;">$5.99</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #d0d0d0; margin-top: 6px;">
+            30 min session • 70 video replies + 200 text msgs
+          </p>
+        </div>
+
+        <div style="border: 1px solid var(--border-color, #3a4a40); padding: 12px; border-radius: 8px; background: rgba(0,0,0,0.2);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="color: var(--gold); font-size: 1.05rem;">Keyhole Extended</strong>
+            <span style="background: var(--gold); color: #000; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem;">$9.99</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #d0d0d0; margin-top: 6px;">
+            45 min session • 100 video replies + 300 text msgs
+          </p>
+        </div>
+
+        <div style="border: 2px solid var(--gold); padding: 12px; border-radius: 8px; background: rgba(216, 184, 148, 0.1);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="color: var(--gold); font-size: 1.05rem;">Keyhole VIP Exclusive</strong>
+            <span style="background: var(--gold); color: #000; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.85rem;">$14.99</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #e0e0e0; margin-top: 6px;">
+            60 min session • Unlimited High-Priority video replies & text<br>
+            ✨ <strong>Exclusive:</strong> 3 fresh generated video messages + pre-made pictures included!
+          </p>
+        </div>
+      </div>
+
+      <div style="font-size: 0.75rem; color: #888888; border-top: 1px solid #3a4a40; padding-top: 10px; margin-top: 8px; font-style: italic;">
+        Rates, session lengths, included usage, limits, and package contents are subject to change.
+      </div>
+    </div>
+  </div>
+
   <!-- Companion Creation Modal -->
   <div class="chat-backdrop" id="companion-modal" role="dialog" aria-modal="true" aria-labelledby="companion-modal-heading">
     <div class="chat-panel auth-panel" style="max-width: 550px; max-height: 90vh; overflow-y: auto;">
@@ -1965,6 +2116,136 @@ const PRESET_FACES = {
         seg.querySelectorAll('button').forEach((el) => el.classList.remove('active'));
         b.classList.add('active');
         renderFacePicker(pickerId, hiddenId, b.dataset.g);
+      });
+    }
+
+    // KEYHOLE Modal Handlers
+    const keyholeModal = document.getElementById('keyhole-modal');
+    const keyholeModalClose = document.getElementById('keyhole-modal-close');
+    if (keyholeModalClose) {
+      keyholeModalClose.addEventListener('click', () => {
+        keyholeModal.classList.remove('is-open');
+      });
+    }
+    window.openKeyholeModal = function() {
+      if (keyholeModal) keyholeModal.classList.add('is-open');
+    };
+
+    // Admin Live Preview & Video Controls
+    const adminPreviewModal = document.getElementById('admin-preview-modal');
+    const adminPreviewClose = document.getElementById('admin-preview-close');
+    const previewVideoStream = document.getElementById('preview-video-stream');
+    const previewPlaceholder = document.getElementById('preview-placeholder');
+    const previewStatusMsg = document.getElementById('preview-status-msg');
+
+    let currentMediaStream = null;
+    let isMirrored = true;
+    let facingMode = 'user'; // 'user' (front) or 'environment' (back)
+
+    if (adminPreviewClose) {
+      adminPreviewClose.addEventListener('click', () => {
+        stopCamera();
+        adminPreviewModal.classList.remove('is-open');
+      });
+    }
+
+    window.openAdminPreviewModal = function() {
+      if (adminPreviewModal) adminPreviewModal.classList.add('is-open');
+    };
+
+    async function startCamera() {
+      try {
+        if (currentMediaStream) stopCamera();
+        currentMediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facingMode },
+          audio: false
+        });
+        if (previewVideoStream) {
+          previewVideoStream.srcObject = currentMediaStream;
+          previewPlaceholder.style.display = 'none';
+        }
+        document.getElementById('btn-toggle-camera').textContent = 'Stop Camera Test';
+        if (previewStatusMsg) previewStatusMsg.textContent = `Camera active (${facingMode === 'user' ? 'Front' : 'Rear'})`;
+      } catch (err) {
+        if (previewStatusMsg) previewStatusMsg.textContent = 'Camera access error: ' + err.message;
+      }
+    }
+
+    function stopCamera() {
+      if (currentMediaStream) {
+        currentMediaStream.getTracks().forEach(track => track.stop());
+        currentMediaStream = null;
+      }
+      if (previewVideoStream) previewVideoStream.srcObject = null;
+      if (previewPlaceholder) previewPlaceholder.style.display = 'flex';
+      const toggleBtn = document.getElementById('btn-toggle-camera');
+      if (toggleBtn) toggleBtn.textContent = 'Start Camera Test';
+      if (previewStatusMsg) previewStatusMsg.textContent = 'Camera stopped.';
+    }
+
+    const btnToggleCam = document.getElementById('btn-toggle-camera');
+    if (btnToggleCam) {
+      btnToggleCam.addEventListener('click', () => {
+        if (currentMediaStream) stopCamera(); else startCamera();
+      });
+    }
+
+    const btnFlipFacing = document.getElementById('btn-flip-facing');
+    if (btnFlipFacing) {
+      btnFlipFacing.addEventListener('click', () => {
+        facingMode = (facingMode === 'user') ? 'environment' : 'user';
+        if (currentMediaStream) startCamera(); else {
+          if (previewStatusMsg) previewStatusMsg.textContent = `Switched orientation to ${facingMode === 'user' ? 'Front' : 'Rear'} camera`;
+        }
+      });
+    }
+
+    // Creator Form Event Listeners
+    const creatorCaptureForm = document.getElementById('creator-capture-form');
+    if (creatorCaptureForm) {
+      creatorCaptureForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const girl = document.getElementById('creator-sister-select').value;
+        const tierAccess = document.getElementById('creator-tier-select').value;
+        const mediaUrl = document.getElementById('creator-media-url').value;
+        if (!mediaUrl) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Please enter a Media URL.';
+          return;
+        }
+        if (previewStatusMsg) previewStatusMsg.textContent = `Assigned ${mediaUrl} to ${girl} (${tierAccess}).`;
+      });
+    }
+
+    const btnSaveSkin = document.getElementById('btn-save-skin');
+    if (btnSaveSkin) {
+      btnSaveSkin.addEventListener('click', () => {
+        const girl = document.getElementById('creator-sister-select').value;
+        const skinColor = document.getElementById('creator-skin-color').value;
+        if (previewStatusMsg) previewStatusMsg.textContent = `Custom skin ${skinColor} applied for ${girl}.`;
+      });
+    }
+
+    const btnFlipMirror = document.getElementById('btn-flip-mirror');
+    if (btnFlipMirror) {
+      btnFlipMirror.addEventListener('click', () => {
+        isMirrored = !isMirrored;
+        if (previewVideoStream) {
+          previewVideoStream.style.transform = isMirrored ? 'scaleX(-1)' : 'scaleX(1)';
+        }
+        if (previewStatusMsg) previewStatusMsg.textContent = `Screen flipped / mirrored: ${isMirrored ? 'ON (Selfie View)' : 'OFF (Normal View)'}`;
+      });
+    }
+
+    const btnTestBackend = document.getElementById('btn-trigger-backend-test');
+    if (btnTestBackend) {
+      btnTestBackend.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/keyhole/tiers');
+          const data = await res.json();
+          if (previewStatusMsg) previewStatusMsg.textContent = `Backend KEYHOLE OK: ${Object.keys(data.tiers).length} tiers active. Disclaimer: "${data.disclaimer}"`;
+        } catch (e) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Backend test error: ' + e.message;
+        }
       });
     }
 

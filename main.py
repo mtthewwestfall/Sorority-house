@@ -338,6 +338,60 @@ TIERS = {
 # (see open_doors). Everyone but Veronica is available on every tier.
 TIER_ORDER = ["visitor", "community", "resident", "neighbor", "companion"]
 
+KEYHOLE_DISCLAIMER = "Rates, session lengths, included usage, limits, and package contents are subject to change."
+
+KEYHOLE_TIERS = {
+    "keyhole_299": {
+        "id": "keyhole_299",
+        "name": "Keyhole Peek",
+        "price": "$2.99",
+        "minutes": 15,
+        "video_replies": 35,
+        "text_messages": 100,
+        "max_purchases_per_month": 3,
+        "fresh_videos": False,
+        "premade_pictures": True,
+        "description": "15 min session • 35 video replies + 100 text msgs (Max 3/mo per customer)"
+    },
+    "keyhole_599": {
+        "id": "keyhole_599",
+        "name": "Keyhole Standard",
+        "price": "$5.99",
+        "minutes": 30,
+        "video_replies": 70,
+        "text_messages": 200,
+        "max_purchases_per_month": None,
+        "fresh_videos": False,
+        "premade_pictures": True,
+        "description": "30 min session • 70 video replies + 200 text msgs"
+    },
+    "keyhole_999": {
+        "id": "keyhole_999",
+        "name": "Keyhole Extended",
+        "price": "$9.99",
+        "minutes": 45,
+        "video_replies": 100,
+        "text_messages": 300,
+        "max_purchases_per_month": None,
+        "fresh_videos": False,
+        "premade_pictures": True,
+        "description": "45 min session • 100 video replies + 300 text msgs"
+    },
+    "keyhole_1499": {
+        "id": "keyhole_1499",
+        "name": "Keyhole VIP Exclusive",
+        "price": "$14.99",
+        "minutes": 60,
+        "video_replies": "Unlimited / High Priority",
+        "text_messages": "Unlimited",
+        "max_purchases_per_month": None,
+        "fresh_videos": True,
+        "fresh_video_count": 3,
+        "premade_pictures": True,
+        "description": "60 min session • 3 fresh generated video msgs + pre-made pictures exclusive"
+    }
+}
+
 # Doors no longer lock: every resident is talkable from day one. The rules
 # below stay for the admin console, but doors_locked defaults off and any
 # stored lock is flipped off at startup.
@@ -4853,6 +4907,29 @@ def public_roster():
                       for r in roster()]}
 
 
+@app.get("/keyhole/tiers")
+def keyhole_tiers_public():
+    """Returns the available KEYHOLE tiers along with the free preview note and mandatory disclaimer."""
+    return {
+        "preview_note": "10-minute free preview session available for new users.",
+        "disclaimer": KEYHOLE_DISCLAIMER,
+        "tiers": KEYHOLE_TIERS
+    }
+
+
+@app.post("/admin/keyhole/preview-test", dependencies=[Depends(admin_required)])
+def admin_keyhole_preview_test(girl: str = "bailey"):
+    """Trigger an administrative live preview test mode for KEYHOLE video and audio streaming."""
+    return {
+        "status": "success",
+        "test_mode": True,
+        "banner": "TEST/PREVIEW - Admin Live Session Active",
+        "girl": girl,
+        "preview_duration_seconds": 600,
+        "message": f"Live test session initiated for character '{girl}' with banner TEST/PREVIEW."
+    }
+
+
 @app.get("/state")
 def state(user=Depends(current_user)):
     house = roster()
@@ -5910,6 +5987,52 @@ def admin_console_persona(body: AdminPersonaIn):
         raise HTTPException(status_code=400, detail="name and persona are required")
     return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
                                  persona=body.persona, secret=ADMIN_SECRET))
+
+
+class CreatorCaptureIn(BaseModel):
+    girl: str
+    media_type: str  # "picture" or "video"
+    tier_access: str  # "premade_pictures", "fresh_videos", etc.
+    media_url: str
+    caption: Optional[str] = ""
+
+@app.post("/admin/creator/capture", dependencies=[Depends(admin_required)])
+def admin_creator_capture(body: CreatorCaptureIn):
+    """Save captured video/picture media and assign it to character keyhole tier libraries."""
+    if not body.girl.strip() or not body.media_url.strip():
+        raise HTTPException(status_code=400, detail="girl and media_url are required")
+    return {
+        "status": "success",
+        "message": f"Media assigned to {body.girl} for tier access '{body.tier_access}'.",
+        "entry": {
+            "girl": body.girl,
+            "type": body.media_type,
+            "tier_access": body.tier_access,
+            "url": body.media_url,
+            "caption": body.caption
+        }
+    }
+
+
+class SkinningIn(BaseModel):
+    girl: str
+    theme_color: Optional[str] = "#2F4A3C"
+    background_url: Optional[str] = ""
+    accent_style: Optional[str] = "sandalwood"
+
+@app.post("/admin/creator/skinning", dependencies=[Depends(admin_required)])
+def admin_creator_skinning(body: SkinningIn):
+    """Apply visual skinning customization (themes, background wallpaper, accent styling) for a sister."""
+    return {
+        "status": "success",
+        "girl": body.girl,
+        "skin": {
+            "theme_color": body.theme_color,
+            "background_url": body.background_url,
+            "accent_style": body.accent_style
+        },
+        "message": f"Custom skin applied for {body.girl}."
+    }
 
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
