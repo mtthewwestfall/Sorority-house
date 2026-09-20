@@ -832,8 +832,18 @@ STAGE_META = {
 # ---------------------------------------------------------------------------
 # APP + CORS + UPLOADS SETUP
 # ---------------------------------------------------------------------------
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "media")
+UPLOAD_DIR = os.environ.get(
+    "KEYHOLE_MEDIA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "media")
+)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".ogv", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+ALLOWED_MEDIA_MIMES = {
+    "video/mp4", "video/webm", "video/quicktime", "video/ogg", "video/x-m4v",
+    "image/jpeg", "image/png", "image/webp", "image/gif"
+}
+MAX_MEDIA_UPLOAD_BYTES = int(os.environ.get("MAX_MEDIA_UPLOAD_BYTES", 100 * 1024 * 1024))  # 100MB default
 
 app = FastAPI(title="God's Greek backend")
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
@@ -6265,6 +6275,31 @@ def _parse_tags_input(raw_tags) -> List[str]:
     return out
 
 
+def _validate_character_exists(char_id: str):
+    """Ensure character_id resolves to an existing/approved character in the roster or personas."""
+    cid = char_id.strip().lower()
+    if not cid:
+        raise HTTPException(status_code=400, detail="character_id is required")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT girl FROM personas WHERE girl=%s", (cid,))
+            if cur.fetchone():
+                return cid
+    finally:
+        conn.close()
+    raise HTTPException(status_code=400, detail=f"Character '{cid}' does not exist in roster")
+
+
+def _validate_media_url(url: str):
+    """Validate external media URL to http/https schemes only."""
+    s = url.strip()
+    parsed = urllib.parse.urlparse(s)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid media URL: must use http or https scheme")
+    return s
+
+
 @app.get("/admin/media", dependencies=[Depends(admin_required)])
 def admin_list_media(character_id: str = ""):
     """List all media assets in the library, optionally filtered by character_id."""
@@ -6304,15 +6339,20 @@ async def admin_upload_media(
     is_enabled: bool = Form(True)
 ):
     """Upload a media file and assign it to a character."""
-    char_id = character_id.strip().lower()
-    if not char_id:
-        raise HTTPException(status_code=400, detail="character_id is required")
+    char_id = _validate_character_exists(character_id)
 
     filename = file.filename or "file"
     ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+    content_type = (file.content_type or "").strip().lower()
+    if content_type and content_type not in ALLOWED_MEDIA_MIMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
+
     m_type = media_type.strip().lower()
     if not m_type:
-        m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".avi", ".ogv") else "image"
+        m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv") else "image"
     if m_type not in ("video", "image"):
         m_type = "video"
 
@@ -6322,6 +6362,8 @@ async def admin_upload_media(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
 
     with open(dest_path, "wb") as f:
         f.write(content)
@@ -6356,12 +6398,8 @@ async def admin_upload_media(
 @app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
 def admin_import_media_url(body: AdminMediaUrlIn):
     """Import an approved external media URL and assign it to a character."""
-    char_id = body.character_id.strip().lower()
-    if not char_id:
-        raise HTTPException(status_code=400, detail="character_id is required")
-    url = body.url.strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="url is required")
+    char_id = _validate_character_exists(body.character_id)
+    url = _validate_media_url(body.url)
 
     m_type = body.media_type.strip().lower()
     if m_type not in ("video", "image"):
@@ -6458,12 +6496,21 @@ async def admin_replace_media_file(
             if file and file.filename:
                 filename = file.filename
                 ext = os.path.splitext(filename)[1].lower()
-                safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
-                dest_path = os.path.join(UPLOAD_DIR, safe_name)
+                if ext not in ALLOWED_MEDIA_EXTENSIONS:
+                    raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+                content_type = (file.content_type or "").strip().lower()
+                if content_type and content_type not in ALLOWED_MEDIA_MIMES:
+                    raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
 
                 content = await file.read()
                 if not content:
                     raise HTTPException(status_code=400, detail="Uploaded file is empty")
+                if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
+
+                safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+                dest_path = os.path.join(UPLOAD_DIR, safe_name)
 
                 with open(dest_path, "wb") as f:
                     f.write(content)
@@ -6480,7 +6527,7 @@ async def admin_replace_media_file(
                         except OSError:
                             pass
             elif url and url.strip():
-                new_url = url.strip()
+                new_url = _validate_media_url(url)
                 new_file_path = ""
                 # Remove old file if converting to URL
                 if old_file_path:
