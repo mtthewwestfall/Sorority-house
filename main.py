@@ -2429,6 +2429,9 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
                         "milestone": brain_milestone(brain, rel["milestone"])}
         if picture_due:
             done_payload["picture_due"] = True
+        served_media = detect_and_serve_media(user_id, girl, user_message)
+        if served_media:
+            done_payload["served_media"] = served_media
         yield _sse("done", done_payload)
     finally:
         stop.set()
@@ -2842,6 +2845,11 @@ class AdminGirlIn(BaseModel):
     sort_order: int = 100
     difficulty: str = DIFFICULTY_DEFAULT
     active: bool = True
+    age: int = 18
+    background_info: str = ""
+    personality_traits: str = ""
+    no_gos: str = ""
+    media_library: Any = []
 
 
 @app.on_event("startup")
@@ -3249,16 +3257,52 @@ def telegram_link(body: TelegramLinkIn):
             "created": False, "email": email}
 
 
+MEDIA_REQUEST_KEYWORDS = ["picture", "photo", "pic", "video", "selfie", "snap", "image", "media"]
+
+def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Dict[str, Any]]:
+    """Detects if user asks for a picture or video during chat and serves an item from that girl's library."""
+    msg_lower = message.lower()
+    if not any(kw in msg_lower for kw in MEDIA_REQUEST_KEYWORDS):
+        return None
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT media_library, avatar_url, name FROM personas WHERE girl=%s", (girl,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            library = row.get("media_library") or []
+            if isinstance(library, str):
+                try:
+                    library = json.loads(library)
+                except Exception:
+                    library = []
+            if library and isinstance(library, list):
+                item = random.choice(library)
+                if isinstance(item, dict):
+                    return item
+                return {"type": "image", "url": str(item)}
+            # Fallback placeholder item from her library profile
+            fallback_url = row.get("avatar_url") or ""
+            return {"type": "image", "url": fallback_url, "title": f"Picture from {row.get('name', girl.title())}'s library"}
+    finally:
+        conn.close()
+
+
 @app.post("/chat")
 def chat(body: ChatIn, user=Depends(current_user)):
     """Whole reply in one response. The brain runs behind it, so "milestone" here
     is the stage as of this turn; /state has it once the refresh lands."""
     girl, rel, remaining = chat_preflight(user, body.girl)
     used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    served_media = detect_and_serve_media(user["user_id"], girl, body.message)
     if pic_tease_due(user["user_id"], user["tier"], used):
         persist_turn(user["user_id"], girl, rel, body.message, PIC_TEASE_LINE)
-        return {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
+        resp = {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
                 "milestone": int(rel["milestone"])}
+        if served_media:
+            resp["served_media"] = served_media
+        return resp
     try:
         msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
         reply = llm(MOUTH, msgs)   # no thinking budget for chat
@@ -3270,6 +3314,8 @@ def chat(body: ChatIn, user=Depends(current_user)):
 
     resp = {"ok": True, "reply": reply, "remaining": remaining,
             "milestone": int(rel["milestone"])}
+    if served_media:
+        resp["served_media"] = served_media
     if pic_deliver_due(user["user_id"], user["tier"]):
         resp["picture_due"] = True
     return resp
@@ -5181,6 +5227,172 @@ def grant_pictures(body: GrantPicturesIn):
     return _grant_picture_packs(user["user_id"], body.packs, payment_id)
 
 
+# ---------------------------------------------------------------------------
+# MODULAR PAYMENT LAYER — Abstract base provider & manager
+# Allows plugging compatible payment providers without site rebuilds.
+# ---------------------------------------------------------------------------
+class BasePaymentProvider:
+    provider_name: str = "base"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+class ShopifyPaymentProvider(BasePaymentProvider):
+    provider_name: str = "shopify"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not SHOPIFY_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="SHOPIFY_WEBHOOK_SECRET must be set")
+        digest = base64.b64encode(hmac.new(SHOPIFY_WEBHOOK_SECRET.encode(), raw_body, hashlib.sha256).digest()).decode()
+        if not hmac.compare_digest(digest, headers.get("X-Shopify-Hmac-Sha256", "")):
+            raise HTTPException(status_code=401, detail="Bad Shopify signature")
+        try:
+            order = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        packs = sum(int(li.get("quantity") or 0) for li in order.get("line_items") or []
+                    if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
+        if packs <= 0:
+            return {"ok": True, "ignored": True}
+        attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
+        user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
+        if user_id:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
+                    if cur.fetchone() is None:
+                        user_id = ""
+            finally:
+                conn.close()
+        if not user_id:
+            email = (order.get("email") or order.get("contact_email") or "").strip()
+            if not email:
+                raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
+            user_id = _user_for_email(email)["user_id"]
+        return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "shopify", "checkout_url": f"{SITE_URL}/cart", "pack_ref": _pack_ref(user_id)}
+
+
+class StripePaymentProvider(BasePaymentProvider):
+    provider_name: str = "stripe"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not STRIPE_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="STRIPE_WEBHOOK_SECRET must be set")
+        if not _stripe_signed(raw_body, headers.get("Stripe-Signature", "")):
+            raise HTTPException(status_code=401, detail="Bad Stripe signature")
+        try:
+            event = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        kind = event.get("type", "")
+        obj = (event.get("data") or {}).get("object") or {}
+        customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else \
+            (obj.get("customer") or {}).get("id", "")
+        event_at = int(event.get("created") or 0)
+
+        if kind == "invoice.paid":
+            tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
+            if not tier:
+                return {"ok": True, "ignored": "no known price"}
+            sub = _stripe_invoice_subscription(obj)
+            user = _user_for_stripe_checkout(sub) or _user_for_stripe_customer(customer_id)
+            if user is None:
+                email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
+                if not email:
+                    return {"ok": True, "ignored": "no email"}
+                try:
+                    user = _user_for_email(email)
+                except HTTPException:
+                    return {"ok": True, "ignored": "no account"}
+            applied = _apply_stripe_event(user["user_id"], tier, customer_id, sub, event_at)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            pi = obj.get("payment_intent")
+            pi = pi if isinstance(pi, str) else (pi or {}).get("id", "") or ""
+            _affitor_stamp(applied, sub, pi)
+            return {"ok": True, "user_id": applied, "tier": tier}
+
+        if kind == "checkout.session.completed":
+            ref = (obj.get("client_reference_id") or "").strip()
+            sub = obj.get("subscription")
+            sub = sub if isinstance(sub, str) else (sub or {}).get("id", "") or ""
+            if not ref or not sub or obj.get("mode") != "subscription":
+                return {"ok": True, "ignored": "no client_reference_id"}
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (ref,))
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                return {"ok": True, "ignored": "unknown user"}
+            _remember_stripe_checkout(sub, ref)
+            if obj.get("payment_status") != "paid":
+                return {"ok": True, "user_id": ref, "pending": True}
+            tier = _stripe_subscription_tier(sub)
+            if not tier:
+                return {"ok": True, "ignored": "no known price"}
+            applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at, checkout=True)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            _affitor_stamp(applied, sub, "")
+            return {"ok": True, "user_id": applied, "tier": tier}
+
+        if kind in ("customer.subscription.deleted", "customer.subscription.updated"):
+            if kind == "customer.subscription.updated" and obj.get("status") not in ("canceled", "unpaid"):
+                return {"ok": True, "ignored": "status active"}
+            user = _user_for_stripe_customer(customer_id)
+            if user is None:
+                email = _stripe_customer_email(customer_id)
+                if not email:
+                    return {"ok": True, "ignored": "unknown customer"}
+                try:
+                    user = _user_for_email(email)
+                except HTTPException:
+                    return {"ok": True, "ignored": "no account"}
+            current = user.get("stripe_subscription_id")
+            if current and obj.get("id") and obj.get("id") != current:
+                return {"ok": True, "ignored": "not the current subscription"}
+            applied = _apply_stripe_event(user["user_id"], "visitor", customer_id,
+                                          obj.get("id") or "", event_at)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            return {"ok": True, "user_id": applied, "tier": "visitor"}
+
+        return {"ok": True, "ignored": kind}
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "stripe", "status": "active"}
+
+
+class PaymentGatewayManager:
+    def __init__(self):
+        self._providers: Dict[str, BasePaymentProvider] = {}
+        self.register_provider(ShopifyPaymentProvider())
+        self.register_provider(StripePaymentProvider())
+
+    def register_provider(self, provider: BasePaymentProvider):
+        self._providers[provider.provider_name] = provider
+
+    def get_provider(self, provider_name: str) -> BasePaymentProvider:
+        p = self._providers.get(provider_name.lower())
+        if not p:
+            raise HTTPException(status_code=400, detail=f"Unsupported payment provider: {provider_name}")
+        return p
+
+
+payment_manager = PaymentGatewayManager()
+
+
 @app.post("/webhooks/shopify/orders")
 async def shopify_order_webhook(request: Request):
     """Shopify 'Order payment' webhook. Picture packs are a Shopify product (SKU
@@ -5919,24 +6131,30 @@ def admin_console_girl(body: AdminGirlIn):
     if body.difficulty not in DIFFICULTY:
         raise HTTPException(status_code=400,
                             detail="difficulty must be one of " + ", ".join(DIFFICULTY))
+    media_lib = body.media_library if isinstance(body.media_library, list) else []
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
                                       avatar_url, min_tier, sort_order, active,
-                                      difficulty)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                      difficulty, age, background_info, personality_traits,
+                                      no_gos, media_library)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
                     avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
                     sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
-                    difficulty=EXCLUDED.difficulty
+                    difficulty=EXCLUDED.difficulty, age=EXCLUDED.age,
+                    background_info=EXCLUDED.background_info,
+                    personality_traits=EXCLUDED.personality_traits,
+                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
                   body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
-                  body.difficulty))
+                  body.difficulty, int(body.age), body.background_info.strip(),
+                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib)))
             conn.commit()
     finally:
         conn.close()
