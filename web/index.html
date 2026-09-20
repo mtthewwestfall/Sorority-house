@@ -247,6 +247,37 @@
     .door-card.open { cursor: pointer; }
     .door-card.open .door-cta { display: inline-flex; margin-top: 16px; }
     .door-cta { display: none; }
+    .door-keyhole { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 0 14px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(233,226,215,.06); color: var(--white); font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; }
+    .door-keyhole:hover { background: rgba(233,226,215,.14); }
+
+    /* KEYHOLE room: her clip on top of her room, the chat underneath. */
+    .kh-panel { width: min(920px, 100%); height: min(760px, 94vh); }
+    .kh-stage { position: relative; flex: none; aspect-ratio: 16 / 9; max-height: 46%; background: #0d0f0d center / cover no-repeat; overflow: hidden; }
+    .kh-stage video, .kh-stage img.kh-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .kh-stage video[hidden], .kh-stage img[hidden] { display: none; }
+    .kh-hud { position: absolute; left: 12px; right: 12px; top: 10px; display: flex; align-items: center; gap: 10px; font-size: .78rem; font-weight: 700; letter-spacing: .04em; }
+    .kh-live { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: rgba(21,23,21,.72); }
+    .kh-live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #c8463a; box-shadow: 0 0 8px #c8463a; }
+    .kh-live.off::before { background: #666; box-shadow: none; }
+    .kh-clock { margin-left: auto; padding: 3px 9px; border-radius: 999px; background: rgba(21,23,21,.72); font-variant-numeric: tabular-nums; }
+    .kh-clock.low { color: #f2a08a; }
+    .kh-counts { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 8px; font-size: .72rem; color: rgba(233,226,215,.85); }
+    .kh-counts span { padding: 2px 8px; border-radius: 999px; background: rgba(21,23,21,.72); }
+    .kh-gate { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; background: rgba(13,15,13,.72); backdrop-filter: blur(4px); }
+    .kh-gate[hidden] { display: none; }
+    .kh-gate h3 { margin: 0 0 6px; font-size: 1.15rem; }
+    .kh-gate p { margin: 0 0 14px; color: var(--muted); font-size: .9rem; max-width: 420px; }
+    .kh-gate .button { padding: 10px 18px; font-size: .9rem; }
+    .kh-packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; max-width: 680px; margin-top: 10px; }
+    .kh-pack { display: block; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: rgba(233,226,215,.05); color: var(--white); text-decoration: none; text-align: left; font: inherit; cursor: pointer; }
+    .kh-pack:hover { background: rgba(233,226,215,.12); }
+    .kh-pack b { display: block; font-size: 1rem; }
+    .kh-pack small { color: var(--muted); font-size: .74rem; line-height: 1.3; display: block; }
+    .kh-pack.disabled { opacity: .5; pointer-events: none; }
+    .kh-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin-right: 6px; align-self: center; }
+    .kh-mode button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: .74rem; font-weight: 700; padding: 8px 10px; cursor: pointer; }
+    .kh-mode button.on { background: rgba(233,226,215,.14); color: var(--white); }
+    @media (max-width: 620px) { .kh-stage { max-height: 38%; } }
 
     .chat-backdrop {
       position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px;
@@ -1140,6 +1171,51 @@
     </div>
   </div>
 
+  <div class="chat-backdrop" id="kh" role="dialog" aria-modal="true" aria-labelledby="kh-name">
+    <div class="chat-panel kh-panel">
+      <div class="chat-head">
+        <button class="chat-close" id="kh-close" type="button" aria-label="Back">&lsaquo;</button>
+        <img id="kh-avatar" src="" alt="" />
+        <div class="who">
+          <strong id="kh-name"></strong>
+          <div>KEYHOLE &middot; her room, live</div>
+        </div>
+        <button class="button dark" id="kh-end" type="button" style="margin-left:auto;font-size:.75rem;padding:4px 10px;" hidden>End session</button>
+      </div>
+      <div class="kh-stage" id="kh-stage">
+        <video id="kh-video" playsinline muted autoplay loop hidden></video>
+        <img id="kh-still" class="kh-clip" src="" alt="" hidden />
+        <div class="kh-hud">
+          <span class="kh-live off" id="kh-live">OFFLINE</span>
+          <span class="kh-clock" id="kh-clock">--:--</span>
+        </div>
+        <div class="kh-counts"><span id="kh-count-videos">0 video</span><span id="kh-count-texts">0 texts</span></div>
+        <div class="kh-gate" id="kh-gate">
+          <div>
+            <h3 id="kh-gate-title">Peek through the keyhole</h3>
+            <p id="kh-gate-text">Ten free minutes in her room, once. After that it's pay per session &mdash; no subscription, unused texts carry over.</p>
+            <button class="button" id="kh-start" type="button">Start free preview</button>
+            <div class="kh-packs" id="kh-packs"></div>
+          </div>
+        </div>
+      </div>
+      <div class="chat-log" id="kh-log" aria-live="polite"></div>
+      <div class="chat-foot">
+        <div class="chat-form">
+          <div class="kh-mode" id="kh-mode">
+            <button type="button" data-mode="video" class="on">Video</button>
+            <button type="button" data-mode="text">Text</button>
+          </div>
+          <div class="field">
+            <textarea id="kh-input" rows="1" autocomplete="off" enterkeyhint="send" maxlength="2000" placeholder="Say something to her" aria-label="Message"></textarea>
+            <button class="button" id="kh-send" type="button" aria-label="Send">&uarr;</button>
+          </div>
+        </div>
+        <div class="chat-meta"><span class="ai-note" id="kh-note">Video reply = a clip of her + her words. Text reply = words only.</span></div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Website backend URL hosted on Railway.
     const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
@@ -1660,6 +1736,219 @@ const PRESET_FACES = {
       currentGirl = null;
     }
 
+    // ---------- KEYHOLE: her room, live, pay per session ----------
+    // Per-girl room scene; anyone without one gets a house default.
+    const KH_ROOMS = { _lounge: 'assets/keyhole-lounge.jpg', _bedroom: 'assets/keyhole-bedroom.jpg' };
+    const khBox = document.getElementById('kh');
+    const khLog = document.getElementById('kh-log');
+    const khInput = document.getElementById('kh-input');
+    const khSend = document.getElementById('kh-send');
+    const khGate = document.getElementById('kh-gate');
+    const khVideo = document.getElementById('kh-video');
+    const khStill = document.getElementById('kh-still');
+    const kh = { girl: null, mode: 'video', live: false, seconds: 0, videos: 0, texts: 0, timer: 0, beat: 0, packs: null, sending: false };
+
+    function khMsg(kind, text) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + kind;
+      el.textContent = text;
+      khLog.appendChild(el);
+      khLog.scrollTop = khLog.scrollHeight;
+      return el;
+    }
+    function khFmt(s) { s = Math.max(0, s | 0); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+    // backend-served media (/media/files/...) lives on the API host; bundled assets/ stay relative
+    function khAssetUrl(url) {
+      if (!url) return '';
+      if (/^(https?:|data:|blob:)/i.test(url)) return url;
+      if (url.startsWith('/')) return API_BASE_URL + url;
+      return url;
+    }
+    function khShowClip(asset) {
+      if (!asset || !asset.url) return;
+      const url = khAssetUrl(asset.url);
+      if (asset.media_type === 'video') {
+        khStill.hidden = true;
+        if (khVideo.src !== url) khVideo.src = url;
+        khVideo.hidden = false;
+        khVideo.play().catch(() => {});
+      } else {
+        khVideo.pause(); khVideo.hidden = true;
+        khStill.src = url; khStill.hidden = false;
+      }
+    }
+    function khPaint() {
+      document.getElementById('kh-clock').textContent = kh.live && kh.seconds > 0 ? khFmt(kh.seconds) : (kh.live ? 'TEXT' : '--:--');
+      document.getElementById('kh-clock').classList.toggle('low', kh.live && kh.seconds > 0 && kh.seconds < 120);
+      const live = document.getElementById('kh-live');
+      live.textContent = kh.live ? 'LIVE' : 'OFFLINE';
+      live.classList.toggle('off', !kh.live);
+      document.getElementById('kh-count-videos').textContent = kh.videos + ' video';
+      document.getElementById('kh-count-texts').textContent = kh.texts + ' texts';
+      document.getElementById('kh-end').hidden = !kh.live;
+      khGate.hidden = kh.live;
+      const videoBtn = document.querySelector('#kh-mode [data-mode="video"]');
+      if (kh.live && (kh.seconds <= 0 || kh.videos <= 0) && kh.mode === 'video') khSetMode('text');
+      videoBtn.disabled = kh.live && (kh.seconds <= 0 || kh.videos <= 0);
+    }
+    function khSetMode(mode) {
+      kh.mode = mode;
+      document.querySelectorAll('#kh-mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+      khInput.placeholder = mode === 'video' ? 'Say something to her (video reply)' : 'Text her';
+    }
+    document.getElementById('kh-mode').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-mode]');
+      if (b && !b.disabled) khSetMode(b.dataset.mode);
+    });
+
+    async function khApi(path, body, method) {
+      const res = await fetch(API_BASE_URL + path, { method: method || (body ? 'POST' : 'GET'), headers: authHeaders(), body: body ? JSON.stringify(body) : undefined });
+      if (res.status === 401) { handleUnauthorized(); throw new Error('unauthorized'); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { const err = new Error(data.detail || ('HTTP ' + res.status)); err.code = data.detail; err.status = res.status; throw err; }
+      return data;
+    }
+    function khApply(w) {
+      kh.live = !!w.live; kh.seconds = w.seconds | 0; kh.videos = w.videos | 0; kh.texts = w.texts | 0;
+      kh.preview = !!w.preview_available;
+      if (w.clip) khShowClip(w.clip);
+      khPaint();
+      khGateText();
+    }
+    function khGateText() {
+      const t = document.getElementById('kh-gate-title'), p = document.getElementById('kh-gate-text'), s = document.getElementById('kh-start');
+      const hasCredit = kh.seconds > 0 && kh.videos > 0;
+      if (hasCredit) {
+        t.textContent = 'You have ' + khFmt(kh.seconds) + ' and ' + kh.videos + ' video replies';
+        p.textContent = 'Step in and the clock starts. Leftover minutes do not carry over; your ' + kh.texts + ' texts do.';
+        s.textContent = 'Enter her room'; s.hidden = false;
+      } else if (kh.preview) {
+        t.textContent = 'Peek through the keyhole';
+        p.textContent = 'Ten free minutes in her room, once. After that it\u2019s pay per session \u2014 no subscription, unused texts carry over.';
+        s.textContent = 'Start free preview'; s.hidden = false;
+      } else if (kh.texts > 0) {
+        t.textContent = 'Your preview is used up';
+        p.textContent = 'You still have ' + kh.texts + ' texts. Text her, or buy a pack to see her on camera.';
+        s.textContent = 'Text her (' + kh.texts + ' left)'; s.hidden = false;
+      } else {
+        t.textContent = 'Your preview is used up';
+        p.textContent = 'Pick a session. Pay once, no subscription. Unused texts carry over to next time.';
+        s.hidden = true;
+      }
+    }
+    async function khLoadPacks() {
+      // links are bound to the signed-in account (client_reference_id), so refetch per login
+      const who = authHeaders().Authorization || '';
+      if (kh.packs && kh.packsFor === who) return;
+      try { kh.packs = (await khApi('/keyhole/packs')).packs || []; } catch (_) { kh.packs = []; }
+      kh.packsFor = who;
+      const box = document.getElementById('kh-packs');
+      box.innerHTML = kh.packs.map((p) => {
+        const tag = p.link ? 'a' : 'span';
+        const href = p.link ? ' href="' + escapeHtml(p.link) + '" target="_blank" rel="noopener"' : '';
+        return '<' + tag + ' class="kh-pack' + (p.link ? '' : ' disabled') + '"' + href + '>' +
+          '<b>' + escapeHtml(p.label) + ' \u00b7 $' + Number(p.usd).toFixed(2) + '</b>' +
+          '<small>' + (p.minutes ? p.minutes + ' min or ~' + p.videos + ' video replies<br>+ ' : '') + p.texts + ' texts' +
+          (p.link ? '' : '<br>coming soon') + '</small></' + tag + '>';
+      }).join('');
+    }
+
+    async function openKeyhole(card) {
+      if (!isLoggedIn()) { openAuth('signup', 'Create a free account to look through the keyhole.'); return; }
+      kh.girl = card.dataset.girl;
+      document.getElementById('kh-name').textContent = card.dataset.name;
+      const av = document.getElementById('kh-avatar');
+      av.src = card.dataset.avatar; av.alt = card.dataset.name;
+      const room = KH_ROOMS[kh.girl] || (kh.girl.length % 2 ? KH_ROOMS._bedroom : KH_ROOMS._lounge);
+      document.getElementById('kh-stage').style.backgroundImage = 'url("' + room + '")';
+      khVideo.pause(); khVideo.hidden = true; khVideo.removeAttribute('src'); khStill.hidden = true;
+      khLog.innerHTML = '';
+      khMsg('note', 'Through the keyhole: ' + card.dataset.name + '\u2019s room.');
+      khSetMode('video');
+      khBox.classList.add('is-open');
+      document.body.classList.add('chat-locked');
+      khLoadPacks();
+      try {
+        const w = await khApi('/keyhole/wallet');
+        if (w.live && w.girl && w.girl !== kh.girl) {
+          khMsg('note', 'You are still in another room. End that session first.');
+          w.live = false;
+        }
+        khApply(w);
+        if (kh.live) khHeartbeat(true);
+      } catch (e) { khMsg('note', 'Could not reach the room. Try again.'); }
+    }
+    function closeKeyhole() {
+      khBox.classList.remove('is-open');
+      document.body.classList.remove('chat-locked');
+      khVideo.pause();
+      clearInterval(kh.timer); clearInterval(kh.beat); kh.timer = kh.beat = 0;
+      kh.girl = null;
+    }
+    document.getElementById('kh-close').addEventListener('click', closeKeyhole);
+    khBox.addEventListener('click', (e) => { if (e.target === khBox) closeKeyhole(); });
+
+    function khHeartbeat(start) {
+      clearInterval(kh.timer); clearInterval(kh.beat);
+      if (!start) return;
+      kh.timer = setInterval(() => { if (kh.live && kh.seconds > 0) { kh.seconds -= 1; khPaint(); } }, 1000);
+      kh.beat = setInterval(async () => {
+        try {
+          const w = await khApi('/keyhole/tick', {});
+          const wasLive = kh.live;
+          khApply(w);
+          if (wasLive && !kh.live) { khHeartbeat(false); khMsg('note', 'Session over. Your texts are saved for next time.'); }
+        } catch (_) {}
+      }, 15000);
+    }
+
+    document.getElementById('kh-start').addEventListener('click', async () => {
+      const btn = document.getElementById('kh-start');
+      btn.disabled = true;
+      try {
+        const w = await khApi('/keyhole/start', { girl: kh.girl, preview: kh.preview && !(kh.seconds > 0 && kh.videos > 0) });
+        khApply(w);
+        khMsg('note', kh.seconds > 0 ? 'She\u2019s on. The clock is running.' : 'Text-only session on your carried-over texts.');
+        khHeartbeat(true);
+        khInput.focus();
+      } catch (e) {
+        const why = { keyhole_empty: 'Nothing left in your wallet - pick a pack below.', preview_used: 'Your free preview is already used.', keyhole_busy: 'You are live in another room. End that session first.' };
+        khMsg('note', why[e.code] || 'Could not start: ' + e.message);
+        if (e.code === 'preview_used') { kh.preview = false; khGateText(); }
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('kh-end').addEventListener('click', async () => {
+      try { khApply(await khApi('/keyhole/end', {})); } catch (_) {}
+      khHeartbeat(false);
+      khMsg('note', 'You left her room. Texts saved for next time.');
+    });
+
+    async function khSendMsg() {
+      const text = khInput.value.trim();
+      if (!text || kh.sending || !kh.live) return;
+      kh.sending = true; khSend.disabled = true;
+      khMsg('me', text);
+      khInput.value = '';
+      const typing = khMsg('her typing', '\u2026');
+      const video = kh.mode === 'video';
+      try {
+        const r = await khApi('/keyhole/chat', { message: text, video });
+        typing.remove();
+        if (r.clip) khShowClip(r.clip);
+        khMsg('her', r.reply);
+        kh.videos = r.videos | 0; kh.texts = r.texts | 0; kh.seconds = r.seconds | 0;
+        khPaint();
+      } catch (e) {
+        typing.remove();
+        const why = { out_of_videos: 'No video replies left. Switch to text or buy a pack.', out_of_texts: 'No texts left. Buy a pack to keep talking.', keyhole_empty: 'Your session ended.' };
+        khMsg('note', why[e.code] || 'She didn\u2019t catch that. Try again.');
+        if (e.code === 'out_of_videos') khSetMode('text');
+        if (e.code === 'keyhole_empty') { kh.live = false; khPaint(); khHeartbeat(false); khApi('/keyhole/wallet').then(khApply).catch(() => {}); }
+      } finally { kh.sending = false; khSend.disabled = false; }
+    }
+    khSend.addEventListener('click', khSendMsg);
+    khInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); khSendMsg(); } });
+
     // iOS does not shrink the layout viewport for the keyboard; it shrinks the visual
     // viewport and may scroll the page. Size the panel to the visible area and pull it
     // back up by however far the page was pushed, so nothing hides behind the keyboard.
@@ -1754,6 +2043,13 @@ const PRESET_FACES = {
         card.classList.remove('locked');
         const status = card.querySelector('.door-status');
         if (status) status.textContent = 'Trust earned';
+        if (!card.querySelector('.door-keyhole')) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'door-keyhole';
+          b.textContent = '\u{1F511} Keyhole';
+          card.appendChild(b);
+        }
       });
     }
 
@@ -1888,6 +2184,7 @@ const PRESET_FACES = {
         // not fall back to the seven in the markup.
         if (!response.ok || !data || !Array.isArray(data.girls)) return;
         renderRoster(data.girls);
+        setDoors();
         loadCompanions();
         scrollToDoorHash();
       } catch (error) { /* keep the doors already in the page */ }
@@ -2132,7 +2429,9 @@ const PRESET_FACES = {
     // Delegated so cards rendered from /roster are clickable too.
     doorsGrid.addEventListener('click', (event) => {
       const card = event.target.closest('.door-card[data-girl]');
-      if (card) openChat(card);
+      if (!card) return;
+      if (event.target.closest('.door-keyhole')) { openKeyhole(card); return; }
+      openChat(card);
     });
 
     const companionContainer = document.getElementById('companion-card-container');
@@ -2856,7 +3155,6 @@ const PRESET_FACES = {
 </script>
 </body>
 </html>
-
 
 
 

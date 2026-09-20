@@ -101,6 +101,21 @@ API CONTRACT implemented here (point your chat app at these):
                                                             set before); locked=false opens all
   GET  /admin/console/export                              -> the roster as JSON (backup)
   (the /admin/console/* endpoints take ADMIN_SECRET as the X-Admin-Secret header)
+  KEYHOLE - her room on cam, pay per session (no subscription). A pack is minutes OR video
+  replies (whichever runs out first) + texts; leftover texts carry over, minutes don't.
+  GET  /keyhole/packs                                    -> {"preview","packs":[{pack,label,usd,
+                                                            minutes,videos,texts,link}]}
+  GET  /keyhole/wallet                 (bearer)          -> {live,girl,seconds,videos,texts,
+                                                            preview_available}
+  POST /keyhole/start {"girl","preview"} (bearer)      -> wallet + {"clip"}; 402 keyhole_empty /
+                                                            preview_used, 409 keyhole_busy
+  POST /keyhole/tick                   (bearer)          -> heartbeat every ~15s, bills the clock
+  POST /keyhole/end                    (bearer)          -> leave; minutes/videos forfeited
+  POST /keyhole/chat {"message","video"} (bearer)      -> {reply,clip?,videos,texts,seconds};
+                                                            402 out_of_videos / out_of_texts
+  POST /admin/grant-keyhole {"email","pack","payment_id","secret"} -> credit a pack by hand
+                                                            (idempotent on payment_id; the Stripe
+                                                            webhook does it for one-time checkouts)
   GET  /health
 
 Env vars (Railway -> Variables):
@@ -142,6 +157,16 @@ Env vars (Railway -> Variables):
                     from the subscription behind checkout.session.completed). With
                     Subscriptions: write and PaymentIntents: write it also stamps the
                     Affitor affiliate metadata (below) on each paid subscription.
+  KEYHOLE_PRICE_QUICK / _STANDARD / _EXTENDED / _HOUR / _TEXTS
+                    Stripe price ids (price_...) of the one-time Keyhole packs; a
+                    checkout.session.completed / .async_payment_succeeded in mode=payment
+                    with that price (or metadata.keyhole_pack=quick|standard|...) credits
+                    the pack to client_reference_id (GET /keyhole/packs appends the signed-in
+                    user_id), else to the buyer's email. Reading the
+                    line item needs STRIPE_API_KEY (Checkout Sessions: read).
+  KEYHOLE_LINK_QUICK / _STANDARD / _EXTENDED / _HOUR / _TEXTS
+                    Stripe Payment Link URLs shown as the buy buttons in the room. The
+                    text-only pack is hidden until its price/link is set.
   AFFITOR_PROGRAM_ID
                     Affitor Wingman program id (default 1083). The web tracker's click id
                     arrives with /auth/signup and /auth/login (affitor_click_id) and is
@@ -318,6 +343,26 @@ STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMPANION", "price_1UGTXa6qicU1CK4UyWHUVLmd"): "companion",
 }
 STRIPE_SIG_TOLERANCE_S = 300
+# KEYHOLE: pay-per-session webcam. No subscription. A pack is minutes on the clock,
+# a video-reply budget and a text budget. The session ends when the clock OR the
+# video budget runs out (both are then forfeited); unused texts carry over.
+# Each pack is a one-time Stripe Payment Link; the webhook maps its price id back
+# here. The link URL is what the room shows the buyer (client_reference_id appended).
+KEYHOLE_PREVIEW = {"minutes": 10, "videos": 20, "texts": 50}   # once per account
+KEYHOLE_PACKS = {
+    "quick":    {"label": "Quick",    "usd": 2.99,  "minutes": 15, "videos": 35,  "texts": 100},
+    "standard": {"label": "Standard", "usd": 5.99,  "minutes": 30, "videos": 70,  "texts": 200},
+    "extended": {"label": "Extended", "usd": 9.99,  "minutes": 45, "videos": 100, "texts": 300},
+    "hour":     {"label": "1 Hour",   "usd": 12.99, "minutes": 60, "videos": 135, "texts": 400},
+    # text-only: price not locked yet. Ships hidden until KEYHOLE_PRICE_TEXTS is set.
+    "texts":    {"label": "Text only", "usd": 0.0,  "minutes": 0,  "videos": 0,   "texts": 100},
+}
+for _pack in KEYHOLE_PACKS:
+    KEYHOLE_PACKS[_pack]["price"] = os.environ.get(f"KEYHOLE_PRICE_{_pack.upper()}", "")
+    KEYHOLE_PACKS[_pack]["link"] = os.environ.get(f"KEYHOLE_LINK_{_pack.upper()}", "")
+KEYHOLE_PRICE_PACKS = {p["price"]: k for k, p in KEYHOLE_PACKS.items() if p["price"]}
+KEYHOLE_TICK_CAP_S = 90      # a heartbeat gap longer than this bills only this much
+KEYHOLE_IDLE_END_S = 300     # no heartbeat for this long = the session is over
 AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
 TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
@@ -1148,6 +1193,20 @@ def init_db():
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
+                -- KEYHOLE wallet: pay-per-session cam time. Seconds and video replies
+                -- die with the session; texts carry over (see KEYHOLE_PACKS).
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS kh_seconds INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS kh_videos INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS kh_texts INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS kh_preview_used BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS kh_girl TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS kh_tick TIMESTAMPTZ;
+                CREATE TABLE IF NOT EXISTS keyhole_payments (
+                    payment_id TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL,
+                    pack       TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -5759,6 +5818,38 @@ def _stripe_signed(raw: bytes, header: str) -> bool:
                (p.split("=", 1) for p in header.split(",") if "=" in p) if k.strip() == "v1")
 
 
+def _user_exists(user_id: str) -> bool:
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _stripe_keyhole_pack(session: dict) -> str:
+    """Which KEYHOLE_PACKS key a paid checkout session bought: metadata.keyhole_pack on
+    the Payment Link, else the line item's price id (needs STRIPE_API_KEY)."""
+    meta = (session.get("metadata") or {}).get("keyhole_pack", "").strip().lower()
+    if meta in KEYHOLE_PACKS:
+        return meta
+    if not STRIPE_API_KEY or not session.get("id"):
+        return ""
+    try:
+        r = requests.get(f"https://api.stripe.com/v1/checkout/sessions/{session['id']}/line_items",
+                         auth=(STRIPE_API_KEY, ""), timeout=15)
+        if r.status_code != 200:
+            raise HTTPException(status_code=503, detail="Stripe line items lookup failed")
+        for li in r.json().get("data") or []:
+            pack = KEYHOLE_PRICE_PACKS.get(((li.get("price") or {}).get("id") or ""))
+            if pack:
+                return pack
+    except (requests.RequestException, ValueError):
+        raise HTTPException(status_code=503, detail="Stripe line items lookup failed")
+    return ""
+
+
 def _stripe_customer_email(customer_id: str) -> str:
     """Email of a Stripe customer via the optional STRIPE_API_KEY. "" when unset or the
     customer has none; raises HTTPException(503) on a transient failure so Stripe retries."""
@@ -6031,6 +6122,31 @@ async def stripe_webhook(request: Request):
         pi = pi if isinstance(pi, str) else (pi or {}).get("id", "") or ""
         _affitor_stamp(applied, sub, pi)
         return {"ok": True, "user_id": applied, "tier": tier}
+
+    if kind in ("checkout.session.completed", "checkout.session.async_payment_succeeded") \
+            and obj.get("mode") == "payment":
+        # one-time Keyhole pack (Payment Link in payment mode). Delayed methods complete
+        # unpaid and settle later via async_payment_succeeded; same session id, so the
+        # grant stays idempotent.
+        if obj.get("payment_status") != "paid":
+            return {"ok": True, "pending": True}
+        pack = _stripe_keyhole_pack(obj)
+        if not pack:
+            return {"ok": True, "ignored": "no known price"}
+        ref = (obj.get("client_reference_id") or "").strip()
+        user = _ensure_user(ref) if ref and _user_exists(ref) else None
+        if user is None:
+            email = ((obj.get("customer_details") or {}).get("email") or obj.get("customer_email")
+                     or "").strip() or _stripe_customer_email(customer_id)
+            if not email:
+                print(f"[stripe] {kind} {event.get('id')}: keyhole pack with no buyer", flush=True)
+                return {"ok": True, "ignored": "no email"}
+            try:
+                user = _user_for_email(email)
+            except HTTPException:
+                print(f"[stripe] {kind} {event.get('id')}: no account for the buyer email", flush=True)
+                return {"ok": True, "ignored": "no account"}
+        return _grant_keyhole_pack(user["user_id"], pack, f"stripe:{obj.get('id')}")
 
     if kind == "checkout.session.completed":
         ref = (obj.get("client_reference_id") or "").strip()
@@ -7484,6 +7600,274 @@ def get_media_asset_detail(asset_id: int):
             return {"ok": True, "asset": dict(asset)}
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE ROOM — pay-per-session cam time (wallet, heartbeat, replies)
+# The girl, her memory and her chat log are the same ones as the house chat;
+# only the meter differs: the wallet pays instead of the tier allowance.
+# ---------------------------------------------------------------------------
+class KeyholeStartIn(BaseModel):
+    girl: str
+    preview: bool = False
+
+
+class KeyholeChatIn(BaseModel):
+    message: str = Field(max_length=CHAT_MAX_CHARS)
+    video: bool = True
+
+
+class GrantKeyholeIn(BaseModel):
+    email: str
+    pack: str
+    payment_id: str
+    secret: str = ""
+
+
+def _keyhole_packs_public(user_id=""):
+    """Buy buttons. The Payment Link carries client_reference_id=user_id so the webhook
+    credits the signed-in account even when the checkout email differs."""
+    out = []
+    for key, p in KEYHOLE_PACKS.items():
+        if key == "texts" and not p["price"]:
+            continue     # text-only pack is not priced yet
+        link = p["link"]
+        if link and user_id:
+            link += ("&" if "?" in link else "?") + urllib.parse.urlencode({"client_reference_id": user_id})
+        out.append({"pack": key, "label": p["label"], "usd": p["usd"], "minutes": p["minutes"],
+                    "videos": p["videos"], "texts": p["texts"], "link": link})
+    return out
+
+
+def _grant_keyhole_pack(user_id, pack, payment_id):
+    """Credits one pack once per payment_id; repeats are a no-op. Minutes and
+    videos stack onto a running session, texts always stack."""
+    p = KEYHOLE_PACKS.get(pack)
+    if p is None:
+        raise HTTPException(status_code=400, detail="unknown pack")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO keyhole_payments (payment_id, user_id, pack) VALUES (%s,%s,%s) "
+                        "ON CONFLICT (payment_id) DO NOTHING", (payment_id, user_id, pack))
+            granted = cur.rowcount == 1
+            if granted:
+                cur.execute("""
+                    UPDATE users SET kh_seconds = kh_seconds + %s, kh_videos = kh_videos + %s,
+                                     kh_texts = kh_texts + %s
+                    WHERE user_id=%s
+                """, (p["minutes"] * 60, p["videos"], p["texts"], user_id))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": user_id, "pack": pack, "duplicate": not granted,
+            "wallet": _keyhole_wallet(user_id)}
+
+
+def _keyhole_wallet(user_id, cur=None):
+    """Bills the clock since the last heartbeat (capped) and closes a session whose
+    clock or video budget is gone or that went silent. Returns the wallet view."""
+    conn = None
+    if cur is None:
+        conn = db()
+        cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT kh_seconds, kh_videos, kh_texts, kh_preview_used, kh_girl,
+                   EXTRACT(EPOCH FROM (now() - kh_tick)) AS gap
+            FROM users WHERE user_id=%s FOR UPDATE
+        """, (user_id,))
+        u = cur.fetchone()
+        seconds, videos, texts = int(u["kh_seconds"]), int(u["kh_videos"]), int(u["kh_texts"])
+        girl = u["kh_girl"] or ""
+        gap = float(u["gap"] or 0)
+        live = bool(girl)
+        if live:
+            timed = seconds > 0    # else a text-only session: no clock, no clips
+            if timed:
+                seconds = max(0, seconds - int(min(gap, KEYHOLE_TICK_CAP_S)))
+            ended = gap > KEYHOLE_IDLE_END_S or (timed and (seconds <= 0 or videos <= 0)) \
+                or (not timed and texts <= 0)
+            if ended:
+                live, girl, seconds, videos = False, "", 0, 0    # forfeited; texts stay
+            cur.execute("""
+                UPDATE users SET kh_seconds=%s, kh_videos=%s, kh_girl=%s,
+                                 kh_tick = CASE WHEN %s THEN now() ELSE NULL END
+                WHERE user_id=%s
+            """, (seconds, videos, girl, live, user_id))
+        if conn is not None:
+            conn.commit()
+        return {"live": live, "girl": girl, "seconds": seconds, "videos": videos, "texts": texts,
+                "preview_available": not u["kh_preview_used"]}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.get("/keyhole/packs")
+def keyhole_packs(authorization: str = Header(default="")):
+    """What the room sells. link is the Stripe Payment Link ("" until configured); with a
+    bearer token the links are bound to that account."""
+    user_id = ""
+    if authorization:
+        try:
+            user_id = current_user(authorization)["user_id"]
+        except HTTPException:
+            pass
+    return {"ok": True, "preview": KEYHOLE_PREVIEW, "packs": _keyhole_packs_public(user_id)}
+
+
+@app.get("/keyhole/wallet")
+def keyhole_wallet(user=Depends(current_user)):
+    return {"ok": True, **_keyhole_wallet(user["user_id"])}
+
+
+@app.post("/keyhole/start")
+def keyhole_start(body: KeyholeStartIn, user=Depends(current_user)):
+    """Open the room with a girl. preview=true spends the one free 10-minute look;
+    otherwise the clock needs a bought pack (402 keyhole_empty)."""
+    girl = body.girl.strip().lower()
+    if not girl_open(user["user_id"], girl, user["tier"]):
+        raise HTTPException(status_code=403, detail="This door is still locked for you")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            w = _keyhole_wallet(user["user_id"], cur)
+            if w["live"] and w["girl"] != girl:
+                raise HTTPException(status_code=409, detail="keyhole_busy")
+            if body.preview and not w["live"]:
+                if not w["preview_available"]:
+                    raise HTTPException(status_code=402, detail="preview_used")
+                cur.execute("""
+                    UPDATE users SET kh_preview_used=TRUE, kh_seconds = kh_seconds + %s,
+                                     kh_videos = kh_videos + %s, kh_texts = kh_texts + %s
+                    WHERE user_id=%s
+                """, (KEYHOLE_PREVIEW["minutes"] * 60, KEYHOLE_PREVIEW["videos"],
+                      KEYHOLE_PREVIEW["texts"], user["user_id"]))
+                w["seconds"] += KEYHOLE_PREVIEW["minutes"] * 60
+                w["videos"] += KEYHOLE_PREVIEW["videos"]
+                w["texts"] += KEYHOLE_PREVIEW["texts"]
+                w["preview_available"] = False
+            if (w["seconds"] <= 0 or w["videos"] <= 0) and w["texts"] <= 0:
+                raise HTTPException(status_code=402, detail="keyhole_empty")
+            if w["seconds"] <= 0 or w["videos"] <= 0:
+                w["seconds"], w["videos"] = 0, 0    # text-only session on carried-over texts
+                cur.execute("UPDATE users SET kh_seconds=0, kh_videos=0 WHERE user_id=%s", (user["user_id"],))
+            cur.execute("UPDATE users SET kh_girl=%s, kh_tick=now() WHERE user_id=%s",
+                        (girl, user["user_id"]))
+            conn.commit()
+    finally:
+        conn.close()
+    clip = get_character_media_by_tag(girl, "greeting")
+    w.update({"live": True, "girl": girl})
+    return {"ok": True, **w, "clip": clip.get("asset")}
+
+
+@app.post("/keyhole/tick")
+def keyhole_tick(user=Depends(current_user)):
+    """Heartbeat from the open room (every ~15s). Bills the elapsed time."""
+    return {"ok": True, **_keyhole_wallet(user["user_id"])}
+
+
+@app.post("/keyhole/end")
+def keyhole_end(user=Depends(current_user)):
+    """Leave the room. Leftover minutes and video replies are forfeited; texts stay."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET kh_girl='', kh_tick=NULL, kh_seconds=0, kh_videos=0 "
+                        "WHERE user_id=%s", (user["user_id"],))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, **_keyhole_wallet(user["user_id"])}
+
+
+def _keyhole_tags(girl):
+    """Distinct tags across her enabled clips, so the mouth picks a clip that exists."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT jsonb_array_elements_text(tags) AS tag
+                FROM media_assets WHERE character_id=%s AND is_enabled=TRUE AND media_type='video'
+            """, (girl,))
+            return sorted(r["tag"] for r in cur.fetchall() if r["tag"] not in ("fallback", "offline"))
+    finally:
+        conn.close()
+
+
+_CAM_TAG_RE = re.compile(r"\s*\[cam:\s*([a-z0-9_\- ]+)\]\s*$", re.I)
+
+
+@app.post("/keyhole/chat")
+def keyhole_chat(body: KeyholeChatIn, user=Depends(current_user)):
+    """One turn in the room. video=true spends a video reply and returns the clip
+    she 'answers' with (picked by the mouth from her tagged library); video=false
+    spends a text. Same persona, memory and chat log as the house chat."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            w = _keyhole_wallet(user["user_id"], cur)
+            if not w["live"]:
+                raise HTTPException(status_code=402, detail="keyhole_empty")
+            if body.video and w["seconds"] <= 0:
+                raise HTTPException(status_code=402, detail="out_of_videos")
+            col = "kh_videos" if body.video else "kh_texts"
+            cur.execute(f"UPDATE users SET {col} = {col} - 1 WHERE user_id=%s AND {col} > 0 RETURNING {col}",
+                        (user["user_id"],))
+            got = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if got is None:
+        raise HTTPException(status_code=402, detail="out_of_videos" if body.video else "out_of_texts")
+    girl = w["girl"]
+    rel = get_relationship(user["user_id"], girl)
+    tags = _keyhole_tags(girl) if body.video else []
+    try:
+        msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
+        cam_note = ("SCENE: you are live on your webcam in your room and the user is watching you "
+                    "through the Keyhole. Speak as if on camera - short, present, physical.")
+        if tags:
+            cam_note += (" End your reply with exactly one line of the form [cam: TAG] where TAG is "
+                         "the clip that fits what you are doing, chosen from: " + ", ".join(tags) + ".")
+        msgs.insert(2, {"role": "system", "content": cam_note})
+        reply = llm(MOUTH, msgs)
+        tag = ""
+        m = _CAM_TAG_RE.search(reply)
+        if m:
+            tag = m.group(1).strip().lower()
+            reply = reply[:m.start()].rstrip()
+        persist_turn(user["user_id"], girl, rel, body.message, reply)
+    except Exception:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE users SET {col} = {col} + 1 WHERE user_id=%s", (user["user_id"],))
+                conn.commit()
+        finally:
+            conn.close()
+        raise
+    kick_brain(user["user_id"], girl, rel)
+    resp = {"ok": True, "reply": reply, "videos": int(got[col]) if body.video else w["videos"],
+            "texts": w["texts"] if body.video else int(got[col]), "seconds": w["seconds"],
+            "milestone": int(rel["milestone"])}
+    if body.video:
+        clip = get_character_media_by_tag(girl, tag if tag in tags else "talking")
+        resp["clip"] = clip.get("asset")
+    return resp
+
+
+@app.post("/admin/grant-keyhole")
+def grant_keyhole(body: GrantKeyholeIn):
+    """Manual credit of a Keyhole pack (the Stripe webhook does it automatically)."""
+    _check_admin(body.secret, strict=True)
+    payment_id = body.payment_id.strip()
+    if not payment_id:
+        raise HTTPException(status_code=400, detail="payment_id required")
+    user = _user_for_email(body.email)
+    return _grant_keyhole_pack(user["user_id"], body.pack.strip().lower(), payment_id)
 
 
 @app.get("/admin", response_class=HTMLResponse)

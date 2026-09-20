@@ -37,8 +37,9 @@ Single-file FastAPI app. The important systems:
 - **Pictures** — visitors get 0 free pictures (signup ploy); paid tiers start with 10 (`PICTURE_FREE_START`), then $0.99 per 5-pack via Shopify (`POST /image`).
 - **Player avatars** — users describe a character, get a graphic-novel-style avatar. Private to the account, profile-only, never a chat character. Monthly contest entries via `POST /avatar/contest`; winners are copied into the game through the admin console only.
 - **Tiers** — Visitor (free), Community Member, Resident, Neighbor. Subscriptions via Stripe Payment Links.
+- **KEYHOLE** — her room on cam (`/keyhole/*`), pay per session, no subscription. Free preview 10 min once; packs Quick $2.99 (15 min / ~35 video replies / 100 texts), Standard $5.99 (30 / ~70 / 200), Extended $9.99 (45 / ~100 / 300), 1 Hour $12.99 (60 / ~135 / 400). A session ends when minutes or video replies run out; unused texts carry over. Video replies are clips from the tagged media library (`/media/character/...`). Packs are one-time Stripe Payment Links (`KEYHOLE_LINK_*`) credited by the webhook via price id (`KEYHOLE_PRICE_*`) or `metadata.keyhole_pack`; `POST /admin/grant-keyhole` credits by hand. Text-only pack exists but is hidden until priced.
 
-Key environment variables (Railway): `DATABASE_URL`, `ADMIN_SECRET`, `GEMINI_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `SHOPIFY_WEBHOOK_SECRET`, `MAIL_FROM`.
+Key environment variables (Railway): `DATABASE_URL`, `ADMIN_SECRET`, `GEMINI_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `SHOPIFY_WEBHOOK_SECRET`, `MAIL_FROM`, `KEYHOLE_PRICE_{QUICK,STANDARD,EXTENDED,HOUR,TEXTS}`, `KEYHOLE_LINK_{QUICK,STANDARD,EXTENDED,HOUR,TEXTS}`.
 
 ## Frontend (web/)
 
