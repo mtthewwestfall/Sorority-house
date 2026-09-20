@@ -5,3 +5,7 @@
 ## 2026-09-12 - Batch Querying User Relationships in GET /state
 **Learning:** Calling `get_relationship(user_id, girl)` sequentially inside a loop over the active roster (35+ residents) opens and closes 35+ DB connections for a single `/state` request. Batch-fetching all relationship records for a user via `SELECT * FROM relationships WHERE user_id=%s` in one query and mapping them in-memory reduces DB connection opens/closes and network roundtrips for `/state` from 35+ down to 1 (~97% reduction).
 **Action:** Always batch-query multi-character/multi-entity state endpoints in a single SQL query keyed by `user_id` instead of iterating DB helper calls.
+
+## 2026-09-12 - In-Memory TTL Caching for Static/Infrequently Mutated Roster Attributes
+**Learning:** Functions like `difficulty_for(girl)` that query static or rarely mutated database attributes (e.g. `personas` configuration) open a new DB connection on every call during engine card and pacing computations. Caching these lookups in an in-memory dictionary with a TTL (e.g., 60 seconds) prevents DB connection churn while ensuring multi-worker processes clear stale cache entries quickly.
+**Action:** Use time-based TTL caching for static or admin-managed entity metadata that is queried frequently on hot request paths.
