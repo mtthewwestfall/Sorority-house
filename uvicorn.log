@@ -1,0 +1,13 @@
+INFO:     Started server process [167419]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8888 (Press CTRL+C to quit)
+INFO:     127.0.0.1:55590 - "GET /gate/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55604 - "GET /roster HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:55614 - "GET /roster HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:55626 - "POST /gate/verify HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:55630 - "POST /gate/verify HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [167419]

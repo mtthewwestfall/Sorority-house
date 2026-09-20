@@ -14,6 +14,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="God's Greek" />
+  <script src="gate.js"></script>
   <script src="https://api.affitor.com/js/affitor-tracker.js" data-affitor-program-id="1083"></script>
   <style>
     :root {
@@ -1033,6 +1034,8 @@
       const h = { 'Content-Type': 'application/json' };
       const t = getToken();
       if (t) h['Authorization'] = 'Bearer ' + t;
+      const sitePwd = localStorage.getItem('gods_town_site_password') || '';
+      if (sitePwd) h['X-Site-Password'] = sitePwd;
       return h;
     }
 
