@@ -288,6 +288,19 @@ PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
 PIC_TEASE_AT = 48
 PIC_TEASE_LINE = "I usually never ask this but there might be something about you, can I send you a pic soon?"
 PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
+
+# Fruit menu codes and action translation dictionary
+FRUIT_MENU_TRANSLATIONS = {
+    "/cherries": "bra comes off",
+    "/takeoffcherries": "bra comes off",
+    "/apples": "pants come off",
+    "/takeoffapples": "pants come off",
+    "/oranges": "shirt comes off",
+    "/takeofforanges": "shirt comes off",
+    "/banana": "she sucks a dick",
+    "o/banana": "she sucks a dick",
+    "/eatabanana": "she sucks a dick"
+}
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
 WEBHOOK_MAX_BYTES = 1024 * 1024
@@ -2522,7 +2535,8 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
 <button id="tabMed" onclick="show('med')">Webcam Media</button>
-<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button></nav>
+<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button>
+<button id="tabGen" onclick="show('gen')">Image Generator</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
@@ -2643,6 +2657,72 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
   </div>
 </div>
 </section>
+
+<section id="gen" class="hid">
+  <div class="card">
+    <h3 style="margin-top:0">Menu Command Translation Key</h3>
+    <div class="mut" style="margin-bottom:12px">Codes sent from the menu are automatically mapped to translated action meanings.</div>
+    <table>
+      <thead>
+        <tr><th>Fruit Code</th><th>Translated Meaning</th></tr>
+      </thead>
+      <tbody id="genTransRows">
+        <tr><td class="mut" colspan="2">Loading translation key...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Upload & Generate</h3>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Fruit Command Code</label>
+          <select id="genFruitCode" style="width:100%">
+            <option value="/oranges">/oranges - shirt comes off</option>
+            <option value="/cherries">/cherries - bra comes off</option>
+            <option value="/apples">/apples - pants come off</option>
+            <option value="o/banana">o/banana - she sucks a dick</option>
+            <option value="/banana">/banana - she sucks a dick</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Output Selection</label>
+          <select id="genOutputMode" style="width:100%">
+            <option value="pictures">Pictures</option>
+            <option value="video">Video</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Media Source File (Picture or Video)</label>
+          <input id="genFile" type="file" accept="image/*,video/*" style="width:100%">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="genExpand" type="checkbox" style="width:auto">
+          <label for="genExpand">Expand Surroundings (Pretend outpainting background visuals)</label>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Extended Delay Duration (Seconds)</label>
+          <input id="genExtDuration" type="number" value="10" min="1" max="120" style="width:100%">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="genLoop" type="checkbox" checked style="width:auto">
+          <label for="genLoop">Loop Video After Extended Duration</label>
+        </div>
+        <div>
+          <button class="p" style="width:100%" onclick="runGenerator()">Generate & Translate</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Translation & Extended Display</h3>
+      <div id="genResultBox">
+        <div class="mut">No generation run yet. Select your options and click Generate.</div>
+      </div>
+    </div>
+  </div>
+</section>
 </main>
 <div id="toast"></div>
 <script>
@@ -2652,7 +2732,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo'};
+const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -2674,7 +2754,7 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
 
 async function loadMediaAssets(){
   const charId=($('#mFilterChar')?.value||'').trim().toLowerCase();
@@ -2892,6 +2972,77 @@ async function endComp(){const email=CUR;if(!confirm('End free time now?'))retur
 async function setTier(){const email=CUR;try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
 async function grantAudits(){const email=CUR;try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
 async function saveNote(){const email=CUR;try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
+
+async function loadGenerator(){
+  try{
+    const r=await api('/admin/generator/translations');
+    const tr=r.translations||{};
+    const rows=Object.keys(tr).map(k=>`<tr><td><code>${esc(k)}</code></td><td>${esc(tr[k])}</td></tr>`).join('');
+    $('#genTransRows').innerHTML=rows||'<tr><td colspan="2" class="mut">No translations found</td></tr>';
+  }catch(e){toast(e.message,true);}
+}
+
+async function runGenerator(){
+  const fruitCode=$('#genFruitCode').value;
+  const outputMode=$('#genOutputMode').value;
+  const expand=$('#genExpand').checked;
+  const extDur=+$('#genExtDuration').value||10;
+  const loop=$('#genLoop').checked;
+  const fileEl=$('#genFile');
+
+  const fd=new FormData();
+  fd.append('fruit_code',fruitCode);
+  fd.append('output_mode',outputMode);
+  fd.append('expand_surroundings',expand?'true':'false');
+  fd.append('extended_duration_seconds',extDur);
+  fd.append('loop_enabled',loop?'true':'false');
+  if(fileEl.files&&fileEl.files[0]){
+    fd.append('file',fileEl.files[0]);
+  }
+
+  $('#genResultBox').innerHTML='<div class="mut">Generating media and rendering translation...</div>';
+  try{
+    const r=await fetch('/admin/generator/generate',{
+      method:'POST',
+      headers:{'X-Admin-Secret':SECRET},
+      body:fd
+    });
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Generation failed');
+
+    let previewHtml='';
+    if(j.output_mode==='video'){
+      previewHtml=`<video id="genPreviewVideo" controls ${j.loop_enabled?'loop':''} style="max-width:100%;border-radius:8px;margin-top:10px" src="${esc(j.url)}"></video>`;
+    }else{
+      previewHtml=`<img src="${esc(j.url)}" style="max-width:100%;border-radius:8px;margin-top:10px" alt="Generated picture">`;
+    }
+
+    $('#genResultBox').innerHTML=`
+      <div class="kv">
+        <div>Fruit Code Sent</div><div><code>${esc(j.fruit_code)}</code></div>
+        <div>Translated Meaning</div><div><b>${esc(j.translated_meaning)}</b></div>
+        <div>Output Mode</div><div>${esc(j.output_mode)}</div>
+        <div>Surroundings Context</div><div>${esc(j.surrounding_description)}</div>
+        <div>Video Loop Config</div><div>${esc(j.loop_description)}</div>
+      </div>
+      ${previewHtml}
+    `;
+
+    if(j.output_mode==='video'&&j.loop_enabled){
+      const v=$('#genPreviewVideo');
+      if(v){
+        setTimeout(()=>{
+          v.play().catch(()=>{});
+        },j.extended_duration_seconds*1000);
+      }
+    }
+    toast('Generator execution complete');
+  }catch(e){
+    $('#genResultBox').innerHTML=`<div style="color:var(--warn)">Error: ${esc(e.message)}</div>`;
+    toast(e.message,true);
+  }
+}
+
 if(SECRET){$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}
 </script></body></html>"""
 
@@ -6332,6 +6483,78 @@ def _validate_media_url(url: str):
     if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
         raise HTTPException(status_code=400, detail="Invalid media URL: must use http or https scheme")
     return s
+
+
+@app.get("/admin/generator/translations", dependencies=[Depends(admin_required)])
+def admin_generator_translations():
+    """Get translation mappings for fruit menu codes."""
+    return {
+        "translations": FRUIT_MENU_TRANSLATIONS,
+        "supported_codes": list(FRUIT_MENU_TRANSLATIONS.keys())
+    }
+
+
+@app.post("/admin/generator/generate", dependencies=[Depends(admin_required)])
+async def admin_generator_generate(
+    fruit_code: str = Form(...),
+    output_mode: str = Form("pictures"),
+    expand_surroundings: bool = Form(False),
+    extended_duration_seconds: int = Form(10),
+    loop_enabled: bool = Form(True),
+    file: Optional[UploadFile] = File(None)
+):
+    """Generate or translate menu media with expanded surroundings and extended loop options."""
+    code_clean = fruit_code.strip()
+    if not code_clean.startswith("/") and not code_clean.startswith("o/"):
+        code_clean = "/" + code_clean
+
+    translated = FRUIT_MENU_TRANSLATIONS.get(code_clean) or FRUIT_MENU_TRANSLATIONS.get(code_clean.lower(), "custom scene generation")
+
+    url = ""
+    file_path_rel = ""
+    media_type = "image" if output_mode.lower() in ("picture", "pictures", "image") else "video"
+
+    if file and file.filename:
+        filename = file.filename
+        ext = os.path.splitext(filename)[1].lower() or (".mp4" if media_type == "video" else ".png")
+        if ext not in ALLOWED_MEDIA_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+        safe_name = f"gen_{secrets.token_hex(8)}{ext}"
+        dest_path = os.path.join(UPLOAD_DIR, safe_name)
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES} bytes)")
+
+        with open(dest_path, "wb") as f:
+            f.write(content)
+
+        file_path_rel = safe_name
+        url = f"/uploads/media/{safe_name}"
+    else:
+        # Fallback generated URL placeholder if no file is uploaded
+        file_path_rel = f"gen_placeholder_{secrets.token_hex(4)}.png"
+        url = f"/uploads/media/{file_path_rel}"
+
+    surrounding_desc = "Outpainted surrounding environment active" if expand_surroundings else "Standard focus framing"
+    loop_desc = f"Loop enabled after {extended_duration_seconds}s extended play" if (media_type == "video" and loop_enabled) else "Standard playback"
+
+    return {
+        "ok": True,
+        "fruit_code": fruit_code,
+        "code_clean": code_clean,
+        "translated_meaning": translated,
+        "output_mode": media_type,
+        "expand_surroundings": expand_surroundings,
+        "surrounding_description": surrounding_desc,
+        "extended_duration_seconds": extended_duration_seconds,
+        "loop_enabled": loop_enabled,
+        "loop_description": loop_desc,
+        "url": url,
+        "file_path": file_path_rel
+    }
 
 
 @app.get("/admin/media", dependencies=[Depends(admin_required)])
