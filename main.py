@@ -245,7 +245,7 @@ BRAIN = _role_config("BRAIN", CHAT_MODEL)     # memory digest, a turn behind
 AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
          else {**MOUTH, "model": os.environ.get("AUDIT_MODEL") or MOUTH["model"]})
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
-SITE_PASSWORD = os.environ.get("SITE_PASSWORD", os.environ.get("GAME_PASSWORD", ""))
+SITE_PASSWORD = ""
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", "God's Greek <no-reply@example.com>")

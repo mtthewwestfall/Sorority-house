@@ -5,7 +5,6 @@
 const SHELL = 'house-shell-v21';
 const SHELL_FILES = [
   './',
-  './gate.js',
   './index.html',
   './town.html',
   './manifest.webmanifest',
