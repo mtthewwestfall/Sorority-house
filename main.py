@@ -2636,7 +2636,7 @@ async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off th
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
  a.download='maplehollow-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
-async function loadChat(girl){const email=CUR;try{const rows=await api('/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl));document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',b.dataset.girl===girl));
+async function loadChat(girl, companionId){const email=CUR;try{const url=companionId?'/admin/accounts/'+encodeURIComponent(email)+'/chat?companion_id='+companionId:'/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl);const rows=await api(url);document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',(companionId?+b.dataset.companionId===+companionId:b.dataset.girl===girl)));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
 async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
@@ -2662,8 +2662,9 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote()">Save note</button></div>
  </div></div>
  <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}
- <h4>Chat log</h4><div class="plist" id="chatTabs">${a.relationships.map(r=>`<button class="s" data-girl="${esc(r.girl)}">${esc(r.girl)}</button>`).join('')||'<span class="mut">no chats yet</span>'}</div><div id="chat" class="chat" style="margin-top:8px"><span class="mut">Pick a girl to read the latest exchanges.</span></div>`;
- $('#chatTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-girl]');if(b)loadChat(b.dataset.girl)});el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
+ <h4>Custom Companions</h4><div>${(a.companions||[]).map(c=>`<div class="card" style="margin-bottom:8px;"><div class="row2"><b>${esc(c.first_name)}</b> <span class="pill">${esc(c.gender||'female')}</span> <span class="mut">Slot ${c.slot_number} · Trust ${c.milestone}</span></div><div class="mut" style="margin-top:4px;">${esc(c.looks_desc)}</div></div>`).join('')||'<span class="mut">No custom companions created</span>'}</div>
+ <h4>Chat log</h4><div class="plist" id="chatTabs">${a.relationships.map(r=>`<button class="s" data-girl="${esc(r.girl)}">${esc(r.girl)}</button>`).join('')}${(a.companions||[]).map(c=>`<button class="s" data-companion-id="${c.id}">[Companion] ${esc(c.first_name)}</button>`).join('')||(a.relationships.length?'':'<span class="mut">no chats yet</span>')}</div><div id="chat" class="chat" style="margin-top:8px"><span class="mut">Pick a girl or custom companion to read the latest exchanges.</span></div>`;
+ $('#chatTabs').addEventListener('click',e=>{const bGirl=e.target.closest('button[data-girl]');const bComp=e.target.closest('button[data-companion-id]');if(bGirl)loadChat(bGirl.dataset.girl);else if(bComp)loadChat(null,+bComp.dataset.companionId)});el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
 function renderComplaints(list){if(!list.length)return '<div class="mut">None</div>';return list.map(c=>`<div class="card" id="c${c.id}"><div class="row2"><b>${esc(c.subject)}</b><span class="pill ${esc(c.status)}">${esc(c.status)}</span>
  <span class="mut">${esc(c.email||'')} ${c.display_name?'· '+esc(c.display_name):''} ${c.tier?'· '+esc(c.tier):''} · ${dt(c.created_at)}</span></div><pre>${esc(c.body)}</pre>
  <div class="row2" style="margin-top:10px"><input id="cn${c.id}" placeholder="Note / resolution" value="${esc(c.admin_note)}" style="flex:1;min-width:200px">
@@ -5680,6 +5681,12 @@ def admin_account(email: str):
                 FROM relationships WHERE user_id=%s ORDER BY milestone DESC
             """, (user["user_id"],))
             acct["relationships"] = cur.fetchall()
+            cur.execute("""
+                SELECT id, slot_number, first_name, gender, looks_desc, personality, backstory,
+                       pet_peeves, non_negotiables, defense, milestone, portrait_url, created_at
+                FROM companions WHERE user_id=%s ORDER BY slot_number ASC
+            """, (user["user_id"],))
+            acct["companions"] = cur.fetchall() or []
             cur.execute("SELECT count(*) AS n FROM chat_logs WHERE user_id=%s AND sender='user'",
                         (user["user_id"],))
             acct["messages_total"] = cur.fetchone()["n"]
@@ -5990,18 +5997,26 @@ def admin_console_export():
 
 
 @app.get("/admin/accounts/{email}/chat", dependencies=[Depends(admin_required)])
-def admin_account_chat(email: str, girl: str, limit: int = 60):
-    """Latest exchanges between an account and one girl (support / complaint review)."""
+def admin_account_chat(email: str, girl: Optional[str] = None, companion_id: Optional[int] = None, limit: int = 60):
+    """Latest exchanges between an account and one girl or companion (support / complaint review)."""
     user = _user_for_email(email)
     limit = max(1, min(500, limit))
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, sender, message, created_at FROM chat_logs
-                WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT %s
-            """, (user["user_id"], girl.strip().lower(), limit))
-            rows = cur.fetchall()
+            if companion_id:
+                cur.execute("""
+                    SELECT id, sender, message, created_at FROM companion_chat_logs
+                    WHERE user_id=%s AND companion_id=%s ORDER BY id DESC LIMIT %s
+                """, (user["user_id"], companion_id, limit))
+            elif girl:
+                cur.execute("""
+                    SELECT id, sender, message, created_at FROM chat_logs
+                    WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT %s
+                """, (user["user_id"], girl.strip().lower(), limit))
+            else:
+                rows = []
+            rows = cur.fetchall() or []
     finally:
         conn.close()
     rows.reverse()

@@ -144,5 +144,26 @@ class TestCompanionAndStyles(unittest.TestCase):
         res_advance = main.companion_gate_milestone(comp, 5, "warm")
         self.assertEqual(res_advance, 5)
 
+    @patch("main._user_for_email")
+    @patch("main.db")
+    def test_10_admin_account_chat_custom_companion(self, mock_db, mock_user_for_email):
+        mock_user_for_email.return_value = {"user_id": "u123", "tier": "resident"}
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {"id": 2, "sender": "companion", "message": "Hi there!", "created_at": "2025-01-01"},
+            {"id": 1, "sender": "user", "message": "Hello companion", "created_at": "2025-01-01"}
+        ]
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_db.return_value = mock_conn
+
+        res = main.admin_account_chat("test@example.com", companion_id=42)
+        self.assertEqual(len(res), 2)
+        self.assertEqual(res[0]["message"], "Hello companion")
+
+        query = mock_cur.execute.call_args[0][0]
+        self.assertIn("FROM companion_chat_logs", query)
+        self.assertIn("WHERE user_id=%s AND companion_id=%s", query)
+
 if __name__ == "__main__":
     unittest.main()
