@@ -2324,18 +2324,44 @@ def _openai_stream(cfg, messages, max_tokens=600, temperature=0.8):
 # ---------------------------------------------------------------------------
 # ROLES — the mouth, the brain and the auditor each pick their own provider.
 # ---------------------------------------------------------------------------
+def _gemini_fallback_model(cfg):
+    m = (cfg.get("model") or "").strip()
+    if m and m.startswith("gemini"):
+        return m
+    if CHAT_MODEL and CHAT_MODEL.startswith("gemini"):
+        return CHAT_MODEL
+    return "gemini-3.1-flash-lite"
+
+
 def llm(cfg, messages, thinking=False, max_tokens=600, temperature=0.8):
     if cfg["provider"] == "openai":
-        return _openai(cfg, messages, max_tokens=max_tokens, temperature=temperature)
-    return _gemini(messages, model=cfg["model"], thinking=thinking,
+        try:
+            return _openai(cfg, messages, max_tokens=max_tokens, temperature=temperature)
+        except Exception:
+            if GEMINI_API_KEY:
+                return _gemini(messages, model=_gemini_fallback_model(cfg), thinking=thinking,
+                               max_tokens=max_tokens, temperature=temperature)
+            raise
+    return _gemini(messages, model=_gemini_fallback_model(cfg), thinking=thinking,
                    max_tokens=max_tokens, temperature=temperature)
 
 
 def llm_stream(cfg, messages, max_tokens=600, temperature=0.8):
     if cfg["provider"] == "openai":
-        return _openai_stream(cfg, messages, max_tokens=max_tokens, temperature=temperature)
-    return _gemini_stream(messages, model=cfg["model"], max_tokens=max_tokens,
-                          temperature=temperature)
+        yielded = False
+        try:
+            for chunk in _openai_stream(cfg, messages, max_tokens=max_tokens, temperature=temperature):
+                yielded = True
+                yield chunk
+            return
+        except Exception:
+            if not yielded and GEMINI_API_KEY:
+                yield from _gemini_stream(messages, model=_gemini_fallback_model(cfg),
+                                          max_tokens=max_tokens, temperature=temperature)
+                return
+            raise
+    yield from _gemini_stream(messages, model=_gemini_fallback_model(cfg), max_tokens=max_tokens,
+                              temperature=temperature)
 
 
 def _role_label(cfg):
