@@ -2663,9 +2663,24 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 <div class="grid">
   <div class="card">
     <h4 style="margin-top:0">Add / Upload Media Asset</h4>
+    <div style="margin-bottom:8px">
+      <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Character / Companion Preset (or type custom below):</label>
+      <div class="row2" style="flex-wrap:wrap;gap:4px">
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_1'">Companion 1</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_2'">Companion 2</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_3'">Companion 3</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_4'">Companion 4</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_5'">Companion 5</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_6'">Companion 6</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='dakota'">Dakota</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='zoe'">Zoe</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='chloe'">Chloe</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='maya'">Maya</button>
+      </div>
+    </div>
     <div class="row2">
-      <input id="mCharId" placeholder="Character ID (e.g. dakota, zoe)" style="flex:1">
-      <input id="mTitle" placeholder="Title / Description" style="flex:1">
+      <input id="mCharId" placeholder="Character / Companion ID (type freely e.g. companion_1, dakota)" style="flex:1">
+      <input id="mTitle" placeholder="Title / Description (type freely)" style="flex:1">
       <select id="mType">
         <option value="video">Video</option>
         <option value="image">Image</option>
@@ -2693,7 +2708,17 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
     </div>
     <div class="card" style="background:#101017;margin-top:10px">
       <h5 style="margin:0 0 8px 0">Option B: Import Media URL / Webpage</h5>
-      <input id="mUrl" placeholder="https://..." style="width:100%">
+      <div style="margin-bottom:6px">
+        <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Webcam Reference Background Presets:</label>
+        <div class="row2" style="flex-wrap:wrap;gap:4px">
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3363.jpeg';$('#mType').value='image';$('#mTitle').value='Living Room Panorama';$('#mTags').value='living-room, couch, desk, panorama'">Living Room Cam (3363)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3364.jpeg';$('#mType').value='image';$('#mTitle').value='Bedroom Panorama';$('#mTags').value='bedroom, bed, desk, panorama'">Bedroom Cam (3364)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3542.jpeg';$('#mType').value='image';$('#mTitle').value='Pink Suite Grid';$('#mTags').value='suite, bed, couch, desk'">Pink Suite Grid (3542)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3543.jpeg';$('#mType').value='image';$('#mTitle').value='Chic Bedroom View';$('#mTags').value='bedroom, bed, desk'">Chic Bedroom (3543)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3547.jpeg';$('#mType').value='image';$('#mTitle').value='Sofa Parlor View';$('#mTags').value='living-room, couch, desk'">Sofa Parlor (3547)</button>
+        </div>
+      </div>
+      <input id="mUrl" placeholder="https://... or /assets/webcam/..." style="width:100%">
       <button class="s" style="margin-top:8px" onclick="importMediaUrlAsset()">Import Media URL / Webpage</button>
     </div>
     <div class="card" style="background:#101017;margin-top:10px">
@@ -2739,14 +2764,16 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
       <h3 style="margin-top:0">Upload & Generate</h3>
       <div style="display:flex;flex-direction:column;gap:12px">
         <div>
-          <label style="display:block;margin-bottom:4px;color:var(--mut)">Fruit Command Code</label>
-          <select id="genFruitCode" style="width:100%">
-            <option value="/oranges">/oranges - shirt comes off</option>
-            <option value="/cherries">/cherries - bra comes off</option>
-            <option value="/apples">/apples - pants come off</option>
-            <option value="o/banana">o/banana - she sucks a dick</option>
-            <option value="/banana">/banana - she sucks a dick</option>
-          </select>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Fruit Command Code / Prompt (Type freely or click preset)</label>
+          <div class="row2" style="flex-wrap:wrap;gap:4px;margin-bottom:6px">
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/oranges'">/oranges</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/cherries'">/cherries</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/apples'">/apples</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='o/banana'">o/banana</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/banana'">/banana</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/eatabanana'">/eatabanana</button>
+          </div>
+          <input id="genFruitCode" placeholder="Type any fruit code, command, or prompt freely (e.g. /oranges, /banana, custom scene)" style="width:100%" value="/oranges">
         </div>
         <div>
           <label style="display:block;margin-bottom:4px;color:var(--mut)">Output Selection</label>

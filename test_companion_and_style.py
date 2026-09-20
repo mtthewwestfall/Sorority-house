@@ -5,7 +5,7 @@ from fastapi.exceptions import HTTPException
 import main
 
 EXACT_PROMPT = (
-    ".realistic women with very large busts. only-realistic portrait — a detailed semi-realistic digital illustration "
+    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
     "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
