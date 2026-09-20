@@ -200,5 +200,39 @@ class TestWebcamMediaManager(unittest.TestCase):
         self.assertEqual(res_del.status_code, 200)
         self.assertEqual(res_del.json()["deleted_asset_id"], 12)
 
+    @patch("requests.get")
+    def test_fetch_remote_media_html_scraping_and_headers(self, mock_get):
+        # Mock HTML response with og:video tag
+        html_resp = MagicMock()
+        html_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        html_resp.text = '<html><head><meta property="og:video" content="https://example.com/stream.mp4"></head></html>'
+
+        # Mock direct video response
+        video_resp = MagicMock()
+        video_resp.headers = {"content-type": "video/mp4"}
+        video_resp.content = b"fake-mp4-video-stream-content"
+        video_resp.url = "https://example.com/stream.mp4"
+
+        mock_get.side_effect = [html_resp, video_resp]
+
+        content, ext, mime, mtype = main._fetch_remote_media("https://example.com/webcam-page", target_format="original")
+        self.assertEqual(content, b"fake-mp4-video-stream-content")
+        self.assertEqual(ext, ".mp4")
+        self.assertEqual(mtype, "video")
+        self.assertEqual(mock_get.call_count, 2)
+
+    def test_convert_image_bytes(self):
+        from PIL import Image
+        import io
+        img = Image.new("RGB", (50, 50), color="blue")
+        out_raw = io.BytesIO()
+        img.save(out_raw, format="PNG")
+        png_bytes = out_raw.getvalue()
+
+        converted_bytes, ext, mime = main._convert_image_bytes(png_bytes, "webp")
+        self.assertEqual(ext, ".webp")
+        self.assertEqual(mime, "image/webp")
+        self.assertTrue(len(converted_bytes) > 0)
+
 if __name__ == "__main__":
     unittest.main()
