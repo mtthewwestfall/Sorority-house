@@ -328,6 +328,32 @@ AUDIT_WINDOW = 80    # audits see up to this many recent messages + the full sum
 
 # Audit product pricing. $0.99 each for everyone; the listed tiers get N FREE per month.
 AUDIT_PRICE_USD = 0.99
+
+# Keyhole pricing & access rules defaults
+KEYHOLE_DEFAULT_CONFIG = {
+    "free_preview_minutes": 10,
+    "quick_price": 2.99,
+    "quick_webcam_minutes": 15,
+    "quick_video_replies": 35,
+    "quick_text_included": 100,
+    "quick_monthly_cap": 3,
+    "standard_price": 5.99,
+    "standard_webcam_minutes": 30,
+    "standard_video_replies": 70,
+    "standard_text_included": 200,
+    "extended_price": 9.99,
+    "extended_webcam_minutes": 45,
+    "extended_video_replies": 100,
+    "extended_text_included": 300,
+    "premium_price": 14.99,
+    "premium_webcam_minutes": 60,
+    "premium_fresh_videos": 3,
+    "premium_premade_pictures": 5,
+    "text_only_price": 1.99,
+    "text_only_included": 100,
+    "text_only_monthly_cap": 1,
+}
+
 FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allowance)
     "visitor":   2,
     "community": 4,
@@ -1015,6 +1041,14 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_event_at BIGINT NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS affitor_click_id TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_minutes_left INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS video_replies_left INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS fresh_videos_left INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS text_balance INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_sessions_bought_this_month INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS text_only_bought_this_month INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_started_at TIMESTAMPTZ;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_duration_s INTEGER NOT NULL DEFAULT 0;
                 -- Telegram users: the Telegram id is the login; /auth/telegram/link can
                 -- later point it at an email account instead.
                 CREATE TABLE IF NOT EXISTS telegram_accounts (
@@ -1174,6 +1208,11 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'normal';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS age INTEGER DEFAULT 18;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS background_info TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS personality_traits TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS no_gos TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _repair_dead_portraits(cur)
@@ -1498,16 +1537,16 @@ def _ensure_user(user_id, display_name="Player", user_row=None, conn=None):
                 else:
                     cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
                     row = cur.fetchone()
-            # lazy monthly reset: message allowance AND free audits refill together.
-            # Visitor is a one-time 50-message trial, so it never refills.
-            if row["tier"] != "visitor" and row["plan_reset_at"] < now:
-                # conditional so two concurrent callers can't both reset (the loser
-                # would wipe usage recorded after the first reset)
+            # lazy monthly reset: message allowance, free audits, and Keyhole monthly purchase caps refill together.
+            if row["plan_reset_at"] < now:
                 cur.execute("""
-                    UPDATE users SET msg_used=0, free_audits_used=0,
+                    UPDATE users SET msg_used = CASE WHEN tier <> 'visitor' THEN 0 ELSE msg_used END,
+                        free_audits_used = CASE WHEN tier <> 'visitor' THEN 0 ELSE free_audits_used END,
+                        quick_sessions_bought_this_month = 0,
+                        text_only_bought_this_month = 0,
                         plan_reset_at = now() + interval '1 month'
-                    WHERE user_id=%s AND tier <> 'visitor' AND plan_reset_at < now()
-                    RETURNING msg_used, free_audits_used, plan_reset_at
+                    WHERE user_id=%s AND plan_reset_at < now()
+                    RETURNING msg_used, free_audits_used, plan_reset_at, quick_sessions_bought_this_month, text_only_bought_this_month
                 """, (user_id,))
                 fresh = cur.fetchone()
                 conn.commit()
@@ -2050,6 +2089,48 @@ def brain_milestone(brain, fallback):
 # ---------------------------------------------------------------------------
 # ONE TURN — prompt assembly and persistence, shared by /chat and /chat/stream.
 # ---------------------------------------------------------------------------
+def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
+    """Tracks active webcam session duration server-side to prevent page refresh bypasses."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webcam_minutes_left, webcam_session_started_at, video_replies_left, fresh_videos_left FROM users WHERE user_id=%s", (user_id,))
+            user = cur.fetchone()
+            if not user:
+                return {"active": False, "reason": "user_not_found"}
+
+            started_at = user.get("webcam_session_started_at")
+            minutes_left = int(user.get("webcam_minutes_left") or 0)
+
+            if not started_at or minutes_left <= 0:
+                return {"active": False, "minutes_left": 0, "video_replies_left": user.get("video_replies_left", 0)}
+
+            now = datetime.now(timezone.utc)
+            elapsed_s = (now - started_at).total_seconds()
+            elapsed_min = elapsed_s / 60.0
+
+            if elapsed_min >= minutes_left:
+                # Session expired - reset session state and deduct minutes
+                cur.execute("""
+                    UPDATE users
+                    SET webcam_minutes_left = 0,
+                        webcam_session_started_at = NULL
+                    WHERE user_id=%s
+                """, (user_id,))
+                conn.commit()
+                return {"active": False, "minutes_left": 0, "reason": "session_expired"}
+
+            remaining_min = max(0, int(minutes_left - elapsed_min))
+            return {
+                "active": True,
+                "minutes_left": remaining_min,
+                "video_replies_left": int(user.get("video_replies_left") or 0),
+                "fresh_videos_left": int(user.get("fresh_videos_left") or 0)
+            }
+    finally:
+        conn.close()
+
+
 def chat_preflight(user, girl_raw):
     """Tier/door/allowance checks. Reserves one message atomically (conditional
     UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
@@ -2057,22 +2138,37 @@ def chat_preflight(user, girl_raw):
     girl = girl_raw.strip().lower()
     if not girl_open(user["user_id"], girl, user["tier"]):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
+
+    # Actively enforce Keyhole webcam session status server-side
+    check_keyhole_session_active(user["user_id"])
+
     limit = TIERS.get(user["tier"], TIERS["visitor"])["limit"]
     conn = db()
     try:
         with conn.cursor() as cur:
+            # First check text_balance carryover, then fallback to tier limit
             cur.execute("""
-                UPDATE users SET msg_used = msg_used + 1
-                WHERE user_id=%s AND msg_used < %s
-                RETURNING msg_used
-            """, (user["user_id"], limit))
-            got = cur.fetchone()
-            conn.commit()
+                UPDATE users SET text_balance = text_balance - 1
+                WHERE user_id=%s AND text_balance > 0
+                RETURNING text_balance
+            """, (user["user_id"],))
+            balance_used = cur.fetchone()
+            if balance_used:
+                conn.commit()
+                remaining = int(balance_used["text_balance"])
+            else:
+                cur.execute("""
+                    UPDATE users SET msg_used = msg_used + 1
+                    WHERE user_id=%s AND msg_used < %s
+                    RETURNING msg_used
+                """, (user["user_id"], limit))
+                got = cur.fetchone()
+                conn.commit()
+                if got is None:
+                    raise HTTPException(status_code=402, detail="out_of_messages")
+                remaining = max(0, limit - int(got["msg_used"]))
     finally:
         conn.close()
-    if got is None:
-        raise HTTPException(status_code=402, detail="out_of_messages")
-    remaining = max(0, limit - int(got["msg_used"]))
     try:
         return girl, get_relationship(user["user_id"], girl), remaining
     except Exception:
@@ -2524,6 +2620,9 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
                         "milestone": brain_milestone(brain, rel["milestone"])}
         if picture_due:
             done_payload["picture_due"] = True
+        served_media = detect_and_serve_media(user_id, girl, user_message)
+        if served_media:
+            done_payload["served_media"] = served_media
         yield _sse("done", done_payload)
     finally:
         stop.set()
@@ -3373,6 +3472,11 @@ class AdminGirlIn(BaseModel):
     sort_order: int = 100
     difficulty: str = DIFFICULTY_DEFAULT
     active: bool = True
+    age: int = 18
+    background_info: str = ""
+    personality_traits: str = ""
+    no_gos: str = ""
+    media_library: Any = []
 
 
 @app.on_event("startup")
@@ -3781,16 +3885,66 @@ def telegram_link(body: TelegramLinkIn):
             "created": False, "email": email}
 
 
+MEDIA_REQUEST_KEYWORDS = ["picture", "photo", "pic", "video", "selfie", "snap", "image", "media"]
+
+def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Dict[str, Any]]:
+    """Detects if user asks for a picture or video during chat and serves an item from that girl's library."""
+    msg_lower = message.lower()
+    if not any(kw in msg_lower for kw in MEDIA_REQUEST_KEYWORDS):
+        return None
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            # Check video replies cap and fresh videos allowance
+            cur.execute("SELECT video_replies_left, fresh_videos_left FROM users WHERE user_id=%s", (user_id,))
+            user_row = cur.fetchone() or {}
+
+            is_video_req = any(kw in msg_lower for kw in ["video", "clip"])
+            if is_video_req:
+                # Fresh video messages are restricted to users with fresh_videos_left (Premium Session tier)
+                if int(user_row.get("fresh_videos_left") or 0) > 0:
+                    cur.execute("UPDATE users SET fresh_videos_left = fresh_videos_left - 1 WHERE user_id=%s", (user_id,))
+                elif int(user_row.get("video_replies_left") or 0) > 0:
+                    cur.execute("UPDATE users SET video_replies_left = video_replies_left - 1 WHERE user_id=%s", (user_id,))
+                else:
+                    return {"type": "notice", "text": "You have reached your video reply cap for this session."}
+
+            cur.execute("SELECT media_library, avatar_url, name FROM personas WHERE girl=%s", (girl,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            library = row.get("media_library") or []
+            if isinstance(library, str):
+                try:
+                    library = json.loads(library)
+                except Exception:
+                    library = []
+            if library and isinstance(library, list):
+                item = random.choice(library)
+                if isinstance(item, dict):
+                    return item
+                return {"type": "video" if is_video_req else "image", "url": str(item)}
+            # Fallback placeholder item from her library profile
+            fallback_url = row.get("avatar_url") or ""
+            return {"type": "video" if is_video_req else "image", "url": fallback_url, "title": f"Media from {row.get('name', girl.title())}'s library"}
+    finally:
+        conn.close()
+
+
 @app.post("/chat")
 def chat(body: ChatIn, user=Depends(current_user)):
     """Whole reply in one response. The brain runs behind it, so "milestone" here
     is the stage as of this turn; /state has it once the refresh lands."""
     girl, rel, remaining = chat_preflight(user, body.girl)
     used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    served_media = detect_and_serve_media(user["user_id"], girl, body.message)
     if pic_tease_due(user["user_id"], user["tier"], used):
         persist_turn(user["user_id"], girl, rel, body.message, PIC_TEASE_LINE)
-        return {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
+        resp = {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
                 "milestone": int(rel["milestone"])}
+        if served_media:
+            resp["served_media"] = served_media
+        return resp
     try:
         msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
         reply = llm(MOUTH, msgs)   # no thinking budget for chat
@@ -3802,6 +3956,8 @@ def chat(body: ChatIn, user=Depends(current_user)):
 
     resp = {"ok": True, "reply": reply, "remaining": remaining,
             "milestone": int(rel["milestone"])}
+    if served_media:
+        resp["served_media"] = served_media
     if pic_deliver_due(user["user_id"], user["tier"]):
         resp["picture_due"] = True
     return resp
@@ -5687,6 +5843,298 @@ def grant_pictures(body: GrantPicturesIn):
     return _grant_picture_packs(user["user_id"], body.packs, payment_id)
 
 
+# ---------------------------------------------------------------------------
+# KEYHOLE HELPERS & ENTITLEMENT GRANTS
+# ---------------------------------------------------------------------------
+def get_keyhole_config():
+    """Retrieve dynamic keyhole config from DB house_rules, falling back to defaults."""
+    cfg = dict(KEYHOLE_DEFAULT_CONFIG)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM house_rules WHERE key LIKE 'kh_%'")
+            for r in cur.fetchall():
+                k = r["key"][3:]
+                if k in cfg:
+                    try:
+                        cfg[k] = float(r["value"]) if "." in r["value"] else int(r["value"])
+                    except ValueError:
+                        pass
+    finally:
+        conn.close()
+    return cfg
+
+
+def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
+    """Grants Keyhole session packages with text allowance carryover and purchase cap enforcement."""
+    pkg = package_type.lower().strip()
+    cfg = get_keyhole_config()
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+            user = cur.fetchone()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            # Check purchase caps
+            quick_cap = int(cfg.get("quick_monthly_cap", 3))
+            text_cap = int(cfg.get("text_only_monthly_cap", 1))
+
+            if pkg == "quick":
+                if int(user.get("quick_sessions_bought_this_month", 0)) >= quick_cap:
+                    raise HTTPException(status_code=400, detail=f"Monthly limit of {quick_cap} Quick Sessions reached.")
+            elif pkg == "text_only":
+                if int(user.get("text_only_bought_this_month", 0)) >= text_cap:
+                    raise HTTPException(status_code=400, detail=f"Monthly limit of {text_cap} Text-Only package reached.")
+
+            # Calculate new entitlements with CARRYOVER for unused text messages
+            add_text = 0
+            add_webcam = 0
+            add_video_replies = 0
+            add_fresh_videos = 0
+
+            if pkg == "quick":
+                add_webcam = int(cfg.get("quick_webcam_minutes", 15))
+                add_video_replies = int(cfg.get("quick_video_replies", 35))
+                add_text = int(cfg.get("quick_text_included", 100))
+                cur.execute("UPDATE users SET quick_sessions_bought_this_month = quick_sessions_bought_this_month + 1 WHERE user_id=%s", (user_id,))
+            elif pkg == "standard":
+                add_webcam = int(cfg.get("standard_webcam_minutes", 30))
+                add_video_replies = int(cfg.get("standard_video_replies", 70))
+                add_text = int(cfg.get("standard_text_included", 200))
+            elif pkg == "extended":
+                add_webcam = int(cfg.get("extended_webcam_minutes", 45))
+                add_video_replies = int(cfg.get("extended_video_replies", 100))
+                add_text = int(cfg.get("extended_text_included", 300))
+            elif pkg == "premium":
+                add_webcam = int(cfg.get("premium_webcam_minutes", 60))
+                add_fresh_videos = int(cfg.get("premium_fresh_videos", 3))
+                # Add picture credits
+                pics = int(cfg.get("premium_premade_pictures", 5))
+                cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s", (pics, user_id))
+            elif pkg == "text_only":
+                add_text = int(cfg.get("text_only_included", 100))
+                cur.execute("UPDATE users SET text_only_bought_this_month = text_only_bought_this_month + 1 WHERE user_id=%s", (user_id,))
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
+
+            # Apply carryover: existing text_balance + add_text
+            cur.execute("""
+                UPDATE users
+                SET text_balance = text_balance + %s,
+                    webcam_minutes_left = webcam_minutes_left + %s,
+                    video_replies_left = video_replies_left + %s,
+                    fresh_videos_left = fresh_videos_left + %s
+                WHERE user_id=%s
+                RETURNING text_balance, webcam_minutes_left, video_replies_left, fresh_videos_left, pic_credits
+            """, (add_text, add_webcam, add_video_replies, add_fresh_videos, user_id))
+            updated = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
+    finally:
+        conn.close()
+
+
+class KeyholePurchaseIn(BaseModel):
+    package_type: str
+
+
+@app.post("/keyhole/purchase")
+def keyhole_purchase(body: KeyholePurchaseIn, user=Depends(current_user)):
+    """Purchase a Keyhole session or text-only package."""
+    return grant_keyhole_package(user["user_id"], body.package_type)
+
+
+@app.post("/keyhole/session/start")
+def keyhole_session_start(user=Depends(current_user)):
+    """Starts or reconnects a webcam session server-side."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webcam_minutes_left, webcam_session_started_at, webcam_session_duration_s FROM users WHERE user_id=%s", (uid,))
+            row = cur.fetchone()
+            if not row or int(row.get("webcam_minutes_left") or 0) <= 0:
+                raise HTTPException(status_code=400, detail="No webcam minutes remaining.")
+
+            # Start timer if not already running
+            if not row.get("webcam_session_started_at"):
+                cur.execute("UPDATE users SET webcam_session_started_at = now() WHERE user_id=%s RETURNING webcam_session_started_at", (uid,))
+                row["webcam_session_started_at"] = cur.fetchone()["webcam_session_started_at"]
+                conn.commit()
+            return {"ok": True, "started_at": str(row["webcam_session_started_at"]), "minutes_left": row["webcam_minutes_left"]}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# MODULAR PAYMENT LAYER — Abstract base provider & manager
+# Allows plugging compatible payment providers without site rebuilds.
+# ---------------------------------------------------------------------------
+class BasePaymentProvider:
+    provider_name: str = "base"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+class ShopifyPaymentProvider(BasePaymentProvider):
+    provider_name: str = "shopify"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not SHOPIFY_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="SHOPIFY_WEBHOOK_SECRET must be set")
+        digest = base64.b64encode(hmac.new(SHOPIFY_WEBHOOK_SECRET.encode(), raw_body, hashlib.sha256).digest()).decode()
+        if not hmac.compare_digest(digest, headers.get("X-Shopify-Hmac-Sha256", "")):
+            raise HTTPException(status_code=401, detail="Bad Shopify signature")
+        try:
+            order = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        packs = sum(int(li.get("quantity") or 0) for li in order.get("line_items") or []
+                    if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
+        if packs <= 0:
+            return {"ok": True, "ignored": True}
+        attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
+        user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
+        if user_id:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
+                    if cur.fetchone() is None:
+                        user_id = ""
+            finally:
+                conn.close()
+        if not user_id:
+            email = (order.get("email") or order.get("contact_email") or "").strip()
+            if not email:
+                raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
+            user_id = _user_for_email(email)["user_id"]
+        return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "shopify", "checkout_url": f"{SITE_URL}/cart", "pack_ref": _pack_ref(user_id)}
+
+
+class StripePaymentProvider(BasePaymentProvider):
+    provider_name: str = "stripe"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not STRIPE_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="STRIPE_WEBHOOK_SECRET must be set")
+        if not _stripe_signed(raw_body, headers.get("Stripe-Signature", "")):
+            raise HTTPException(status_code=401, detail="Bad Stripe signature")
+        try:
+            event = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        kind = event.get("type", "")
+        obj = (event.get("data") or {}).get("object") or {}
+        customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else \
+            (obj.get("customer") or {}).get("id", "")
+        event_at = int(event.get("created") or 0)
+
+        if kind == "invoice.paid":
+            tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
+            if not tier:
+                return {"ok": True, "ignored": "no known price"}
+            sub = _stripe_invoice_subscription(obj)
+            user = _user_for_stripe_checkout(sub) or _user_for_stripe_customer(customer_id)
+            if user is None:
+                email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
+                if not email:
+                    return {"ok": True, "ignored": "no email"}
+                try:
+                    user = _user_for_email(email)
+                except HTTPException:
+                    return {"ok": True, "ignored": "no account"}
+            applied = _apply_stripe_event(user["user_id"], tier, customer_id, sub, event_at)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            pi = obj.get("payment_intent")
+            pi = pi if isinstance(pi, str) else (pi or {}).get("id", "") or ""
+            _affitor_stamp(applied, sub, pi)
+            return {"ok": True, "user_id": applied, "tier": tier}
+
+        if kind == "checkout.session.completed":
+            ref = (obj.get("client_reference_id") or "").strip()
+            sub = obj.get("subscription")
+            sub = sub if isinstance(sub, str) else (sub or {}).get("id", "") or ""
+            if not ref or not sub or obj.get("mode") != "subscription":
+                return {"ok": True, "ignored": "no client_reference_id"}
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (ref,))
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                return {"ok": True, "ignored": "unknown user"}
+            _remember_stripe_checkout(sub, ref)
+            if obj.get("payment_status") != "paid":
+                return {"ok": True, "user_id": ref, "pending": True}
+            tier = _stripe_subscription_tier(sub)
+            if not tier:
+                return {"ok": True, "ignored": "no known price"}
+            applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at, checkout=True)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            _affitor_stamp(applied, sub, "")
+            return {"ok": True, "user_id": applied, "tier": tier}
+
+        if kind in ("customer.subscription.deleted", "customer.subscription.updated"):
+            if kind == "customer.subscription.updated" and obj.get("status") not in ("canceled", "unpaid"):
+                return {"ok": True, "ignored": "status active"}
+            user = _user_for_stripe_customer(customer_id)
+            if user is None:
+                email = _stripe_customer_email(customer_id)
+                if not email:
+                    return {"ok": True, "ignored": "unknown customer"}
+                try:
+                    user = _user_for_email(email)
+                except HTTPException:
+                    return {"ok": True, "ignored": "no account"}
+            current = user.get("stripe_subscription_id")
+            if current and obj.get("id") and obj.get("id") != current:
+                return {"ok": True, "ignored": "not the current subscription"}
+            applied = _apply_stripe_event(user["user_id"], "visitor", customer_id,
+                                          obj.get("id") or "", event_at)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            return {"ok": True, "user_id": applied, "tier": "visitor"}
+
+        return {"ok": True, "ignored": kind}
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "stripe", "status": "active"}
+
+
+class PaymentGatewayManager:
+    def __init__(self):
+        self._providers: Dict[str, BasePaymentProvider] = {}
+        self.register_provider(ShopifyPaymentProvider())
+        self.register_provider(StripePaymentProvider())
+
+    def register_provider(self, provider: BasePaymentProvider):
+        self._providers[provider.provider_name] = provider
+
+    def get_provider(self, provider_name: str) -> BasePaymentProvider:
+        p = self._providers.get(provider_name.lower())
+        if not p:
+            raise HTTPException(status_code=400, detail=f"Unsupported payment provider: {provider_name}")
+        return p
+
+
+payment_manager = PaymentGatewayManager()
+
+
 @app.post("/webhooks/shopify/orders")
 async def shopify_order_webhook(request: Request):
     """Shopify 'Order payment' webhook. Picture packs are a Shopify product (SKU
@@ -6434,24 +6882,30 @@ def admin_console_girl(body: AdminGirlIn):
     if body.difficulty not in DIFFICULTY:
         raise HTTPException(status_code=400,
                             detail="difficulty must be one of " + ", ".join(DIFFICULTY))
+    media_lib = body.media_library if isinstance(body.media_library, list) else []
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
                                       avatar_url, min_tier, sort_order, active,
-                                      difficulty)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                      difficulty, age, background_info, personality_traits,
+                                      no_gos, media_library)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
                     avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
                     sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
-                    difficulty=EXCLUDED.difficulty
+                    difficulty=EXCLUDED.difficulty, age=EXCLUDED.age,
+                    background_info=EXCLUDED.background_info,
+                    personality_traits=EXCLUDED.personality_traits,
+                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
                   body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
-                  body.difficulty))
+                  body.difficulty, int(body.age), body.background_info.strip(),
+                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib)))
             conn.commit()
     finally:
         conn.close()
@@ -6475,6 +6929,33 @@ def admin_console_girl_active(girl: str, active: bool = True):
     if not found:
         raise HTTPException(status_code=404, detail="Unknown girl slug")
     return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/admin/keyhole/config", dependencies=[Depends(admin_required)])
+def admin_get_keyhole_config():
+    """Retrieve current Keyhole pricing and session parameters."""
+    return get_keyhole_config()
+
+
+class KeyholeConfigIn(BaseModel):
+    config: Dict[str, Any]
+
+
+@app.post("/admin/keyhole/config", dependencies=[Depends(admin_required)])
+def admin_set_keyhole_config(body: KeyholeConfigIn):
+    """Save Keyhole pricing and session parameters into DB house_rules."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            for key, val in body.config.items():
+                cur.execute("""
+                    INSERT INTO house_rules (key, value) VALUES (%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """, (f"kh_{key}", str(val)))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "config": get_keyhole_config()}
 
 
 @app.get("/admin/console/doors", dependencies=[Depends(admin_required)])
