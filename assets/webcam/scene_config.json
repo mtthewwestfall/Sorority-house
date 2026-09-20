@@ -1,0 +1,18 @@
+{
+  "quick_setup": {
+    "active_room": "room_03_japandi",
+    "active_model": "model_bailey_darkhair",
+    "sound_profile": "ambient_studio_01.mp3"
+  },
+  "rooms": {
+    "room_01_parisian": { "source_file": "image_5xyrmU.png", "outpaint": true },
+    "room_02_nightcity": { "source_file": "image_PTKQBc.png", "outpaint": true },
+    "room_03_japandi": { "source_file": "image_iJBMP2.png", "outpaint": true },
+    "room_04_rustic": { "source_file": "image_6h1nPb.png", "outpaint": true }
+  },
+  "models": {
+    "model_bailey_darkhair": { "spritesheet": "image_73kTTq.png", "default_tag": "webcam" },
+    "model_bailey_blonde": { "spritesheet": "image_8pRo7J.png", "default_tag": "webcam" },
+    "model_bailey_redhead": { "spritesheet": "image_h_lM8P.png", "default_tag": "webcam" }
+  }
+}
