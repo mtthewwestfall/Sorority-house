@@ -204,8 +204,8 @@ from typing import Optional, List, Dict, Any
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -830,12 +830,34 @@ STAGE_META = {
 }
 
 # ---------------------------------------------------------------------------
-# APP + CORS
+# APP + CORS + UPLOADS SETUP
 # ---------------------------------------------------------------------------
+UPLOAD_DIR = os.environ.get(
+    "KEYHOLE_MEDIA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "media")
+)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".ogv", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+ALLOWED_MEDIA_MIMES = {
+    "video/mp4", "video/webm", "video/quicktime", "video/ogg", "video/x-m4v",
+    "image/jpeg", "image/png", "image/webp", "image/gif"
+}
+MAX_MEDIA_UPLOAD_BYTES = int(os.environ.get("MAX_MEDIA_UPLOAD_BYTES", 100 * 1024 * 1024))  # 100MB default
+
 app = FastAPI(title="God's Greek backend")
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/media/files/{filename}")
+def serve_media_file(filename: str):
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Media file not found")
+    return FileResponse(file_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1080,6 +1102,23 @@ def init_db():
                 );
                 INSERT INTO promo_counters (key, used) VALUES ('free_audits', 0)
                 ON CONFLICT (key) DO NOTHING;
+
+                -- KEYHOLE Webcam Video & Media Assets Library
+                CREATE TABLE IF NOT EXISTS media_assets (
+                    id           SERIAL PRIMARY KEY,
+                    character_id TEXT NOT NULL,
+                    title        TEXT NOT NULL DEFAULT '',
+                    media_type   TEXT NOT NULL DEFAULT 'video', -- 'video' or 'image'
+                    url          TEXT NOT NULL,
+                    file_path    TEXT NOT NULL DEFAULT '',
+                    tags         JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    is_default   BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_fallback  BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -2482,6 +2521,7 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
+<button id="tabMed" onclick="show('med')">Webcam Media</button>
 <button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
@@ -2561,6 +2601,48 @@ full character doc, which is her Layer-1 system block. Changes are live on the n
 Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
 <div id="pedit" class="card hid"></div>
 </section>
+
+<section id="med" class="hid">
+<div class="grid">
+  <div class="card">
+    <h4 style="margin-top:0">Add / Upload Media Asset</h4>
+    <div class="row2">
+      <input id="mCharId" placeholder="Character ID (e.g. dakota, zoe)" style="flex:1">
+      <input id="mTitle" placeholder="Title / Description" style="flex:1">
+      <select id="mType">
+        <option value="video">Video</option>
+        <option value="image">Image</option>
+      </select>
+    </div>
+    <div class="row2">
+      <input id="mTags" placeholder="Tags (comma separated: e.g. idle, talking, sitting-bed, desk)" style="flex:2">
+      <label><input id="mIsDefault" type="checkbox"> Default/Idle</label>
+      <label><input id="mIsFallback" type="checkbox"> Fallback Image</label>
+      <label><input id="mIsEnabled" type="checkbox" checked> Enabled</label>
+    </div>
+    <div class="card" style="background:#101017;margin-top:10px">
+      <h5 style="margin:0 0 8px 0">Option A: Upload File</h5>
+      <input id="mFile" type="file" accept="video/*,image/*">
+      <button class="p" style="margin-top:8px" onclick="uploadMediaAsset()">Upload Media File</button>
+    </div>
+    <div class="card" style="background:#101017;margin-top:10px">
+      <h5 style="margin:0 0 8px 0">Option B: Import Media URL</h5>
+      <input id="mUrl" placeholder="https://..." style="width:100%">
+      <button class="s" style="margin-top:8px" onclick="importMediaUrlAsset()">Import Approved URL</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row2" style="justify-content:space-between">
+      <h4 style="margin:0">Media Library</h4>
+      <div class="row2" style="margin:0">
+        <input id="mFilterChar" placeholder="Filter by character ID" style="width:160px" onkeydown="if(event.key==='Enter')loadMediaAssets()">
+        <button class="s" onclick="loadMediaAssets()">Filter / Refresh</button>
+      </div>
+    </div>
+    <div id="mList" style="margin-top:12px;max-height:600px;overflow-y:auto"></div>
+  </div>
+</div>
+</section>
 </main>
 <div id="toast"></div>
 <script>
@@ -2570,7 +2652,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',demo:'tabDemo'};
+const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -2592,7 +2674,139 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();}
+
+async function loadMediaAssets(){
+  const charId=($('#mFilterChar')?.value||'').trim().toLowerCase();
+  try{
+    const url='/admin/media'+(charId?`?character_id=${encodeURIComponent(charId)}`:'');
+    const r=await api(url);
+    const assets=r.assets||[];
+    if(!assets.length){
+      $('#mList').innerHTML='<div class="mut">No media assets found. Upload or import a URL above.</div>';
+      return;
+    }
+    $('#mList').innerHTML=assets.map(a=>{
+      const tagBadges=(a.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(' ');
+      const preview=a.media_type==='video'?
+        `<video src="${esc(a.url)}" controls loop muted style="max-width:100%;max-height:160px;border-radius:6px;background:#000"></video>`:
+        `<img src="${esc(a.url)}" style="max-width:100%;max-height:160px;border-radius:6px;object-fit:cover">`;
+      return `<div class="card" style="background:#101017;margin-bottom:12px">
+        <div class="row2" style="justify-content:space-between">
+          <strong>${esc(a.character_id)}</strong> &middot; <span class="mut">${esc(a.title||a.media_type)}</span>
+          <div>
+            ${a.is_default?'<span class="pill senior">Default / Idle</span> ':''}
+            ${a.is_fallback?'<span class="pill resolved">Fallback</span> ':''}
+            ${a.is_enabled?'<span class="pill open">Active</span>':'<span class="pill mut">Disabled</span>'}
+          </div>
+        </div>
+        <div style="margin:8px 0">${preview}</div>
+        <div class="row2" style="margin:4px 0">${tagBadges||'<span class="mut">(no tags)</span>'}</div>
+        <div class="row2" style="margin-top:8px;font-size:12px">
+          <button class="s" onclick="toggleMediaDefault(${a.id})">${a.is_default?'Clear Default':'Set Default'}</button>
+          <button class="s" onclick="toggleMediaFallback(${a.id},${!a.is_fallback})">${a.is_fallback?'Clear Fallback':'Set Fallback'}</button>
+          <button class="s" onclick="toggleMediaEnabled(${a.id},${!a.is_enabled})">${a.is_enabled?'Disable':'Enable'}</button>
+          <button class="s" onclick="promptReplaceMedia(${a.id})">Replace URL/File</button>
+          <button class="s" style="color:#f05555;border-color:#f05555" onclick="deleteMediaAsset(${a.id})">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){toast(e.message,true);}
+}
+
+async function uploadMediaAsset(){
+  const charId=$('#mCharId').value.trim();
+  const file=$('#mFile').files[0];
+  if(!charId||!file){toast('Enter character ID and select a file',true);return;}
+  const fd=new FormData();
+  fd.append('character_id',charId);
+  fd.append('file',file);
+  fd.append('title',$('#mTitle').value.trim());
+  fd.append('media_type',$('#mType').value);
+  fd.append('tags',$('#mTags').value);
+  fd.append('is_default',$('#mIsDefault').checked);
+  fd.append('is_fallback',$('#mIsFallback').checked);
+  fd.append('is_enabled',$('#mIsEnabled').checked);
+  try{
+    const r=await fetch('/admin/media/upload',{method:'POST',headers:{'X-Admin-Secret':SECRET},body:fd});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Upload failed');
+    toast('Media uploaded and assigned!');
+    $('#mFile').value='';
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function importMediaUrlAsset(){
+  const charId=$('#mCharId').value.trim();
+  const url=$('#mUrl').value.trim();
+  if(!charId||!url){toast('Enter character ID and URL',true);return;}
+  try{
+    await api('/admin/media/import-url',{
+      method:'POST',
+      body:JSON.stringify({
+        character_id:charId,
+        url:url,
+        title:$('#mTitle').value.trim(),
+        media_type:$('#mType').value,
+        tags:($('#mTags').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+        is_default:$('#mIsDefault').checked,
+        is_fallback:$('#mIsFallback').checked,
+        is_enabled:$('#mIsEnabled').checked
+      })
+    });
+    toast('Media URL imported!');
+    $('#mUrl').value='';
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function toggleMediaDefault(id){
+  try{
+    await api(`/admin/media/${id}/set-default`,{method:'POST'});
+    toast('Default media updated');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function toggleMediaFallback(id,val){
+  try{
+    await api(`/admin/media/${id}/update`,{method:'POST',body:JSON.stringify({is_fallback:val})});
+    toast('Fallback status updated');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function toggleMediaEnabled(id,val){
+  try{
+    await api(`/admin/media/${id}/update`,{method:'POST',body:JSON.stringify({is_enabled:val})});
+    toast('Media status updated');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function promptReplaceMedia(id){
+  const newUrl=prompt('Enter replacement media URL:');
+  if(!newUrl||!newUrl.trim())return;
+  const fd=new FormData();
+  fd.append('url',newUrl.trim());
+  try{
+    const r=await fetch(`/admin/media/${id}/replace`,{method:'POST',headers:{'X-Admin-Secret':SECRET},body:fd});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Replacement failed');
+    toast('Media replaced');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function deleteMediaAsset(id){
+  if(!confirm('Delete this media asset?'))return;
+  try{
+    await api(`/admin/media/${id}`,{method:'DELETE'});
+    toast('Media asset deleted');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
 async function loadDoors(){try{const r=await api('/admin/console/doors');$('#dLocked').checked=r.doors_locked;$('#dRule').classList.toggle('hid',!r.doors_locked);$('#dSet').value=r.door_set;
  $('#dStage').innerHTML=[1,2,3,4,5,6,7,8].map(s=>`<option value="${s}"${s===r.unlock_stage?' selected':''}>M${s}</option>`).join('')}catch(e){toast(e.message,true)}}
 async function saveDoors(){try{await api('/admin/console/doors',{method:'POST',body:JSON.stringify({doors_locked:$('#dLocked').checked,door_set:+$('#dSet').value,unlock_stage:+$('#dStage').value})});toast('Saved - live on the next reload');loadDoors()}catch(e){toast(e.message,true)}}
@@ -6006,6 +6220,559 @@ def admin_account_chat(email: str, girl: str, limit: int = 60):
         conn.close()
     rows.reverse()
     return rows
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE WEBCAM MEDIA MANAGER (ADMIN ENDPOINTS)
+# ---------------------------------------------------------------------------
+
+class AdminMediaUrlIn(BaseModel):
+    character_id: str
+    url: str
+    title: str = ""
+    media_type: str = "video"  # 'video' or 'image'
+    tags: List[str] = []
+    is_default: bool = False
+    is_fallback: bool = False
+    is_enabled: bool = True
+
+
+class AdminMediaUpdateIn(BaseModel):
+    title: Optional[str] = None
+    media_type: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_default: Optional[bool] = None
+    is_fallback: Optional[bool] = None
+    is_enabled: Optional[bool] = None
+
+
+class AdminMediaReplaceUrlIn(BaseModel):
+    url: str
+    media_type: Optional[str] = None
+
+
+def _parse_tags_input(raw_tags) -> List[str]:
+    if isinstance(raw_tags, list):
+        tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()]
+    elif isinstance(raw_tags, str):
+        try:
+            parsed = json.loads(raw_tags)
+            if isinstance(parsed, list):
+                tags = [str(t).strip().lower() for t in parsed if str(t).strip()]
+            else:
+                tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+        except Exception:
+            tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+    else:
+        tags = []
+    # Deduplicate while preserving order
+    seen = set()
+    out = []
+    for t in tags:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def _validate_character_exists(char_id: str):
+    """Ensure character_id resolves to an existing/approved character in the roster or personas."""
+    cid = char_id.strip().lower()
+    if not cid:
+        raise HTTPException(status_code=400, detail="character_id is required")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT girl FROM personas WHERE girl=%s", (cid,))
+            if cur.fetchone():
+                return cid
+    finally:
+        conn.close()
+    raise HTTPException(status_code=400, detail=f"Character '{cid}' does not exist in roster")
+
+
+def _validate_media_url(url: str):
+    """Validate external media URL to http/https schemes only."""
+    s = url.strip()
+    parsed = urllib.parse.urlparse(s)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid media URL: must use http or https scheme")
+    return s
+
+
+@app.get("/admin/media", dependencies=[Depends(admin_required)])
+def admin_list_media(character_id: str = ""):
+    """List all media assets in the library, optionally filtered by character_id."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if character_id.strip():
+                cur.execute("""
+                    SELECT id, character_id, title, media_type, url, file_path, tags,
+                           is_default, is_fallback, is_enabled, created_at, updated_at
+                    FROM media_assets
+                    WHERE character_id=%s
+                    ORDER BY is_default DESC, is_fallback DESC, created_at DESC
+                """, (character_id.strip().lower(),))
+            else:
+                cur.execute("""
+                    SELECT id, character_id, title, media_type, url, file_path, tags,
+                           is_default, is_fallback, is_enabled, created_at, updated_at
+                    FROM media_assets
+                    ORDER BY character_id ASC, is_default DESC, is_fallback DESC, created_at DESC
+                """)
+            rows = cur.fetchall() or []
+            return {"ok": True, "assets": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/upload", dependencies=[Depends(admin_required)])
+async def admin_upload_media(
+    character_id: str = Form(...),
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    media_type: str = Form(""),
+    tags: str = Form("[]"),
+    is_default: bool = Form(False),
+    is_fallback: bool = Form(False),
+    is_enabled: bool = Form(True)
+):
+    """Upload a media file and assign it to a character."""
+    char_id = _validate_character_exists(character_id)
+
+    filename = file.filename or "file"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+    content_type = (file.content_type or "").strip().lower()
+    if content_type and content_type not in ALLOWED_MEDIA_MIMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
+
+    m_type = media_type.strip().lower()
+    if not m_type:
+        m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv") else "image"
+    if m_type not in ("video", "image"):
+        m_type = "video"
+
+    safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
+
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    public_url = f"/media/files/{safe_name}"
+    parsed_tags = _parse_tags_input(tags)
+    asset_title = title.strip() or filename
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if is_default:
+                cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            if is_fallback:
+                cur.execute("UPDATE media_assets SET is_fallback=FALSE WHERE character_id=%s", (char_id,))
+            cur.execute("""
+                INSERT INTO media_assets (
+                    character_id, title, media_type, url, file_path, tags,
+                    is_default, is_fallback, is_enabled
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (char_id, asset_title, m_type, public_url, safe_name, Json(parsed_tags),
+                  is_default, is_fallback, is_enabled))
+            asset = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(asset)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
+def admin_import_media_url(body: AdminMediaUrlIn):
+    """Import an approved external media URL and assign it to a character."""
+    char_id = _validate_character_exists(body.character_id)
+    url = _validate_media_url(body.url)
+
+    m_type = body.media_type.strip().lower()
+    if m_type not in ("video", "image"):
+        m_type = "video"
+
+    parsed_tags = _parse_tags_input(body.tags)
+    asset_title = body.title.strip() or os.path.basename(urllib.parse.urlparse(url).path) or "Imported Media"
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if body.is_default:
+                cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            if body.is_fallback:
+                cur.execute("UPDATE media_assets SET is_fallback=FALSE WHERE character_id=%s", (char_id,))
+            cur.execute("""
+                INSERT INTO media_assets (
+                    character_id, title, media_type, url, file_path, tags,
+                    is_default, is_fallback, is_enabled
+                ) VALUES (%s, %s, %s, %s, '', %s, %s, %s, %s)
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (char_id, asset_title, m_type, url, Json(parsed_tags),
+                  body.is_default, body.is_fallback, body.is_enabled))
+            asset = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(asset)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/{asset_id}/update", dependencies=[Depends(admin_required)])
+def admin_update_media_metadata(asset_id: int, body: AdminMediaUpdateIn):
+    """Update media asset tags, title, default/fallback status, or enabled state."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            char_id = asset["character_id"]
+            title = body.title.strip() if body.title is not None else asset["title"]
+            m_type = body.media_type.strip().lower() if body.media_type is not None else asset["media_type"]
+            if m_type not in ("video", "image"):
+                m_type = asset["media_type"]
+
+            tags = _parse_tags_input(body.tags) if body.tags is not None else asset["tags"]
+            is_default = body.is_default if body.is_default is not None else asset["is_default"]
+            is_fallback = body.is_fallback if body.is_fallback is not None else asset["is_fallback"]
+            is_enabled = body.is_enabled if body.is_enabled is not None else asset["is_enabled"]
+
+            if is_default and not asset["is_default"]:
+                cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            if is_fallback and not asset["is_fallback"]:
+                cur.execute("UPDATE media_assets SET is_fallback=FALSE WHERE character_id=%s", (char_id,))
+
+            cur.execute("""
+                UPDATE media_assets
+                SET title=%s, media_type=%s, tags=%s, is_default=%s, is_fallback=%s, is_enabled=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (title, m_type, Json(tags), is_default, is_fallback, is_enabled, asset_id))
+            updated = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(updated)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/{asset_id}/replace", dependencies=[Depends(admin_required)])
+async def admin_replace_media_file(
+    asset_id: int,
+    file: Optional[UploadFile] = File(None),
+    url: Optional[str] = Form(None)
+):
+    """Replace file or URL of an existing media asset."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            char_id = asset["character_id"]
+            old_file_path = asset["file_path"]
+
+            new_url = asset["url"]
+            new_file_path = old_file_path
+
+            if file and file.filename:
+                filename = file.filename
+                ext = os.path.splitext(filename)[1].lower()
+                if ext not in ALLOWED_MEDIA_EXTENSIONS:
+                    raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+                content_type = (file.content_type or "").strip().lower()
+                if content_type and content_type not in ALLOWED_MEDIA_MIMES:
+                    raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
+
+                content = await file.read()
+                if not content:
+                    raise HTTPException(status_code=400, detail="Uploaded file is empty")
+                if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
+
+                safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+                dest_path = os.path.join(UPLOAD_DIR, safe_name)
+
+                with open(dest_path, "wb") as f:
+                    f.write(content)
+
+                new_url = f"/media/files/{safe_name}"
+                new_file_path = safe_name
+
+                # Remove old file if it existed
+                if old_file_path:
+                    old_full = os.path.join(UPLOAD_DIR, old_file_path)
+                    if os.path.isfile(old_full):
+                        try:
+                            os.remove(old_full)
+                        except OSError:
+                            pass
+            elif url and url.strip():
+                new_url = _validate_media_url(url)
+                new_file_path = ""
+                # Remove old file if converting to URL
+                if old_file_path:
+                    old_full = os.path.join(UPLOAD_DIR, old_file_path)
+                    if os.path.isfile(old_full):
+                        try:
+                            os.remove(old_full)
+                        except OSError:
+                            pass
+            else:
+                raise HTTPException(status_code=400, detail="Provide either a new file or url")
+
+            cur.execute("""
+                UPDATE media_assets
+                SET url=%s, file_path=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (new_url, new_file_path, asset_id))
+            updated = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(updated)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/{asset_id}/set-default", dependencies=[Depends(admin_required)])
+def admin_set_default_media(asset_id: int):
+    """Set specified asset as the default for its character (clearing other defaults)."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            char_id = asset["character_id"]
+            cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            cur.execute("UPDATE media_assets SET is_default=TRUE, updated_at=now() WHERE id=%s", (asset_id,))
+            conn.commit()
+            return {"ok": True, "character_id": char_id, "default_asset_id": asset_id}
+    finally:
+        conn.close()
+
+
+@app.delete("/admin/media/{asset_id}", dependencies=[Depends(admin_required)])
+def admin_delete_media(asset_id: int):
+    """Delete a media asset and clean up any uploaded local file."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            old_file_path = asset["file_path"]
+            cur.execute("DELETE FROM media_assets WHERE id=%s", (asset_id,))
+            conn.commit()
+
+            if old_file_path:
+                old_full = os.path.join(UPLOAD_DIR, old_file_path)
+                if os.path.isfile(old_full):
+                    try:
+                        os.remove(old_full)
+                    except OSError:
+                        pass
+            return {"ok": True, "deleted_asset_id": asset_id}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE CUSTOMER ROOM MEDIA API (PUBLIC / ROOM INTEGRATION)
+# Strict Character Isolation:
+# Every query filters strictly by character_id.
+# Never fall back to another character's media.
+# ---------------------------------------------------------------------------
+
+def _character_fallback_response(char_id: str, conn=None):
+    """Retrieve or generate approved fallback media representation for a character.
+    STRICT ISOLATION: Strictly scoped to char_id, never returns another character's media."""
+    close_conn = False
+    if conn is None:
+        conn = db()
+        close_conn = True
+    try:
+        with conn.cursor() as cur:
+            # 1. Check if character has an explicit enabled fallback asset
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND is_fallback=TRUE
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            fb_asset = cur.fetchone()
+            if fb_asset:
+                return {"ok": True, "has_media": True, "fallback": True, "asset": dict(fb_asset)}
+
+            # 2. Check if persona has avatar_url
+            cur.execute("SELECT name, avatar_url FROM personas WHERE girl=%s", (char_id,))
+            p_row = cur.fetchone()
+            if p_row and p_row.get("avatar_url"):
+                return {
+                    "ok": True,
+                    "has_media": True,
+                    "fallback": True,
+                    "asset": {
+                        "id": None,
+                        "character_id": char_id,
+                        "title": f"{p_row.get('name', char_id.title())} Fallback",
+                        "media_type": "image",
+                        "url": p_row["avatar_url"],
+                        "tags": ["fallback"],
+                        "is_default": False,
+                        "is_fallback": True
+                    }
+                }
+
+            # 3. Fallback placeholder representation (character isolated)
+            return {
+                "ok": True,
+                "has_media": False,
+                "fallback": True,
+                "asset": {
+                    "id": None,
+                    "character_id": char_id,
+                    "title": f"{char_id.title()} Offline",
+                    "media_type": "image",
+                    "url": f"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360' viewBox='0 0 640 360'><rect width='100%25' height='100%25' fill='%2317171e'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239a9ab0' font-family='sans-serif' font-size='20'>{char_id.title()} Webcam Offline</text></svg>",
+                    "tags": ["fallback", "offline"],
+                    "is_default": False,
+                    "is_fallback": True
+                }
+            }
+    finally:
+        if close_conn:
+            conn.close()
+
+
+@app.get("/media/character/{character_id}/default")
+def get_character_default_media(character_id: str):
+    """Retrieve default looping media for a character.
+    If no enabled default video exists, returns character's approved fallback state."""
+    char_id = character_id.strip().lower()
+    if not char_id:
+        raise HTTPException(status_code=400, detail="character_id is required")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND is_default=TRUE
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            asset = cur.fetchone()
+            if asset:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(asset)}
+
+            # Fallback to any enabled default/idle tagged video for this character
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND (tags @> '["idle"]'::jsonb OR tags @> '["default"]'::jsonb)
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            idle_asset = cur.fetchone()
+            if idle_asset:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(idle_asset)}
+
+            # Fallback to any enabled video for this character
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND media_type='video'
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            any_video = cur.fetchone()
+            if any_video:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(any_video)}
+
+            # Strict isolation: Return character's own fallback state
+            return _character_fallback_response(char_id, conn=conn)
+    finally:
+        conn.close()
+
+
+@app.get("/media/character/{character_id}/tag/{tag}")
+def get_character_media_by_tag(character_id: str, tag: str):
+    """Retrieve an appropriate tagged clip (e.g. talking, idle, sitting-bed, chair, desk, greeting).
+    If no enabled matching tag asset exists for this character, returns default or fallback media state."""
+    char_id = character_id.strip().lower()
+    tag_clean = tag.strip().lower()
+    if not char_id or not tag_clean:
+        raise HTTPException(status_code=400, detail="character_id and tag are required")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            tag_json = json.dumps([tag_clean])
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND tags @> %s::jsonb
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id, tag_json))
+            asset = cur.fetchone()
+            if asset:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(asset)}
+
+            # Fallback to default media for this character
+            return get_character_default_media(char_id)
+    finally:
+        conn.close()
+
+
+@app.get("/media/character/{character_id}/fallback")
+def get_character_fallback_media(character_id: str):
+    """Retrieve character's approved fallback image or empty state representation."""
+    char_id = character_id.strip().lower()
+    if not char_id:
+        raise HTTPException(status_code=400, detail="character_id is required")
+    return _character_fallback_response(char_id)
+
+
+@app.get("/media/asset/{asset_id}")
+def get_media_asset_detail(asset_id: int):
+    """Retrieve public details for a specific enabled approved asset."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback, is_enabled
+                FROM media_assets
+                WHERE id=%s AND is_enabled=TRUE
+            """, (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Approved media asset not found or disabled")
+            return {"ok": True, "asset": dict(asset)}
+    finally:
+        conn.close()
 
 
 @app.get("/admin", response_class=HTMLResponse)
