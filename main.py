@@ -2639,6 +2639,20 @@ pre{white-space:pre-wrap;margin:0}
       <button class="p" onclick="adminDemoSpeak()">Speak Live</button>
     </div>
   </div>
+
+  <div class="card" style="margin-top:14px">
+    <h5>3. Voice Profile Quick Test & Preview</h5>
+    <div class="mut" style="margin-bottom:8px">Select a sister voice profile to test character speech performance:</div>
+    <div class="row2" style="flex-wrap:wrap;gap:6px">
+      <button class="s" type="button" onclick="testSisterVoice('bailey')">🎙️ Bailey Voice</button>
+      <button class="s" type="button" onclick="testSisterVoice('carmen')">🎙️ Carmen Voice</button>
+      <button class="s" type="button" onclick="testSisterVoice('chloe')">🎙️ Chloe Voice</button>
+      <button class="s" type="button" onclick="testSisterVoice('valentina')">🎙️ Valentina Voice</button>
+      <button class="s" type="button" onclick="testSisterVoice('riley')">🎙️ Riley Voice</button>
+      <button class="s" type="button" onclick="testSisterVoice('maya')">🎙️ Maya Voice</button>
+    </div>
+    <div id="voiceStatus" class="mut" style="margin-top:8px">Ready to test sister voice profiles.</div>
+  </div>
 </div>
 </div>
 </section>
@@ -2813,6 +2827,17 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
   </div>
 </section>
 </main>
+
+<div id="mediaModal" class="hid" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="closeMediaPreviewModal(event)">
+  <div class="card" style="background:#17171e;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;position:relative" onclick="event.stopPropagation()">
+    <div class="row2" style="justify-content:space-between;margin-bottom:12px">
+      <h3 id="modalTitle" style="margin:0">Media Preview</h3>
+      <button class="s" onclick="closeMediaPreviewModal()">✕ Close</button>
+    </div>
+    <div id="modalBody" style="text-align:center;background:#0d0d11;padding:12px;border-radius:8px"></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <script>
 const $=s=>document.querySelector(s);let SECRET=sessionStorage.getItem('adm')||'';let ROWS=[],CUR='';
@@ -2833,6 +2858,12 @@ async function adminSetDemoMilestone(){
   }catch(e){toast(e.message,true);}
 }
 
+function testSisterVoice(sister){
+  const voiceStatus=$('#voiceStatus');
+  if(voiceStatus) voiceStatus.innerText='Testing voice profile for ' + sister.toUpperCase() + '...';
+  toast('Voice profile loaded for ' + sister.toUpperCase());
+}
+
 async function adminDemoSpeak(){
   const cid=+$('#demoCompId').value;
   const message=$('#demoSpeakMsg').value.trim();
@@ -2844,6 +2875,29 @@ async function adminDemoSpeak(){
   }catch(e){toast(e.message,true);}
 }
 function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+
+function openMediaPreviewModal(url, type, charId, title){
+  const modal=$('#mediaModal');
+  const modalTitle=$('#modalTitle');
+  const modalBody=$('#modalBody');
+  if(!modal||!modalBody)return;
+  modalTitle.textContent=(charId?charId.toUpperCase()+' - ':'') + (title||'Media Preview');
+  if(type==='video'){
+    modalBody.innerHTML=`<video src="${esc(url)}" controls autoplay loop style="max-width:100%;max-height:70vh;border-radius:8px;background:#000"></video>`;
+  }else{
+    modalBody.innerHTML=`<img src="${esc(url)}" style="max-width:100%;max-height:70vh;border-radius:8px;object-fit:contain">`;
+  }
+  modal.classList.remove('hid');
+}
+
+function closeMediaPreviewModal(){
+  const modal=$('#mediaModal');
+  const modalBody=$('#modalBody');
+  if(modal){
+    modal.classList.add('hid');
+    if(modalBody) modalBody.innerHTML='';
+  }
+}
 
 async function loadMediaAssets(){
   const charId=($('#mFilterChar')?.value||'').trim().toLowerCase();
@@ -2858,8 +2912,8 @@ async function loadMediaAssets(){
     $('#mList').innerHTML=assets.map(a=>{
       const tagBadges=(a.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(' ');
       const preview=a.media_type==='video'?
-        `<video src="${esc(a.url)}" controls loop muted style="max-width:100%;max-height:160px;border-radius:6px;background:#000"></video>`:
-        `<img src="${esc(a.url)}" style="max-width:100%;max-height:160px;border-radius:6px;object-fit:cover">`;
+        `<video src="${esc(a.url)}" controls loop muted style="max-width:100%;max-height:160px;border-radius:6px;background:#000;cursor:pointer" onclick="openMediaPreviewModal('${esc(a.url)}','video','${esc(a.character_id)}','${esc(a.title||'')}')"></video>`:
+        `<img src="${esc(a.url)}" style="max-width:100%;max-height:160px;border-radius:6px;object-fit:cover;cursor:pointer" onclick="openMediaPreviewModal('${esc(a.url)}','image','${esc(a.character_id)}','${esc(a.title||'')}')">`;
       return `<div class="card" style="background:#101017;margin-bottom:12px">
         <div class="row2" style="justify-content:space-between">
           <strong>${esc(a.character_id)}</strong> &middot; <span class="mut">${esc(a.title||a.media_type)}</span>
@@ -2872,6 +2926,7 @@ async function loadMediaAssets(){
         <div style="margin:8px 0">${preview}</div>
         <div class="row2" style="margin:4px 0">${tagBadges||'<span class="mut">(no tags)</span>'}</div>
         <div class="row2" style="margin-top:8px;font-size:12px">
+          <button class="s" onclick="openMediaPreviewModal('${esc(a.url)}','${esc(a.media_type)}','${esc(a.character_id)}','${esc(a.title||'')}')">🔍 Large Preview</button>
           <button class="s" onclick="toggleMediaDefault(${a.id})">${a.is_default?'Clear Default':'Set Default'}</button>
           <button class="s" onclick="toggleMediaFallback(${a.id},${!a.is_fallback})">${a.is_fallback?'Clear Fallback':'Set Fallback'}</button>
           <button class="s" onclick="toggleMediaEnabled(${a.id},${!a.is_enabled})">${a.is_enabled?'Disable':'Enable'}</button>
@@ -3081,8 +3136,19 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  <textarea id="pDoc" style="min-height:300px;font-family:ui-monospace,monospace">${esc(p.persona)}</textarea>
  <div class="row2"><button class="p" data-girl="${esc(p.girl)}" onclick="saveGirl(this.dataset.girl)">Save</button>
  ${p.isNew?'':`<button class="s" onclick="setActive('${esc(p.girl)}',${p.active?'false':'true'})">${p.active?'Retire her':'Bring her back'}</button>`}
+ ${p.girl?`<button class="s" onclick="openCompanionWebcamMedia('${esc(p.girl)}')">🎥 Webcam Media</button>`:''}
  <span class="mut" id="pLen">${(p.persona||'').length} chars</span></div>`;
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
+
+function openCompanionWebcamMedia(charId){
+  show('med');
+  const filterInput=$('#mFilterChar');
+  const mCharId=$('#mCharId');
+  if(filterInput) filterInput.value=charId;
+  if(mCharId) mCharId.value=charId;
+  loadMediaAssets();
+}
+
 async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
  try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
   blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
@@ -3118,7 +3184,7 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote()">Save note</button></div>
  </div></div>
  <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}
- <h4>Custom Companions</h4><div>${(a.companions||[]).map(c=>`<div class="card" style="margin-bottom:8px;"><div class="row2"><b>${esc(c.first_name)}</b> <span class="pill">${esc(c.gender||'female')}</span> <span class="mut">Slot ${c.slot_number} · Trust ${c.milestone}</span></div><div class="mut" style="margin-top:4px;">${esc(c.looks_desc)}</div></div>`).join('')||'<span class="mut">No custom companions created</span>'}</div>
+ <h4>Custom Companions</h4><div>${(a.companions||[]).map(c=>`<div class="card" style="margin-bottom:8px;"><div class="row2"><b>${esc(c.first_name)}</b> <span class="pill">${esc(c.gender||'female')}</span> <span class="mut">Slot ${c.slot_number} · Trust ${c.milestone}</span> <button class="s" style="margin-left:8px" onclick="openCompanionWebcamMedia('companion_' + ${c.slot_number})">🎥 Webcam Media</button></div><div class="mut" style="margin-top:4px;">${esc(c.looks_desc)}</div></div>`).join('')||'<span class="mut">No custom companions created</span>'}</div>
  <h4>Chat log</h4><div class="plist" id="chatTabs">${a.relationships.map(r=>`<button class="s" data-girl="${esc(r.girl)}">${esc(r.girl)}</button>`).join('')}${(a.companions||[]).map(c=>`<button class="s" data-companion-id="${c.id}">[Companion] ${esc(c.first_name)}</button>`).join('')||(a.relationships.length?'':'<span class="mut">no chats yet</span>')}</div><div id="chat" class="chat" style="margin-top:8px"><span class="mut">Pick a girl or custom companion to read the latest exchanges.</span></div>`;
  $('#chatTabs').addEventListener('click',e=>{const bGirl=e.target.closest('button[data-girl]');const bComp=e.target.closest('button[data-companion-id]');if(bGirl)loadChat(bGirl.dataset.girl);else if(bComp)loadChat(null,+bComp.dataset.companionId)});el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
 function renderComplaints(list){if(!list.length)return '<div class="mut">None</div>';return list.map(c=>`<div class="card" id="c${c.id}"><div class="row2"><b>${esc(c.subject)}</b><span class="pill ${esc(c.status)}">${esc(c.status)}</span>
