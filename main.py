@@ -1645,6 +1645,18 @@ def get_relationship(user_id, girl):
         conn.close()
 
 
+def get_relationships(user_id):
+    """Fetch all relationships for a user in a single query (Bolt ⚡ optimization)."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM relationships WHERE user_id=%s", (user_id,))
+            rows = cur.fetchall()
+            return {r["girl"]: r for r in rows}
+    finally:
+        conn.close()
+
+
 def last_messages(user_id, girl, n):
     conn = db()
     try:
@@ -5060,11 +5072,18 @@ def public_roster():
 def state(user=Depends(current_user)):
     house = roster()
     doors = open_doors(user["user_id"], user["tier"], house)
+    # OPTIMIZATION (Bolt ⚡): Batch fetch all user relationships in 1 query instead of N DB calls in a loop
+    rels = get_relationships(user["user_id"])
     girls = {}
     for row in house:
         door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
         if door["open"]:
-            rel = get_relationship(user["user_id"], row["girl"])
+            rel = rels.get(row["girl"]) or {
+                "user_id": user["user_id"], "girl": row["girl"], "milestone": 1,
+                "summary": "", "since_summary": 0, "stage_since": None,
+                "last_session": None, "active_days": 1, "stage_days": 0,
+                "pinned_told": [], "pinned_kept": []
+            }
             band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
             girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
                                   "kept": len(rel.get("pinned_kept") or [])}
