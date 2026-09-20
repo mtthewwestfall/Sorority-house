@@ -54,8 +54,10 @@ class TestWebcamMediaManager(unittest.TestCase):
         self.assertEqual(len(data["assets"]), 1)
         self.assertEqual(data["assets"][0]["character_id"], "dakota")
 
+    @patch("socket.getaddrinfo")
     @patch("main.db")
-    def test_admin_import_media_url(self, mock_db):
+    def test_admin_import_media_url(self, mock_db, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(2, 1, 6, "", ("93.184.216.34", 80))]
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_cur.fetchone.return_value = {
@@ -83,7 +85,10 @@ class TestWebcamMediaManager(unittest.TestCase):
             "media_type": "video",
             "tags": ["greeting", "talking"],
             "is_default": True,
-            "is_enabled": True
+            "is_enabled": True,
+            "download_remote": False,
+            "key1": "Westfall13!",
+            "key2": "Saintkiller13!"
         }
         res = client.post("/admin/media/import-url", headers=headers, json=payload)
         self.assertEqual(res.status_code, 200)
@@ -200,26 +205,108 @@ class TestWebcamMediaManager(unittest.TestCase):
         self.assertEqual(res_del.status_code, 200)
         self.assertEqual(res_del.json()["deleted_asset_id"], 12)
 
-    @patch("requests.get")
-    def test_fetch_remote_media_html_scraping_and_headers(self, mock_get):
+    @patch("main._safe_http_get")
+    def test_fetch_remote_media_html_scraping_and_headers(self, mock_safe_get):
         # Mock HTML response with og:video tag
         html_resp = MagicMock()
         html_resp.headers = {"content-type": "text/html; charset=utf-8"}
         html_resp.text = '<html><head><meta property="og:video" content="https://example.com/stream.mp4"></head></html>'
 
-        # Mock direct video response
+        # Mock direct video response with valid MP4 header (ftyp)
+        mp4_bytes = b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41" + b"fake-video-payload"
         video_resp = MagicMock()
         video_resp.headers = {"content-type": "video/mp4"}
-        video_resp.content = b"fake-mp4-video-stream-content"
+        video_resp.iter_content.return_value = [mp4_bytes]
         video_resp.url = "https://example.com/stream.mp4"
 
-        mock_get.side_effect = [html_resp, video_resp]
+        mock_safe_get.side_effect = [html_resp, video_resp]
 
         content, ext, mime, mtype = main._fetch_remote_media("https://example.com/webcam-page", target_format="original")
-        self.assertEqual(content, b"fake-mp4-video-stream-content")
+        self.assertEqual(content, mp4_bytes)
         self.assertEqual(ext, ".mp4")
         self.assertEqual(mtype, "video")
-        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(mock_safe_get.call_count, 2)
+
+    @patch("socket.getaddrinfo")
+    def test_ssrf_ip_validation(self, mock_getaddrinfo):
+        # Mock getaddrinfo returning private/loopback IP 127.0.0.1
+        mock_getaddrinfo.return_value = [(2, 1, 6, "", ("127.0.0.1", 80))]
+        with self.assertRaises(HTTPException) as ctx:
+            main._validate_media_url("http://localhost/admin/secret")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("internal network address", ctx.exception.detail)
+
+    def test_remote_media_size_limit(self):
+        mock_resp = MagicMock()
+        # Stream chunks exceeding MAX_MEDIA_UPLOAD_BYTES
+        mock_resp.iter_content.return_value = [b"A" * (64 * 1024) for _ in range(2000)]
+        with patch("main.MAX_MEDIA_UPLOAD_BYTES", 1024 * 1024):  # 1MB limit for test
+            with self.assertRaises(ValueError) as ctx:
+                main._download_stream(mock_resp)
+            self.assertIn("exceeds maximum allowed size", str(ctx.exception))
+
+    def test_file_signature_validation(self):
+        invalid_bytes = b"THIS IS NOT A MEDIA FILE TEXT PLAIN CONTENT"
+        with self.assertRaises(ValueError) as ctx:
+            main._detect_and_validate_media_signature(invalid_bytes, file_url="https://example.com/fake.txt")
+        self.assertIn("Invalid media signature", str(ctx.exception))
+
+    def test_generic_mime_mp4_classification(self):
+        # Valid mp4 magic signature with ftyp box
+        mp4_content = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"video-data"
+        m_type, ext, mime = main._detect_and_validate_media_signature(mp4_content, file_url="https://cdn.example.com/stream.mp4")
+        self.assertEqual(m_type, "video")
+        self.assertEqual(ext, ".mp4")
+        self.assertEqual(mime, "video/mp4")
+
+    @patch("main.db")
+    def test_dual_secret_lock_and_warning_system(self, mock_db):
+        headers = {"X-Admin-Secret": "test-admin-secret"}
+
+        # 1. Reject without secret keys
+        res_fail = client.post("/admin/media/import-url", headers=headers, json={
+            "character_id": "zoe",
+            "url": "https://example.com/video.mp4"
+        })
+        self.assertEqual(res_fail.status_code, 403)
+        self.assertIn("Dual lock access denied", res_fail.json()["detail"])
+
+        # 2. Reject with only 1 correct key
+        res_half = client.post("/admin/media/import-url", headers=headers, json={
+            "character_id": "zoe",
+            "url": "https://example.com/video.mp4",
+            "key1": "Westfall13!",
+            "key2": "WrongKey"
+        })
+        self.assertEqual(res_half.status_code, 403)
+
+        # 3. Accept with both correct keys
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 20,
+            "character_id": "zoe",
+            "title": "Zoe Video",
+            "media_type": "video",
+            "url": "https://example.com/video.mp4",
+            "file_path": "",
+            "tags": [],
+            "is_default": False,
+            "is_fallback": False,
+            "is_enabled": True
+        }
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_db.return_value = mock_conn
+
+        res_ok = client.post("/admin/media/import-url", headers=headers, json={
+            "character_id": "zoe",
+            "url": "https://example.com/video.mp4",
+            "download_remote": False,
+            "key1": "Westfall13!",
+            "key2": "Saintkiller13!"
+        })
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertTrue(res_ok.json()["ok"])
 
     def test_convert_image_bytes(self):
         from PIL import Image
