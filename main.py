@@ -2620,15 +2620,34 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
       <label><input id="mIsFallback" type="checkbox"> Fallback Image</label>
       <label><input id="mIsEnabled" type="checkbox" checked> Enabled</label>
     </div>
+    <div class="row2" style="margin-top:8px">
+      <label style="font-size:12px;color:#aaa">Target Format Conversion:</label>
+      <select id="mFormat" style="flex:1">
+        <option value="original">Keep Original / Auto</option>
+        <option value="webp">Convert to WEBP Image</option>
+        <option value="jpeg">Convert to JPEG Image</option>
+        <option value="png">Convert to PNG Image</option>
+      </select>
+    </div>
     <div class="card" style="background:#101017;margin-top:10px">
       <h5 style="margin:0 0 8px 0">Option A: Upload File</h5>
       <input id="mFile" type="file" accept="video/*,image/*">
       <button class="p" style="margin-top:8px" onclick="uploadMediaAsset()">Upload Media File</button>
     </div>
     <div class="card" style="background:#101017;margin-top:10px">
-      <h5 style="margin:0 0 8px 0">Option B: Import Media URL</h5>
+      <h5 style="margin:0 0 8px 0">Option B: Import Media URL / Webpage</h5>
       <input id="mUrl" placeholder="https://..." style="width:100%">
-      <button class="s" style="margin-top:8px" onclick="importMediaUrlAsset()">Import Approved URL</button>
+      <button class="s" style="margin-top:8px" onclick="importMediaUrlAsset()">Import Media URL / Webpage</button>
+    </div>
+    <div class="card" style="background:#101017;margin-top:10px">
+      <h5 style="margin:0 0 8px 0">Option C: Live Webcam Capture</h5>
+      <video id="camPreview" autoplay playsinline muted style="width:100%;max-height:200px;background:#000;border-radius:6px;display:none"></video>
+      <div class="row2" style="margin-top:8px">
+        <button class="s" id="btnCamStart" onclick="startWebcamStream()">Start Camera</button>
+        <button class="s" id="btnCamSnap" onclick="captureWebcamSnapshot()" style="display:none">Snap Photo</button>
+        <button class="s" id="btnCamRec" onclick="toggleWebcamRecording()" style="display:none">Start Video Rec</button>
+      </div>
+      <div id="camStatus" class="mut" style="margin-top:4px;font-size:12px">Camera inactive</div>
     </div>
   </div>
   <div class="card">
@@ -2714,10 +2733,10 @@ async function loadMediaAssets(){
   }catch(e){toast(e.message,true);}
 }
 
-async function uploadMediaAsset(){
+async function uploadMediaAsset(fileOverride){
   const charId=$('#mCharId').value.trim();
-  const file=$('#mFile').files[0];
-  if(!charId||!file){toast('Enter character ID and select a file',true);return;}
+  const file=fileOverride || $('#mFile').files[0];
+  if(!charId||!file){toast('Enter character ID and select/record a file',true);return;}
   const fd=new FormData();
   fd.append('character_id',charId);
   fd.append('file',file);
@@ -2727,12 +2746,13 @@ async function uploadMediaAsset(){
   fd.append('is_default',$('#mIsDefault').checked);
   fd.append('is_fallback',$('#mIsFallback').checked);
   fd.append('is_enabled',$('#mIsEnabled').checked);
+  fd.append('target_format',$('#mFormat').value);
   try{
     const r=await fetch('/admin/media/upload',{method:'POST',headers:{'X-Admin-Secret':SECRET},body:fd});
     const j=await r.json();
     if(!r.ok)throw new Error(j.detail||'Upload failed');
     toast('Media uploaded and assigned!');
-    $('#mFile').value='';
+    if(!fileOverride)$('#mFile').value='';
     loadMediaAssets();
   }catch(e){toast(e.message,true);}
 }
@@ -2752,13 +2772,81 @@ async function importMediaUrlAsset(){
         tags:($('#mTags').value||'').split(',').map(s=>s.trim()).filter(Boolean),
         is_default:$('#mIsDefault').checked,
         is_fallback:$('#mIsFallback').checked,
-        is_enabled:$('#mIsEnabled').checked
+        is_enabled:$('#mIsEnabled').checked,
+        target_format:$('#mFormat').value,
+        download_remote:true
       })
     });
     toast('Media URL imported!');
     $('#mUrl').value='';
     loadMediaAssets();
   }catch(e){toast(e.message,true);}
+}
+
+let webcamStream=null, mediaRecorder=null, recChunks=[];
+async function startWebcamStream(){
+  try{
+    webcamStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    const preview=$('#camPreview');
+    preview.srcObject=webcamStream;
+    preview.style.display='block';
+    $('#btnCamSnap').style.display='inline-block';
+    $('#btnCamRec').style.display='inline-block';
+    $('#btnCamStart').innerText='Stop Camera';
+    $('#btnCamStart').onclick=stopWebcamStream;
+    $('#camStatus').innerText='Webcam active';
+  }catch(e){toast('Webcam access error: '+e.message,true);}
+}
+
+function stopWebcamStream(){
+  if(webcamStream){
+    webcamStream.getTracks().forEach(t=>t.stop());
+    webcamStream=null;
+  }
+  $('#camPreview').style.display='none';
+  $('#btnCamSnap').style.display='none';
+  $('#btnCamRec').style.display='none';
+  $('#btnCamStart').innerText='Start Camera';
+  $('#btnCamStart').onclick=startWebcamStream;
+  $('#camStatus').innerText='Camera inactive';
+}
+
+async function captureWebcamSnapshot(){
+  const video=$('#camPreview');
+  if(!video||!webcamStream){toast('Camera not active',true);return;}
+  const canvas=document.createElement('canvas');
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  canvas.toBlob(blob=>{
+    const file=new File([blob],`webcam_snap_${Date.now()}.png`,{type:'image/png'});
+    $('#mType').value='image';
+    uploadMediaAsset(file);
+  },'image/png');
+}
+
+function toggleWebcamRecording(){
+  if(mediaRecorder && mediaRecorder.state==='recording'){
+    mediaRecorder.stop();
+    $('#btnCamRec').innerText='Start Video Rec';
+    $('#camStatus').innerText='Finalizing video...';
+  }else{
+    if(!webcamStream){toast('Camera not active',true);return;}
+    recChunks=[];
+    mediaRecorder=new MediaRecorder(webcamStream);
+    mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size>0)recChunks.push(e.data);};
+    mediaRecorder.onstop=()=>{
+      const blob=new Blob(recChunks,{type:'video/webm'});
+      const file=new File([blob],`webcam_rec_${Date.now()}.webm`,{type:'video/webm'});
+      $('#mType').value='video';
+      uploadMediaAsset(file);
+      $('#camStatus').innerText='Webcam active';
+    };
+    mediaRecorder.start();
+    $('#btnCamRec').innerText='Stop Video Rec';
+    $('#camStatus').innerText='Recording live video...';
+  }
 }
 
 async function toggleMediaDefault(id){
@@ -2786,10 +2874,12 @@ async function toggleMediaEnabled(id,val){
 }
 
 async function promptReplaceMedia(id){
-  const newUrl=prompt('Enter replacement media URL:');
+  const newUrl=prompt('Enter replacement media URL or webpage:');
   if(!newUrl||!newUrl.trim())return;
+  const targetFmt=$('#mFormat')?.value||'original';
   const fd=new FormData();
   fd.append('url',newUrl.trim());
+  fd.append('target_format',targetFmt);
   try{
     const r=await fetch(`/admin/media/${id}/replace`,{method:'POST',headers:{'X-Admin-Secret':SECRET},body:fd});
     const j=await r.json();
@@ -6260,6 +6350,118 @@ def admin_account_chat(email: str, girl: Optional[str] = None, companion_id: Opt
 # KEYHOLE WEBCAM MEDIA MANAGER (ADMIN ENDPOINTS)
 # ---------------------------------------------------------------------------
 
+from PIL import Image
+import io
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,video/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _convert_image_bytes(content: bytes, target_format: str) -> tuple[bytes, str, str]:
+    target = (target_format or "").strip().lower()
+    if target in ("jpeg", "jpg"):
+        fmt = "JPEG"
+        ext = ".jpg"
+        mime = "image/jpeg"
+    elif target == "png":
+        fmt = "PNG"
+        ext = ".png"
+        mime = "image/png"
+    elif target == "webp":
+        fmt = "WEBP"
+        ext = ".webp"
+        mime = "image/webp"
+    else:
+        return content, "", ""
+
+    try:
+        img = Image.open(io.BytesIO(content))
+        if fmt == "JPEG" and img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format=fmt)
+        return out.getvalue(), ext, mime
+    except Exception as e:
+        logger.warning(f"Image conversion to {target_format} failed: {e}")
+        return content, "", ""
+
+
+def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[bytes, str, str, str]:
+    """
+    Fetches media from a URL or webpage.
+    Supports bypassing anti-bot headers, scraping og:video / og:image / <video> / <img> sources from HTML pages,
+    and converting image formats if requested.
+    Returns: (content_bytes, safe_ext, mime_type, final_media_type)
+    """
+    headers = dict(DEFAULT_BROWSER_HEADERS)
+    headers["Referer"] = url
+    resp = requests.get(url, headers=headers, timeout=15, stream=True)
+    resp.raise_for_status()
+
+    content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+
+    if "text/html" in content_type:
+        html_text = resp.text
+        media_url = None
+        v_match = re.search(r'<meta\s+property=["\']og:video(?::url)?["\']\s+content=["\']([^"\']+)["\']', html_text, re.I)
+        if not v_match:
+            v_match = re.search(r'<video[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
+        if not v_match:
+            v_match = re.search(r'<source[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
+
+        img_match = re.search(r'<meta\s+property=["\']og:image(?::url)?["\']\s+content=["\']([^"\']+)["\']', html_text, re.I)
+        if not img_match:
+            img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
+
+        if v_match:
+            media_url = urllib.parse.urljoin(url, v_match.group(1))
+        elif img_match:
+            media_url = urllib.parse.urljoin(url, img_match.group(1))
+
+        if not media_url:
+            raise ValueError("No direct video or image media found on the provided webpage URL")
+
+        headers["Referer"] = url
+        resp = requests.get(media_url, headers=headers, timeout=15, stream=True)
+        resp.raise_for_status()
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+
+    content = resp.content
+    if not content:
+        raise ValueError("Downloaded media content is empty")
+
+    m_type = "video" if ("video" in content_type or url.endswith((".mp4", ".webm", ".mov", ".m4v", ".ogv"))) else "image"
+
+    ext = ""
+    if m_type == "video":
+        if "webm" in content_type: ext = ".webm"
+        elif "mp4" in content_type: ext = ".mp4"
+        elif "quicktime" in content_type or "mov" in content_type: ext = ".mov"
+        else: ext = os.path.splitext(urllib.parse.urlparse(resp.url).path)[1].lower() or ".mp4"
+    else:
+        if "webp" in content_type: ext = ".webp"
+        elif "png" in content_type: ext = ".png"
+        elif "jpeg" in content_type or "jpg" in content_type: ext = ".jpg"
+        elif "gif" in content_type: ext = ".gif"
+        else: ext = os.path.splitext(urllib.parse.urlparse(resp.url).path)[1].lower() or ".jpg"
+
+    if target_format and target_format.lower() != "original" and m_type == "image":
+        converted, new_ext, new_mime = _convert_image_bytes(content, target_format)
+        if new_ext:
+            content = converted
+            ext = new_ext
+            content_type = new_mime
+
+    return content, ext, content_type, m_type
+
+
 class AdminMediaUrlIn(BaseModel):
     character_id: str
     url: str
@@ -6269,6 +6471,8 @@ class AdminMediaUrlIn(BaseModel):
     is_default: bool = False
     is_fallback: bool = False
     is_enabled: bool = True
+    target_format: Optional[str] = "original"
+    download_remote: Optional[bool] = True
 
 
 class AdminMediaUpdateIn(BaseModel):
@@ -6370,9 +6574,10 @@ async def admin_upload_media(
     tags: str = Form("[]"),
     is_default: bool = Form(False),
     is_fallback: bool = Form(False),
-    is_enabled: bool = Form(True)
+    is_enabled: bool = Form(True),
+    target_format: str = Form("original")
 ):
-    """Upload a media file and assign it to a character."""
+    """Upload a media file and assign it to a character, with optional format conversion."""
     char_id = _validate_character_exists(character_id)
 
     filename = file.filename or "file"
@@ -6384,20 +6589,26 @@ async def admin_upload_media(
     if content_type and content_type not in ALLOWED_MEDIA_MIMES:
         raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
 
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
+
     m_type = media_type.strip().lower()
     if not m_type:
         m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv") else "image"
     if m_type not in ("video", "image"):
         m_type = "video"
 
+    if target_format and target_format.lower() != "original" and m_type == "image":
+        converted, new_ext, _ = _convert_image_bytes(content, target_format)
+        if new_ext:
+            content = converted
+            ext = new_ext
+
     safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
     dest_path = os.path.join(UPLOAD_DIR, safe_name)
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
-    if len(content) > MAX_MEDIA_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
 
     with open(dest_path, "wb") as f:
         f.write(content)
@@ -6431,13 +6642,29 @@ async def admin_upload_media(
 
 @app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
 def admin_import_media_url(body: AdminMediaUrlIn):
-    """Import an approved external media URL and assign it to a character."""
+    """Import an external media URL or webpage, fetching assets locally with anti-bot bypass & format options."""
     char_id = _validate_character_exists(body.character_id)
     url = _validate_media_url(body.url)
 
+    saved_path = ""
+    asset_url = url
     m_type = body.media_type.strip().lower()
     if m_type not in ("video", "image"):
         m_type = "video"
+
+    if body.download_remote:
+        try:
+            content, ext, mime, detected_mtype = _fetch_remote_media(url, target_format=body.target_format or "original")
+            if detected_mtype:
+                m_type = detected_mtype
+            safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+            dest_path = os.path.join(UPLOAD_DIR, safe_name)
+            with open(dest_path, "wb") as f:
+                f.write(content)
+            saved_path = safe_name
+            asset_url = f"/media/files/{safe_name}"
+        except Exception as e:
+            logger.warning(f"Remote fetch/scrape for '{url}' fell back to direct URL import: {e}")
 
     parsed_tags = _parse_tags_input(body.tags)
     asset_title = body.title.strip() or os.path.basename(urllib.parse.urlparse(url).path) or "Imported Media"
@@ -6453,10 +6680,10 @@ def admin_import_media_url(body: AdminMediaUrlIn):
                 INSERT INTO media_assets (
                     character_id, title, media_type, url, file_path, tags,
                     is_default, is_fallback, is_enabled
-                ) VALUES (%s, %s, %s, %s, '', %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, character_id, title, media_type, url, file_path, tags,
                           is_default, is_fallback, is_enabled, created_at, updated_at
-            """, (char_id, asset_title, m_type, url, Json(parsed_tags),
+            """, (char_id, asset_title, m_type, asset_url, saved_path, Json(parsed_tags),
                   body.is_default, body.is_fallback, body.is_enabled))
             asset = cur.fetchone()
             conn.commit()
@@ -6510,7 +6737,8 @@ def admin_update_media_metadata(asset_id: int, body: AdminMediaUpdateIn):
 async def admin_replace_media_file(
     asset_id: int,
     file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None)
+    url: Optional[str] = Form(None),
+    target_format: Optional[str] = Form("original")
 ):
     """Replace file or URL of an existing media asset."""
     conn = db()
@@ -6526,6 +6754,7 @@ async def admin_replace_media_file(
 
             new_url = asset["url"]
             new_file_path = old_file_path
+            new_mtype = asset["media_type"]
 
             if file and file.filename:
                 filename = file.filename
@@ -6543,6 +6772,13 @@ async def admin_replace_media_file(
                 if len(content) > MAX_MEDIA_UPLOAD_BYTES:
                     raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
 
+                m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv") else "image"
+                if target_format and target_format.lower() != "original" and m_type == "image":
+                    converted, new_ext, _ = _convert_image_bytes(content, target_format)
+                    if new_ext:
+                        content = converted
+                        ext = new_ext
+
                 safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
                 dest_path = os.path.join(UPLOAD_DIR, safe_name)
 
@@ -6551,8 +6787,8 @@ async def admin_replace_media_file(
 
                 new_url = f"/media/files/{safe_name}"
                 new_file_path = safe_name
+                new_mtype = m_type
 
-                # Remove old file if it existed
                 if old_file_path:
                     old_full = os.path.join(UPLOAD_DIR, old_file_path)
                     if os.path.isfile(old_full):
@@ -6561,10 +6797,23 @@ async def admin_replace_media_file(
                         except OSError:
                             pass
             elif url and url.strip():
-                new_url = _validate_media_url(url)
-                new_file_path = ""
-                # Remove old file if converting to URL
-                if old_file_path:
+                clean_url = _validate_media_url(url)
+                try:
+                    content, ext, mime, detected_mtype = _fetch_remote_media(clean_url, target_format=target_format or "original")
+                    safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+                    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+                    with open(dest_path, "wb") as f:
+                        f.write(content)
+                    new_url = f"/media/files/{safe_name}"
+                    new_file_path = safe_name
+                    if detected_mtype:
+                        new_mtype = detected_mtype
+                except Exception as e:
+                    logger.warning(f"Remote replace for '{clean_url}' fell back to URL: {e}")
+                    new_url = clean_url
+                    new_file_path = ""
+
+                if old_file_path and old_file_path != new_file_path:
                     old_full = os.path.join(UPLOAD_DIR, old_file_path)
                     if os.path.isfile(old_full):
                         try:
@@ -6576,11 +6825,11 @@ async def admin_replace_media_file(
 
             cur.execute("""
                 UPDATE media_assets
-                SET url=%s, file_path=%s, updated_at=now()
+                SET url=%s, file_path=%s, media_type=%s, updated_at=now()
                 WHERE id=%s
                 RETURNING id, character_id, title, media_type, url, file_path, tags,
                           is_default, is_fallback, is_enabled, created_at, updated_at
-            """, (new_url, new_file_path, asset_id))
+            """, (new_url, new_file_path, new_mtype, asset_id))
             updated = cur.fetchone()
             conn.commit()
             return {"ok": True, "asset": dict(updated)}
