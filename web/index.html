@@ -1218,7 +1218,7 @@
 
   <script>
     // Website backend URL hosted on Railway.
-    const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+    const API_BASE_URL = "http://localhost:8000";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
@@ -1757,16 +1757,24 @@ const PRESET_FACES = {
       return el;
     }
     function khFmt(s) { s = Math.max(0, s | 0); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+    // backend-served media (/media/files/...) lives on the API host; bundled assets/ stay relative
+    function khAssetUrl(url) {
+      if (!url) return '';
+      if (/^(https?:|data:|blob:)/i.test(url)) return url;
+      if (url.startsWith('/')) return API_BASE_URL + url;
+      return url;
+    }
     function khShowClip(asset) {
       if (!asset || !asset.url) return;
+      const url = khAssetUrl(asset.url);
       if (asset.media_type === 'video') {
         khStill.hidden = true;
-        if (khVideo.src !== asset.url) khVideo.src = asset.url;
+        if (khVideo.src !== url) khVideo.src = url;
         khVideo.hidden = false;
         khVideo.play().catch(() => {});
       } else {
         khVideo.pause(); khVideo.hidden = true;
-        khStill.src = asset.url; khStill.hidden = false;
+        khStill.src = url; khStill.hidden = false;
       }
     }
     function khPaint() {
@@ -1829,8 +1837,11 @@ const PRESET_FACES = {
       }
     }
     async function khLoadPacks() {
-      if (kh.packs) return;
+      // links are bound to the signed-in account (client_reference_id), so refetch per login
+      const who = authHeaders().Authorization || '';
+      if (kh.packs && kh.packsFor === who) return;
       try { kh.packs = (await khApi('/keyhole/packs')).packs || []; } catch (_) { kh.packs = []; }
+      kh.packsFor = who;
       const box = document.getElementById('kh-packs');
       box.innerHTML = kh.packs.map((p) => {
         const tag = p.link ? 'a' : 'span';
@@ -3144,7 +3155,6 @@ const PRESET_FACES = {
 </script>
 </body>
 </html>
-
 
 
 

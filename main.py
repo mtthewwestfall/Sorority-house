@@ -159,8 +159,10 @@ Env vars (Railway -> Variables):
                     Affitor affiliate metadata (below) on each paid subscription.
   KEYHOLE_PRICE_QUICK / _STANDARD / _EXTENDED / _HOUR / _TEXTS
                     Stripe price ids (price_...) of the one-time Keyhole packs; a
-                    checkout.session.completed in mode=payment with that price (or
-                    metadata.keyhole_pack=quick|standard|...) credits the pack. Reading the
+                    checkout.session.completed / .async_payment_succeeded in mode=payment
+                    with that price (or metadata.keyhole_pack=quick|standard|...) credits
+                    the pack to client_reference_id (GET /keyhole/packs appends the signed-in
+                    user_id), else to the buyer's email. Reading the
                     line item needs STRIPE_API_KEY (Checkout Sessions: read).
   KEYHOLE_LINK_QUICK / _STANDARD / _EXTENDED / _HOUR / _TEXTS
                     Stripe Payment Link URLs shown as the buy buttons in the room. The
@@ -6121,8 +6123,11 @@ async def stripe_webhook(request: Request):
         _affitor_stamp(applied, sub, pi)
         return {"ok": True, "user_id": applied, "tier": tier}
 
-    if kind == "checkout.session.completed" and obj.get("mode") == "payment":
-        # one-time Keyhole pack (Payment Link in payment mode)
+    if kind in ("checkout.session.completed", "checkout.session.async_payment_succeeded") \
+            and obj.get("mode") == "payment":
+        # one-time Keyhole pack (Payment Link in payment mode). Delayed methods complete
+        # unpaid and settle later via async_payment_succeeded; same session id, so the
+        # grant stays idempotent.
         if obj.get("payment_status") != "paid":
             return {"ok": True, "pending": True}
         pack = _stripe_keyhole_pack(obj)
@@ -7619,13 +7624,18 @@ class GrantKeyholeIn(BaseModel):
     secret: str = ""
 
 
-def _keyhole_packs_public():
+def _keyhole_packs_public(user_id=""):
+    """Buy buttons. The Payment Link carries client_reference_id=user_id so the webhook
+    credits the signed-in account even when the checkout email differs."""
     out = []
     for key, p in KEYHOLE_PACKS.items():
         if key == "texts" and not p["price"]:
             continue     # text-only pack is not priced yet
+        link = p["link"]
+        if link and user_id:
+            link += ("&" if "?" in link else "?") + urllib.parse.urlencode({"client_reference_id": user_id})
         out.append({"pack": key, "label": p["label"], "usd": p["usd"], "minutes": p["minutes"],
-                    "videos": p["videos"], "texts": p["texts"], "link": p["link"]})
+                    "videos": p["videos"], "texts": p["texts"], "link": link})
     return out
 
 
@@ -7695,9 +7705,16 @@ def _keyhole_wallet(user_id, cur=None):
 
 
 @app.get("/keyhole/packs")
-def keyhole_packs():
-    """What the room sells. link is the Stripe Payment Link ("" until configured)."""
-    return {"ok": True, "preview": KEYHOLE_PREVIEW, "packs": _keyhole_packs_public()}
+def keyhole_packs(authorization: str = Header(default="")):
+    """What the room sells. link is the Stripe Payment Link ("" until configured); with a
+    bearer token the links are bound to that account."""
+    user_id = ""
+    if authorization:
+        try:
+            user_id = current_user(authorization)["user_id"]
+        except HTTPException:
+            pass
+    return {"ok": True, "preview": KEYHOLE_PREVIEW, "packs": _keyhole_packs_public(user_id)}
 
 
 @app.get("/keyhole/wallet")
@@ -7823,8 +7840,6 @@ def keyhole_chat(body: KeyholeChatIn, user=Depends(current_user)):
             tag = m.group(1).strip().lower()
             reply = reply[:m.start()].rstrip()
         persist_turn(user["user_id"], girl, rel, body.message, reply)
-    except HTTPException:
-        raise
     except Exception:
         conn = db()
         try:
