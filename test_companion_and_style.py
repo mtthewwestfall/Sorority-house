@@ -122,7 +122,7 @@ class TestCompanionAndStyles(unittest.TestCase):
         }
         mock_post.return_value = mock_resp
 
-        mime, b64 = main.generate_picture("dakota", "Dakota", None, portrait=("image/png", b"fakebytes"))
+        mime, b64 = main.generate_picture("dakota", "Dakota", None, portrait=("image/png", b"fakebytes"), scenes=["a custom test scene"])
         self.assertEqual(b64, "b64data")
 
         payload = mock_post.call_args[1]["json"]
@@ -130,6 +130,8 @@ class TestCompanionAndStyles(unittest.TestCase):
         prompt_text = next(p["text"] for p in parts if "text" in p)
         self.assertIn("Create a new picture of Dakota, the same person as in the reference image:", prompt_text)
         self.assertIn("Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration", prompt_text)
+        self.assertIn("Scene: a custom test scene.", prompt_text)
+        self.assertNotIn("{scene}", prompt_text)
         self.assertIn("phone-camera framing", prompt_text)
 
     def test_8_companion_content_safety(self):
@@ -143,6 +145,13 @@ class TestCompanionAndStyles(unittest.TestCase):
         self.assertEqual(res_lower, 4)
         res_advance = main.companion_gate_milestone(comp, 5, "warm")
         self.assertEqual(res_advance, 5)
+
+    def test_10_portrait_bytes_local_file(self):
+        res = main._portrait_bytes("assets/dakota.jpg")
+        self.assertIsNotNone(res)
+        mime, buf = res
+        self.assertEqual(mime, "image/jpeg")
+        self.assertGreater(len(buf), 0)
 
 if __name__ == "__main__":
     unittest.main()

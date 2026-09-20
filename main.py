@@ -3475,6 +3475,17 @@ def _portrait_bytes(avatar_url):
     stored URL can never point the server at something else."""
     if not avatar_url or "://" in avatar_url or avatar_url.startswith("//"):
         return None
+    clean_path = avatar_url.split("?")[0].lstrip("/")
+    for candidate in [os.path.join("web", clean_path), clean_path]:
+        if os.path.isfile(candidate):
+            try:
+                mime = "image/png" if candidate.endswith(".png") else "image/webp" if candidate.endswith(".webp") else "image/jpeg"
+                with open(candidate, "rb") as f:
+                    buf = f.read()
+                if buf and len(buf) <= PORTRAIT_MAX_BYTES:
+                    return (mime, buf)
+            except OSError:
+                pass
     url = f"{SITE_URL}/{avatar_url.lstrip('/')}"
     try:
         with requests.get(url, timeout=15, stream=True, allow_redirects=False) as r:
@@ -3512,7 +3523,7 @@ def generate_picture(girl, name, avatar_url, portrait=None, scenes=None):
               "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
               "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
               "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-              "mountain slopes, soft golden daylight. Scene: {scene}. "
+              f"mountain slopes, soft golden daylight. Scene: {scene}. "
               "Fully clothed, tasteful, natural expression, phone-camera framing. "
               "No text, no watermarks.")
     parts = [{"text": prompt}]
