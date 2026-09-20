@@ -3119,10 +3119,12 @@ async function runGenerator(){
     if(!r.ok)throw new Error(j.detail||'Generation failed');
 
     let previewHtml='';
-    if(j.output_mode==='video'){
-      previewHtml=`<video id="genPreviewVideo" controls ${j.loop_enabled?'loop':''} style="max-width:100%;border-radius:8px;margin-top:10px" src="${esc(j.url)}"></video>`;
-    }else{
-      previewHtml=`<img src="${esc(j.url)}" style="max-width:100%;border-radius:8px;margin-top:10px" alt="Generated picture">`;
+    if(j.url && j.url.trim()){
+      if(j.output_mode==='video'){
+        previewHtml=`<video id="genPreviewVideo" controls ${j.loop_enabled?'loop':''} style="max-width:100%;border-radius:8px;margin-top:10px" src="${esc(j.url)}"></video>`;
+      }else{
+        previewHtml=`<img src="${esc(j.url)}" style="max-width:100%;border-radius:8px;margin-top:10px" alt="Generated picture" onerror="this.style.display='none'">`;
+      }
     }
 
     $('#genResultBox').innerHTML=`
@@ -6771,11 +6773,19 @@ async def admin_generator_generate(
             f.write(content)
 
         file_path_rel = safe_name
-        url = f"/uploads/media/{safe_name}"
+        url = f"/media/files/{safe_name}"
     else:
         # Fallback generated URL placeholder if no file is uploaded
         file_path_rel = f"gen_placeholder_{secrets.token_hex(4)}.png"
-        url = f"/uploads/media/{file_path_rel}"
+        placeholder_path = os.path.join(UPLOAD_DIR, file_path_rel)
+        try:
+            from PIL import Image
+            img = Image.new("RGB", (200, 200), color=(47, 74, 60))
+            img.save(placeholder_path, format="PNG")
+        except Exception:
+            with open(placeholder_path, "wb") as f:
+                f.write(b"")
+        url = f"/media/files/{file_path_rel}"
 
     surrounding_desc = "Outpainted surrounding environment active" if expand_surroundings else "Standard focus framing"
     loop_desc = f"Loop enabled after {extended_duration_seconds}s extended play" if (media_type == "video" and loop_enabled) else "Standard playback"
