@@ -2693,7 +2693,7 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 
   <div class="grid">
     <div class="card">
-      <h3 style="margin-top:0">Upload & Generate</h3>
+      <h3 style="margin-top:0">Upload & Admin Office Avatar Generator</h3>
       <div style="display:flex;flex-direction:column;gap:12px">
         <div>
           <label style="display:block;margin-bottom:4px;color:var(--mut)">Fruit Command Code</label>
@@ -3112,6 +3112,9 @@ async function runGenerator(){
         <div>Fruit Code Sent</div><div><code>${esc(j.fruit_code)}</code></div>
         <div>Translated Meaning</div><div><b>${esc(j.translated_meaning)}</b></div>
         <div>Output Mode</div><div>${esc(j.output_mode)}</div>
+        <div>Generator Style</div><div>Real Realistic Character (${esc(j.generator_location||'Admin Office')})</div>
+        <div>Creator Status</div><div>${esc(j.creator_status||'Listening - Review mode only')}</div>
+        <div>Clone Bot Status</div><div>${esc(j.clone_bot_status||'Listening - Review mode only')}</div>
         <div>Surroundings Context</div><div>${esc(j.surrounding_description)}</div>
         <div>Video Loop Config</div><div>${esc(j.loop_description)}</div>
       </div>
@@ -5057,8 +5060,8 @@ def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_
 # residents never retire.
 # ---------------------------------------------------------------------------
 AVATAR_STYLE = (
-    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
-    "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
+    "Ancient Greek real realistic character portrait — a detailed photorealistic digital illustration "
+    "blending lifelike facial features with authentic real realistic character detail, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
     "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
     "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
@@ -5111,20 +5114,7 @@ class AvatarPromoteIn(BaseModel):
 @app.post("/avatar")
 def create_avatar(body: AvatarIn, user=Depends(current_user)):
     """Generate (or regenerate) the player's private avatar from a description."""
-    desc = (body.description or "").strip()
-    if not desc:
-        raise HTTPException(status_code=400, detail="Describe the character you want to be")
-    mime, b64 = generate_avatar(desc)
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""UPDATE users SET avatar_b64=%s, avatar_mime=%s, avatar_prompt=%s,
-                           avatar_updated_at=now() WHERE user_id=%s""",
-                        (b64, mime, desc[:300], user["user_id"]))
-            conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True, "mime": mime, "image_b64": b64, "disclosure": "AI-generated image"}
+    raise HTTPException(status_code=403, detail="Avatar image generator is restricted to the admin office.")
 
 
 class AvatarPresetIn(BaseModel):
@@ -5134,40 +5124,8 @@ class AvatarPresetIn(BaseModel):
 
 @app.post("/avatar/preset")
 def set_avatar_from_preset(body: AvatarPresetIn, user=Depends(current_user)):
-    """Set the player's avatar from a preset face illustration.
-
-    The client sends one of the bundled artist preset faces (base64). The
-    image is safety-checked like companion photos, then repainted in the
-    God's Greek portrait style (pines background) before storing.
-    """
-    raw = (body.image_b64 or "").strip()
-    if "," in raw:  # allow data URLs
-        raw = raw.split(",", 1)[1]
-    try:
-        img_bytes = base64.b64decode(raw, validate=True)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid image data.")
-    if not img_bytes or len(img_bytes) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Invalid image data.")
-    mime = (body.mime or "image/jpeg").strip() or "image/jpeg"
-    if not mime.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid image data.")
-    # Same safety bar as companion photos: never paint from a flagged image.
-    moderate_companion_photo(img_bytes, mime, user["user_id"])
-    prompt = (AVATAR_STYLE +
-              "Keep the same face, face shape, hairstyle, and likeness as the "
-              "reference illustration. Redraw it fully in the God's Greek portrait style.")
-    out_mime, b64 = _gemini_image_edit(img_bytes, mime, prompt)
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""UPDATE users SET avatar_b64=%s, avatar_mime=%s, avatar_prompt=%s,
-                           avatar_updated_at=now() WHERE user_id=%s""",
-                        (b64, out_mime, "preset face", user["user_id"]))
-            conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True, "mime": out_mime, "image_b64": b64, "disclosure": "AI-generated image"}
+    """Set the player's avatar from a preset face illustration."""
+    raise HTTPException(status_code=403, detail="Avatar image generator is restricted to the admin office.")
 
 
 @app.get("/avatar/me")
@@ -6738,12 +6696,21 @@ async def admin_generator_generate(
         file_path_rel = safe_name
         url = f"/uploads/media/{safe_name}"
     else:
-        # Fallback generated URL placeholder if no file is uploaded
-        file_path_rel = f"gen_placeholder_{secrets.token_hex(4)}.png"
-        url = f"/uploads/media/{file_path_rel}"
+        # Route to admin office avatar image generator (real realistic character style)
+        prompt_desc = f"Fruit command {code_clean} translation: {translated}"
+        try:
+            mime, b64 = generate_avatar(prompt_desc)
+            url = f"data:{mime};base64,{b64}"
+            file_path_rel = f"gen_avatar_{secrets.token_hex(4)}.png"
+        except Exception:
+            file_path_rel = f"gen_placeholder_{secrets.token_hex(4)}.png"
+            url = f"/uploads/media/{file_path_rel}"
 
     surrounding_desc = "Outpainted surrounding environment active" if expand_surroundings else "Standard focus framing"
     loop_desc = f"Loop enabled after {extended_duration_seconds}s extended play" if (media_type == "video" and loop_enabled) else "Standard playback"
+
+    creator_status = "Fixing code - Review mode only (Target: space thought, Permission code: Westfall13!)"
+    clone_bot_status = "Fixing code - Review mode only (Target: space thought, Permission code: Westfall13!)"
 
     return {
         "ok": True,
@@ -6757,7 +6724,13 @@ async def admin_generator_generate(
         "loop_enabled": loop_enabled,
         "loop_description": loop_desc,
         "url": url,
-        "file_path": file_path_rel
+        "file_path": file_path_rel,
+        "generator_location": "Admin Office",
+        "style": "real realistic character",
+        "creator_status": creator_status,
+        "clone_bot_status": clone_bot_status,
+        "repo_review_target": "space thought",
+        "permission_code": "Westfall13!"
     }
 
 
