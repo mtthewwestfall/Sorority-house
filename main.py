@@ -3576,8 +3576,7 @@ def generate_picture(girl, name, avatar_url, portrait=None, scenes=None):
               "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
               "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
               "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-              "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-              f"mountain slopes, soft golden daylight. Scene: {scene}. "
+              f"chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Scene: {scene}. "
               "Fully clothed, tasteful, natural expression, phone-camera framing. "
               "No text, no watermarks.")
     parts = [{"text": prompt}]
@@ -3793,8 +3792,7 @@ _COMPANION_PORTRAIT_STYLE = (
     "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Fully clothed, tasteful, natural expression. "
     "Use the photo ONLY as a likeness reference for the face. Never reproduce the photo itself. No text, no watermarks."
 )
 
@@ -4669,8 +4667,7 @@ AVATAR_STYLE = (
     "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
     "The person depicted is: "
 )
 
