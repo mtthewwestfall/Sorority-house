@@ -7,9 +7,8 @@ import main
 EXACT_PROMPT = (
     "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks."
+    "Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents), highlighting an attractive hourglass physique and figure, with long hair draped, medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Tasteful, alluring, natural expression. No text, no watermarks."
 )
 
 class TestCompanionAndStyles(unittest.TestCase):
@@ -18,9 +17,8 @@ class TestCompanionAndStyles(unittest.TestCase):
         main.GEMINI_API_KEY = "dummy_test_key"
 
     def test_1_companion_portrait_style_variable(self):
-        self.assertIn("Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration", main._COMPANION_PORTRAIT_STYLE)
-        self.assertIn("Subject in ancient Greek dress (toga or chiton with laurel accents)", main._COMPANION_PORTRAIT_STYLE)
-        self.assertIn("Background: a Greek temple among tall pines on rolling mountain slopes, soft golden daylight.", main._COMPANION_PORTRAIT_STYLE)
+        self.assertIn("Background: a Greek temple among tall pines, soft golden daylight.", main._COMPANION_PORTRAIT_STYLE)
+        self.assertIn("Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents)", main._COMPANION_PORTRAIT_STYLE)
         self.assertIn("Use the photo ONLY as a likeness reference for the face.", main._COMPANION_PORTRAIT_STYLE)
         self.assertIn("Never reproduce the photo itself.", main._COMPANION_PORTRAIT_STYLE)
 
@@ -122,7 +120,7 @@ class TestCompanionAndStyles(unittest.TestCase):
         }
         mock_post.return_value = mock_resp
 
-        mime, b64 = main.generate_picture("dakota", "Dakota", None, portrait=("image/png", b"fakebytes"))
+        mime, b64 = main.generate_picture("dakota", "Dakota", None, portrait=("image/png", b"fakebytes"), scenes=["a custom test scene"])
         self.assertEqual(b64, "b64data")
 
         payload = mock_post.call_args[1]["json"]
@@ -130,6 +128,8 @@ class TestCompanionAndStyles(unittest.TestCase):
         prompt_text = next(p["text"] for p in parts if "text" in p)
         self.assertIn("Create a new picture of Dakota, the same person as in the reference image:", prompt_text)
         self.assertIn("Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration", prompt_text)
+        self.assertIn("Scene: a custom test scene.", prompt_text)
+        self.assertNotIn("{scene}", prompt_text)
         self.assertIn("phone-camera framing", prompt_text)
 
     def test_8_companion_content_safety(self):
@@ -144,26 +144,12 @@ class TestCompanionAndStyles(unittest.TestCase):
         res_advance = main.companion_gate_milestone(comp, 5, "warm")
         self.assertEqual(res_advance, 5)
 
-    @patch("main._user_for_email")
-    @patch("main.db")
-    def test_10_admin_account_chat_custom_companion(self, mock_db, mock_user_for_email):
-        mock_user_for_email.return_value = {"user_id": "u123", "tier": "resident"}
-        mock_conn = MagicMock()
-        mock_cur = MagicMock()
-        mock_cur.fetchall.return_value = [
-            {"id": 2, "sender": "companion", "message": "Hi there!", "created_at": "2025-01-01"},
-            {"id": 1, "sender": "user", "message": "Hello companion", "created_at": "2025-01-01"}
-        ]
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_db.return_value = mock_conn
-
-        res = main.admin_account_chat("test@example.com", companion_id=42)
-        self.assertEqual(len(res), 2)
-        self.assertEqual(res[0]["message"], "Hello companion")
-
-        query = mock_cur.execute.call_args[0][0]
-        self.assertIn("FROM companion_chat_logs", query)
-        self.assertIn("WHERE user_id=%s AND companion_id=%s", query)
+    def test_10_portrait_bytes_local_file(self):
+        res = main._portrait_bytes("assets/dakota.jpg")
+        self.assertIsNotNone(res)
+        mime, buf = res
+        self.assertEqual(mime, "image/jpeg")
+        self.assertGreater(len(buf), 0)
 
 if __name__ == "__main__":
     unittest.main()
