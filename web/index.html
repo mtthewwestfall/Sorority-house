@@ -1779,6 +1779,10 @@ const PRESET_FACES = {
           '<div class="door-name">' + name + '</div>' +
           '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
           '<p>' + escapeHtml(g.blurb) + '</p>' +
+          '<div class="sims-status-pills" style="margin: 8px 0; display: flex; gap: 6px; flex-wrap: wrap; font-size: 0.75rem;">' +
+          '<span style="background: rgba(47,74,60,0.8); color: #D8B894; padding: 2px 6px; border-radius: 4px; border: 1px solid #D8B894;">💚 Mood: ' + escapeHtml((g.sims_status && g.sims_status.mood) || 'Warm') + '</span>' +
+          '<span style="background: rgba(47,74,60,0.8); color: #D8B894; padding: 2px 6px; border-radius: 4px; border: 1px solid #D8B894;">⚡ AI Agency: ' + escapeHtml((g.sims_status && g.sims_status.autonomy) || 'High') + '</span>' +
+          '</div>' +
           '<span class="door-cta">Talk to ' + name + ' \u2192</span></div>' +
           '</article>';
       }).join('');
