@@ -1,573 +1,610 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>God's Town — 3v3 Live Evolutions Arena (P2P/PVP)</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
-  <style>
-    :root {
-      --bg: #0d0f0e;
-      --card-bg: #171a18;
-      --border: #2F4A3C;
-      --gold: #D8B894;
-      --text: #E9E2D7;
-      --red: #d9534f;
-      --green: #5cb85c;
-      --serif: 'Times New Roman', Times, serif;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow-x: hidden;
-    }
-    header {
-      padding: 16px 24px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: rgba(13, 15, 14, 0.95);
-    }
-    .logo {
-      font-family: var(--serif);
-      font-size: 1.3rem;
-      font-weight: bold;
-      color: var(--gold);
-      text-decoration: none;
-      letter-spacing: 0.1em;
-    }
-    nav a {
-      color: #a9a294;
-      text-decoration: none;
-      margin-left: 18px;
-      font-size: 0.9rem;
-    }
-    nav a:hover { color: var(--text); }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>God's Companions Arena — Greek vs Roman Citadel</title>
+    <style>
+        :root {
+            --bg-dark: #121A15;
+            --card-bg: #1A2620;
+            --accent-gold: #D8B894;
+            --accent-green: #2F4A3C;
+            --border-color: #3A5747;
+            --greek-blue: #2A4858;
+            --roman-red: #582A2A;
+            --text-light: #E0E8E3;
+            --meter-mood: #4E878C;
+            --meter-agency: #D4A373;
+            --meter-energy: #2A9D8F;
+            --meter-resist: #E76F51;
+        }
 
-    .arena-container {
-      max-width: 1000px;
-      margin: 20px auto;
-      padding: 0 16px;
-    }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Cinzel', 'Times New Roman', serif;
+        }
 
-    /* Lobby & Mode Switcher */
-    .lobby-bar {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-    .lobby-status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.95rem;
-      color: var(--gold);
-    }
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--green);
-    }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
 
-    /* HUD Header */
-    .hud {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px 12px 0 0;
-      padding: 16px;
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      gap: 16px;
-    }
-    .team-hud {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .team-hud.right { text-align: right; }
-    .team-name {
-      font-family: var(--serif);
-      font-size: 1.1rem;
-      font-weight: bold;
-      color: var(--gold);
-    }
-    .health-bar-outer {
-      height: 20px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 10px;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.2);
-      position: relative;
-    }
-    .health-bar-inner {
-      height: 100%;
-      background: linear-gradient(90deg, #5cb85c, #8ae68a);
-      width: 100%;
-      transition: width 0.2s ease;
-    }
-    .team-hud.right .health-bar-inner {
-      float: right;
-      background: linear-gradient(270deg, #d9534f, #ff8080);
-    }
-    .tag-team-slots {
-      display: flex;
-      gap: 8px;
-    }
-    .team-hud.right .tag-team-slots { justify-content: flex-end; }
-    .tag-badge {
-      padding: 4px 10px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 0.75rem;
-      color: #a9a294;
-      cursor: pointer;
-    }
-    .tag-badge.active {
-      border-color: var(--gold);
-      color: var(--gold);
-      font-weight: bold;
-      background: rgba(216, 184, 148, 0.15);
-    }
-    .timer {
-      font-family: var(--serif);
-      font-size: 2rem;
-      font-weight: bold;
-      color: var(--gold);
-      padding: 0 12px;
-    }
+        header {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
 
-    /* Canvas Screen */
-    #arenaCanvas {
-      display: block;
-      width: 100%;
-      height: 480px;
-      background: #111412;
-      border: 1px solid var(--border);
-      border-top: none;
-      border-bottom: none;
-    }
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: var(--accent-gold);
+        }
 
-    /* Controls Footer */
-    .controls-panel {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 0 0 12px 12px;
-      padding: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-    .btn-group {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .btn {
-      padding: 10px 18px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: rgba(47, 74, 60, 0.4);
-      color: var(--text);
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 0.88rem;
-    }
-    .btn:hover { background: var(--border); }
-    .btn-primary {
-      background: var(--gold);
-      color: #0d0f0e;
-      border-color: var(--gold);
-    }
-    .btn-primary:hover { background: #c2a17d; }
+        .subtitle {
+            font-size: 14px;
+            color: #8A9A90;
+            font-family: sans-serif;
+        }
 
-    /* Info Logs */
-    .logs-panel {
-      margin-top: 24px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-    }
-    .logs-panel h3 {
-      margin: 0 0 12px;
-      font-family: var(--serif);
-      color: var(--gold);
-    }
-    #historyLogList {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      max-height: 180px;
-      overflow-y: auto;
-      font-size: 0.88rem;
-      color: #c9c2b4;
-    }
-    #historyLogList li {
-      padding: 6px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
-    }
-  </style>
+        /* Arena Stage */
+        .arena-stage {
+            width: 100%;
+            max-width: 1200px;
+            height: 380px;
+            background: linear-gradient(180deg, #0A100C 0%, #17241D 70%, #23362B 100%);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 25px;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.8);
+        }
+
+        /* Greek Castle (Left, Decent Size) */
+        .castle-greek {
+            position: absolute;
+            left: 30px;
+            bottom: 40px;
+            width: 260px;
+            height: 220px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .greek-pediment {
+            width: 100%;
+            height: 0;
+            border-left: 130px solid transparent;
+            border-right: 130px solid transparent;
+            border-bottom: 60px solid #D8B894;
+            position: relative;
+        }
+
+        .greek-pediment::after {
+            content: "🏛️";
+            position: absolute;
+            top: 20px;
+            left: -14px;
+            font-size: 24px;
+        }
+
+        .greek-columns {
+            width: 100%;
+            height: 140px;
+            background: repeating-linear-gradient(
+                90deg,
+                #E8D4BE,
+                #E8D4BE 24px,
+                #9D8366 24px,
+                #9D8366 36px
+            );
+            border: 2px solid #5A4733;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        .greek-towers {
+            position: absolute;
+            top: -25px;
+            width: 115%;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .greek-tower {
+            width: 45px;
+            height: 160px;
+            background: #B8A082;
+            border: 1px solid #5A4733;
+        }
+
+        /* Roman Castle (Right, Decent Size) */
+        .castle-roman {
+            position: absolute;
+            right: 30px;
+            bottom: 40px;
+            width: 260px;
+            height: 210px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .roman-fort {
+            width: 100%;
+            height: 160px;
+            background: #7A423A;
+            border: 2px solid #3A1B17;
+            position: relative;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        .roman-crenellations {
+            width: 100%;
+            height: 25px;
+            background: repeating-linear-gradient(
+                90deg,
+                #7A423A,
+                #7A423A 20px,
+                transparent 20px,
+                transparent 40px
+            );
+            position: absolute;
+            top: -25px;
+        }
+
+        .roman-gate {
+            width: 75px;
+            height: 85px;
+            background: #200E0C;
+            border-radius: 35px 35px 0 0;
+            position: absolute;
+            bottom: 0;
+            left: 92px;
+            border: 2px solid #4A2824;
+        }
+
+        .roman-banner {
+            position: absolute;
+            top: -50px;
+            right: 30px;
+            background: #900;
+            color: #FFD700;
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid #FFD700;
+        }
+
+        /* Character Field Sprites */
+        .battlefield {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            height: 120px;
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-end;
+            padding: 0 310px;
+        }
+
+        .faction-line {
+            display: flex;
+            gap: 12px;
+        }
+
+        .field-sprite {
+            width: 38px;
+            height: 75px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .field-sprite:hover {
+            transform: scale(1.15);
+        }
+
+        .head-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 2px solid var(--accent-gold);
+            background: #444;
+            position: relative;
+        }
+
+        .head-avatar::after {
+            content: '🌿';
+            position: absolute;
+            top: -8px;
+            left: 2px;
+            font-size: 12px;
+        }
+
+        .greek-tunic {
+            width: 22px;
+            height: 40px;
+            background: linear-gradient(180deg, #E8E8E8 0%, #2F4A3C 100%);
+            border-radius: 4px 4px 0 0;
+            border: 1px solid #A0A0A0;
+        }
+
+        .roman-toga {
+            width: 22px;
+            height: 40px;
+            background: linear-gradient(180deg, #E8E8E8 0%, #7A423A 100%);
+            border-radius: 4px 4px 0 0;
+            border: 1px solid #A0A0A0;
+        }
+
+        .sprite-name {
+            font-size: 10px;
+            color: #FFF;
+            margin-top: 2px;
+            font-family: sans-serif;
+            white-space: nowrap;
+        }
+
+        /* Dialogue Speech Bubbles */
+        .speech-bubble {
+            position: absolute;
+            top: -45px;
+            background: rgba(20, 30, 25, 0.9);
+            border: 1px solid var(--accent-gold);
+            color: #FFF;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-family: sans-serif;
+            white-space: nowrap;
+            z-index: 10;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+
+        /* Controls & Action Buttons */
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .btn {
+            background: var(--accent-green);
+            color: var(--accent-gold);
+            border: 1px solid var(--accent-gold);
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--accent-gold);
+            color: var(--accent-green);
+        }
+
+        /* 10v10 Character Roster Grid */
+        .roster-container {
+            width: 100%;
+            max-width: 1200px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .faction-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .faction-header {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+        }
+
+        .faction-greek-title { color: #81A491; }
+        .faction-roman-title { color: #C27A70; }
+
+        .character-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .char-card {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .char-thumb {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 2px solid var(--accent-gold);
+            object-fit: cover;
+            background: #333;
+        }
+
+        .char-info {
+            flex-grow: 1;
+        }
+
+        .char-name {
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--accent-gold);
+        }
+
+        .char-title {
+            font-size: 10px;
+            color: #8A9A90;
+            font-family: sans-serif;
+            margin-bottom: 4px;
+        }
+
+        /* Sims-Style Meters */
+        .meter-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .meter-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9px;
+            font-family: sans-serif;
+        }
+
+        .meter-label {
+            width: 35px;
+            color: #AAA;
+        }
+
+        .meter-bar-bg {
+            flex-grow: 1;
+            height: 5px;
+            background: #222;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .meter-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        .fill-mood { background-color: var(--meter-mood); }
+        .fill-agency { background-color: var(--meter-agency); }
+        .fill-energy { background-color: var(--meter-energy); }
+        .fill-resist { background-color: var(--meter-resist); }
+    </style>
 </head>
 <body>
-  <header>
-    <a href="index.html" class="logo">lockeddoor.ai</a>
-    <nav>
-      <a href="index.html">God's Town</a>
-      <a href="products.html">Products</a>
-      <a href="town.html">Town Map</a>
-      <a href="arena.html" style="color: var(--gold); font-weight: bold;">3v3 Live Arena</a>
-      <a href="community-cam.html">Webcam Hub</a>
-    </nav>
-  </header>
 
-  <div class="arena-container">
-    <!-- Lobby Bar -->
-    <div class="lobby-bar">
-      <div class="lobby-status">
-        <span class="status-dot"></span>
-        <span id="lobbyModeText">Matchmaking Mode: Live Peer PVP / P2P Matchmaking</span>
-      </div>
-      <div class="btn-group">
-        <button class="btn btn-primary" id="btnHostPVP">Create Host Room</button>
-        <button class="btn" id="btnJoinPVP">Join Room (P2P)</button>
-        <button class="btn" id="btnPracticeAI">VS Companion AI</button>
-      </div>
-    </div>
-
-    <!-- HUD Header -->
-    <div class="hud">
-      <div class="team-hud">
-        <div class="team-name" id="p1TeamName">House of Westfall (3v3)</div>
-        <div class="health-bar-outer">
-          <div class="health-bar-inner" id="p1HealthBar" style="width: 100%;"></div>
+    <header>
+        <div>
+            <div class="logo">GOD'S COMPANIONS ARENA</div>
+            <div class="subtitle">10v10 Citadel Rating & Raiding — Ancient Greek vs Roman Citadel</div>
         </div>
-        <div class="tag-team-slots" id="p1TagSlots"></div>
-      </div>
-
-      <div class="timer" id="roundTimer">99</div>
-
-      <div class="team-hud right">
-        <div class="team-name" id="p2TeamName">House of Pellegrin (3v3)</div>
-        <div class="health-bar-outer">
-          <div class="health-bar-inner" id="p2HealthBar" style="width: 100%;"></div>
+        <div>
+            <span class="btn" style="font-size: 12px; padding: 6px 12px;">GREEK CITADEL LEVEL 12</span>
+            <span class="btn" style="font-size: 12px; padding: 6px 12px; background: #582A2A; border-color: #C27A70;">ROMAN FORT LEVEL 10</span>
         </div>
-        <div class="tag-team-slots" id="p2TagSlots"></div>
-      </div>
+    </header>
+
+    <!-- Visual Arena Battlefield with 2 Decent Size Castles -->
+    <div class="arena-stage">
+        <!-- Left Castle: Decent Size Greek Citadel -->
+        <div class="castle-greek">
+            <div class="greek-towers">
+                <div class="greek-tower"></div>
+                <div class="greek-tower"></div>
+            </div>
+            <div class="greek-pediment"></div>
+            <div class="greek-columns"></div>
+            <div style="color: var(--accent-gold); font-size: 11px; margin-top: 6px; font-weight: bold;">GREAT GREEK CITADEL</div>
+        </div>
+
+        <!-- Right Castle: Decent Size Roman Fortress -->
+        <div class="castle-roman">
+            <div class="roman-banner">SPQR</div>
+            <div class="roman-fort">
+                <div class="roman-crenellations"></div>
+                <div class="roman-gate"></div>
+            </div>
+            <div style="color: #C27A70; font-size: 11px; margin-top: 6px; font-weight: bold;">ROMAN FORTRESS</div>
+        </div>
+
+        <!-- Battlefield Character Sprites -->
+        <div class="battlefield">
+            <!-- Greek Side (5 Active Field Guardians) -->
+            <div class="faction-line" id="greekField">
+                <div class="field-sprite">
+                    <div class="speech-bubble">Protect the Greek Citadel with all our strength!</div>
+                    <div class="head-avatar"></div>
+                    <div class="greek-tunic"></div>
+                    <div class="sprite-name">Dakota</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="greek-tunic"></div>
+                    <div class="sprite-name">Zoe</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="greek-tunic"></div>
+                    <div class="sprite-name">Willow</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="greek-tunic"></div>
+                    <div class="sprite-name">Brittany</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="greek-tunic"></div>
+                    <div class="sprite-name">Sasha</div>
+                </div>
+            </div>
+
+            <!-- Roman Side (5 Active Field Defenders) -->
+            <div class="faction-line" id="romanField">
+                <div class="field-sprite">
+                    <div class="speech-bubble" style="border-color: #C27A70;">For the Roman Fort! Hold the ramparts!</div>
+                    <div class="head-avatar"></div>
+                    <div class="roman-toga"></div>
+                    <div class="sprite-name">Lila</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="roman-toga"></div>
+                    <div class="sprite-name">Nell</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="roman-toga"></div>
+                    <div class="sprite-name">Sable</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="roman-toga"></div>
+                    <div class="sprite-name">Odette</div>
+                </div>
+                <div class="field-sprite">
+                    <div class="head-avatar"></div>
+                    <div class="roman-toga"></div>
+                    <div class="sprite-name">Maren</div>
+                </div>
+            </div>
+        </div>
+        <div style="position: absolute; top: 10px; right: 15px; font-size: 10px; color: #666;">Greek Citadel (Left, Large) vs. Roman Fort (Right)</div>
+        <div style="position: absolute; top: 10px; left: 15px; font-size: 11px; color: var(--accent-gold); font-weight: bold;">LIVE RAID SIMULATION</div>
     </div>
 
-    <!-- Live Canvas -->
-    <canvas id="arenaCanvas" width="960" height="480"></canvas>
-
-    <!-- Controls Panel -->
-    <div class="controls-panel">
-      <div class="btn-group">
-        <button class="btn" id="btnLeft">◄ Left (A)</button>
-        <button class="btn" id="btnRight">Right (D) ►</button>
-        <button class="btn" id="btnJump">Jump (W)</button>
-      </div>
-
-      <div class="btn-group">
-        <button class="btn btn-primary" id="btnPunch">Punch (J)</button>
-        <button class="btn btn-primary" id="btnKick">Kick (K)</button>
-        <button class="btn" id="btnBlock">Block (L)</button>
-        <button class="btn btn-primary" style="background: #2F4A3C; color: #D8B894;" id="btnSpecial">Special Move (U)</button>
-      </div>
-
-      <div class="btn-group">
-        <button class="btn" id="btnTag1">Tag Fighter 1 (1)</button>
-        <button class="btn" id="btnTag2">Tag Fighter 2 (2)</button>
-        <button class="btn" id="btnTag3">Tag Fighter 3 (3)</button>
-      </div>
+    <!-- Battle Controls -->
+    <div class="controls">
+        <button class="btn" onclick="simulateExchange()">Simulate Tactical Exchange</button>
+        <button class="btn" style="background: #222; border-color: #555; color: #AAA;" onclick="window.location.href='/town.html'">Return to Town</button>
     </div>
 
-    <!-- Generational History & Event Log -->
-    <div class="logs-panel">
-      <h3>Generational Evolution & Fight History</h3>
-      <ul id="historyLogList">
-        <li>Year 1: 3v3 Live Combat Arena ready for P2P/PVP player & companion matches. Non-lethal KO rules.</li>
-      </ul>
+    <!-- 10v10 Character Rosters with Sims Meters -->
+    <div class="roster-container">
+        <!-- Greek Citadel Faction (10 Companions) -->
+        <div class="faction-card">
+            <div class="faction-header">
+                <span class="faction-greek-title">GREEK CITADEL GUARDIANS (10)</span>
+                <span style="font-size: 11px; color: #4E878C;">ATTACKING</span>
+            </div>
+            <div class="character-grid" id="greekRosterGrid"></div>
+        </div>
+
+        <!-- Roman Citadel Faction (10 Companions) -->
+        <div class="faction-card">
+            <div class="faction-header">
+                <span class="faction-roman-title">ROMAN FORT DEFENDERS (10)</span>
+                <span style="font-size: 11px; color: #E76F51;">DEFENDING</span>
+            </div>
+            <div class="character-grid" id="romanRosterGrid"></div>
+        </div>
     </div>
-  </div>
 
-  <script src="js/generations.js"></script>
-  <script>
-    const genEngine = new GenerationEngine();
-    const canvas = document.getElementById("arenaCanvas");
-    const ctx = canvas.getContext("2d");
+    <script>
+        const GREEK_GUARDIANS = [
+            { name: "Dakota", title: "The Gatekeeper", mood: 85, agency: 90, energy: 75, resist: 40, img: "assets/dakota.jpg" },
+            { name: "Zoe", title: "The Mirage", mood: 90, agency: 70, energy: 85, resist: 30, img: "assets/zoe.jpg" },
+            { name: "Willow", title: "The Quiet Lock", mood: 65, agency: 80, energy: 60, resist: 80, img: "assets/willow.jpg" },
+            { name: "Brittany", title: "The Sweet Trap", mood: 75, agency: 65, energy: 80, resist: 50, img: "assets/brittany.jpg" },
+            { name: "Sasha", title: "The Wildcard", mood: 95, agency: 85, energy: 90, resist: 25, img: "assets/sasha.jpg" },
+            { name: "Piper", title: "The Closed Book", mood: 60, agency: 75, energy: 70, resist: 85, img: "assets/piper.jpg" },
+            { name: "Veronica", title: "The Host", mood: 80, agency: 80, energy: 75, resist: 45, img: "assets/veronica.jpg" },
+            { name: "Kristen", title: "The Gentle Hands", mood: 85, agency: 60, energy: 90, resist: 35, img: "assets/kristen.jpg" },
+            { name: "Mia", title: "The First to Know", mood: 70, agency: 85, energy: 65, resist: 60, img: "assets/mia.jpg" },
+            { name: "Anna", title: "The Steady Hands", mood: 90, agency: 95, energy: 80, resist: 20, img: "assets/anna.jpg" }
+        ];
 
-    let isPVP = true;
-    let peerConnection = null;
+        const ROMAN_DEFENDERS = [
+            { name: "Lila", title: "The Toll-Keeper", mood: 80, agency: 85, energy: 70, resist: 50, img: "assets/portraits/f01.jpg" },
+            { name: "Nell", title: "The Millwright", mood: 75, agency: 90, energy: 85, resist: 40, img: "assets/portraits/f02.jpg" },
+            { name: "Sable", title: "The Baker", mood: 85, agency: 70, energy: 75, resist: 35, img: "assets/portraits/f03.jpg" },
+            { name: "Odette", title: "The Chandler", mood: 70, agency: 80, energy: 60, resist: 65, img: "assets/portraits/f04.jpg" },
+            { name: "Maren", title: "The Teacher", mood: 90, agency: 85, energy: 80, resist: 30, img: "assets/portraits/f05.jpg" },
+            { name: "Prudence", title: "The Healer", mood: 85, agency: 75, energy: 90, resist: 25, img: "assets/portraits/f06.jpg" },
+            { name: "Delia", title: "The Fisher", mood: 65, agency: 85, energy: 70, resist: 70, img: "assets/portraits/f07.jpg" },
+            { name: "Imogen", title: "The Orchard Keeper", mood: 95, agency: 80, energy: 85, resist: 20, img: "assets/portraits/f08.jpg" },
+            { name: "Hazel", title: "The Midwife", mood: 80, agency: 70, energy: 75, resist: 45, img: "assets/portraits/f09.jpg" },
+            { name: "Sarah", title: "The Sanctuary", mood: 90, agency: 90, energy: 85, resist: 15, img: "assets/sarah.jpg" }
+        ];
 
-    let p1Team = genEngine.getActiveTeam("lineage_sparta");
-    let p2Team = genEngine.getActiveTeam("lineage_pellegrin");
-
-    let p1Index = 0;
-    let p2Index = 0;
-
-    let p1 = { x: 200, y: 320, vx: 0, vy: 0, width: 50, height: 90, hp: 100, isGrounded: true, isBlocking: false, animState: 'idle' };
-    let p2 = { x: 710, y: 320, vx: 0, vy: 0, width: 50, height: 90, hp: 100, isGrounded: true, isBlocking: false, animState: 'idle' };
-
-    let gameOver = false;
-    let p1Dialogue = "For God's Greek!";
-    let p2Dialogue = "Defend the Realm!";
-
-    function renderHUD() {
-      const active1 = p1Team[p1Index] || { name: "Dakota I", stats: { str: 80 } };
-      const active2 = p2Team[p2Index] || { name: "Zoe I", stats: { str: 80 } };
-
-      document.getElementById("p1TeamName").textContent = `${active1.name} (${active1.stats.geneType})`;
-      document.getElementById("p2TeamName").textContent = `${active2.name} (${active2.stats.geneType})`;
-
-      document.getElementById("p1HealthBar").style.width = `${Math.max(0, p1.hp)}%`;
-      document.getElementById("p2HealthBar").style.width = `${Math.max(0, p2.hp)}%`;
-
-      document.getElementById("p1TagSlots").innerHTML = p1Team.map((c, i) => `<span class="tag-badge ${i===p1Index?'active':''}" onclick="switchP1(${i})">${c.name}</span>`).join('');
-      document.getElementById("p2TagSlots").innerHTML = p2Team.map((c, i) => `<span class="tag-badge ${i===p2Index?'active':''}" onclick="switchP2(${i})">${c.name}</span>`).join('');
-
-      document.getElementById("historyLogList").innerHTML = genEngine.state.historyLog.slice(-10).reverse().map(item => `<li>${item}</li>`).join('');
-    }
-
-    function switchP1(idx) {
-      if (idx >= 0 && idx < p1Team.length && idx !== p1Index) {
-        p1Index = idx;
-        p1.hp = 100;
-        renderHUD();
-      }
-    }
-
-    function switchP2(idx) {
-      if (idx >= 0 && idx < p2Team.length && idx !== p2Index) {
-        p2Index = idx;
-        p2.hp = 100;
-        renderHUD();
-      }
-    }
-
-    const keys = {};
-    window.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; handleKeyPress(e.key.toLowerCase()); });
-    window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
-
-    function handleKeyPress(key) {
-      if (gameOver) return;
-      if (key === 'a') p1.vx = -4;
-      if (key === 'd') p1.vx = 4;
-      if (key === 'w' && p1.isGrounded) { p1.vy = -12; p1.isGrounded = false; }
-      if (key === 'j') performAttack('punch');
-      if (key === 'k') performAttack('kick');
-      if (key === 'u') performAttack('special');
-      if (key === '1') switchP1(0);
-      if (key === '2') switchP1(1);
-      if (key === '3') switchP1(2);
-
-      // Player 2 controls in local 2-Player PVP mode!
-      if (key === 'arrowleft') p2.x -= 15;
-      if (key === 'arrowright') p2.x += 15;
-      if (key === 'arrowup' && p2.isGrounded) { p2.vy = -12; p2.isGrounded = false; }
-      if (key === 'num4' || key === 'i') performP2Attack('punch');
-      if (key === 'num5' || key === 'o') performP2Attack('kick');
-    }
-
-    function performAttack(type) {
-      const active1 = p1Team[p1Index];
-      const active2 = p2Team[p2Index];
-      const dist = Math.abs(p1.x - p2.x);
-      p1.animState = type;
-
-      if (dist < 80) {
-        let dmg = type === 'punch' ? 12 : type === 'kick' ? 18 : 30;
-        if (p2.isBlocking) dmg = Math.round(dmg * 0.2);
-
-        p2.hp -= dmg;
-        p2.animState = 'hit';
-
-        if (p2.hp <= 0) {
-          p2.hp = 0;
-          genEngine.recordDecision(active1.id, `3v3 Live Combat vs ${active2.name}`, `Knockout Victory`);
-          if (p2Index + 1 < p2Team.length) switchP2(p2Index + 1);
-          else { gameOver = true; alert(`PVP MATCH OVER! ${active1.name} and House of Westfall win!`); }
+        function renderRoster(list, elementId) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = list.map(c => `
+                <div class="char-card">
+                    <img class="char-thumb" src="${c.img}" alt="${c.name}" onerror="this.src='assets/dakota.jpg'">
+                    <div class="char-info">
+                        <div class="char-name">${c.name}</div>
+                        <div class="char-title">${c.title}</div>
+                        <div class="meter-container">
+                            <div class="meter-row"><span class="meter-label">Mood</span><div class="meter-bar-bg"><div class="meter-bar-fill fill-mood" style="width: ${c.mood}%"></div></div></div>
+                            <div class="meter-row"><span class="meter-label">Agency</span><div class="meter-bar-bg"><div class="meter-bar-fill fill-agency" style="width: ${c.agency}%"></div></div></div>
+                            <div class="meter-row"><span class="meter-label">Energy</span><div class="meter-bar-bg"><div class="meter-bar-fill fill-energy" style="width: ${c.energy}%"></div></div></div>
+                            <div class="meter-row"><span class="meter-label">Resist</span><div class="meter-bar-bg"><div class="meter-bar-fill fill-resist" style="width: ${c.resist}%"></div></div></div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
         }
-      }
-      renderHUD();
-    }
 
-    function performP2Attack(type) {
-      const active1 = p1Team[p1Index];
-      const active2 = p2Team[p2Index];
-      const dist = Math.abs(p1.x - p2.x);
-      p2.animState = type;
+        renderRoster(GREEK_GUARDIANS, 'greekRosterGrid');
+        renderRoster(ROMAN_DEFENDERS, 'romanRosterGrid');
 
-      if (dist < 80) {
-        let dmg = type === 'punch' ? 12 : 18;
-        if (p1.isBlocking) dmg = Math.round(dmg * 0.2);
-
-        p1.hp -= dmg;
-        p1.animState = 'hit';
-
-        if (p1.hp <= 0) {
-          p1.hp = 0;
-          genEngine.recordDecision(active2.id, `3v3 Live Combat vs ${active1.name}`, `Knockout Victory`);
-          if (p1Index + 1 < p1Team.length) switchP1(p1Index + 1);
-          else { gameOver = true; alert(`PVP MATCH OVER! ${active2.name} and House of Pellegrin win!`); }
+        function simulateExchange() {
+            GREEK_GUARDIANS.forEach(c => {
+                c.energy = Math.max(10, c.energy + Math.floor(Math.random() * 10) - 5);
+                c.mood = Math.min(100, Math.max(10, c.mood + Math.floor(Math.random() * 10) - 4));
+            });
+            ROMAN_DEFENDERS.forEach(c => {
+                c.energy = Math.max(10, c.energy + Math.floor(Math.random() * 10) - 5);
+                c.mood = Math.min(100, Math.max(10, c.mood + Math.floor(Math.random() * 10) - 4));
+            });
+            renderRoster(GREEK_GUARDIANS, 'greekRosterGrid');
+            renderRoster(ROMAN_DEFENDERS, 'romanRosterGrid');
         }
-      }
-      renderHUD();
-    }
-
-    function update() {
-      if (keys['a']) p1.x -= 4;
-      if (keys['d']) p1.x += 4;
-      p1.isBlocking = !!keys['l'];
-
-      p1.y += p1.vy;
-      if (!p1.isGrounded) p1.vy += 0.8;
-      if (p1.y >= 320) { p1.y = 320; p1.vy = 0; p1.isGrounded = true; }
-
-      // Gravity for P2
-      p2.y += p2.vy;
-      if (!p2.isGrounded) p2.vy += 0.8;
-      if (p2.y >= 320) { p2.y = 320; p2.vy = 0; p2.isGrounded = true; }
-
-      p1.x = Math.max(50, Math.min(860, p1.x));
-      p2.x = Math.max(50, Math.min(860, p2.x));
-    }
-
-
-    function drawCastles(ctx, width, height) {
-      // Draw distant wide low castle silhouette in background
-      ctx.fillStyle = '#1e2621';
-      // Castle 1 (wide & long on left hill)
-      ctx.fillRect(80, 260, 220, 80);
-      ctx.fillRect(60, 240, 40, 100);
-      ctx.fillRect(280, 240, 40, 100);
-      ctx.fillRect(160, 230, 60, 110);
-
-      // Castle 2 (sprawling wide fortress on right hill)
-      ctx.fillRect(620, 270, 260, 70);
-      ctx.fillRect(600, 250, 45, 90);
-      ctx.fillRect(855, 250, 45, 90);
-      ctx.fillRect(710, 240, 70, 100);
-
-      // Crenellations & classical battlements
-      ctx.fillStyle = '#161d18';
-      for (let x = 60; x < 320; x += 15) {
-        ctx.fillRect(x, 235, 8, 10);
-      }
-      for (let x = 600; x < 890; x += 15) {
-        ctx.fillRect(x, 245, 8, 10);
-      }
-    }
-
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#111412";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      drawCastles(ctx, canvas.width, canvas.height);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#161b18";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.fillStyle = "#2F4A3C";
-      ctx.fillRect(0, 410, canvas.width, 70);
-      ctx.fillStyle = "#D8B894";
-      ctx.fillRect(0, 408, canvas.width, 2);
-
-      // P1 Sprite & Tunic Overlay
-      ctx.fillStyle = p1.animState === 'hit' ? '#ff8080' : p1.isBlocking ? '#5cb85c' : '#D8B894';
-      ctx.fillRect(p1.x, p1.y, p1.width, p1.height);
-      // Greek Tunic/Drapery overlay
-      ctx.fillStyle = '#E9E2D7';
-      ctx.fillRect(p1.x + 5, p1.y + 35, p1.width - 10, p1.height - 35);
-      ctx.fillStyle = '#2F4A3C';
-      ctx.fillRect(p1.x + 5, p1.y + 35, p1.width - 10, 6); // Tunic Sash
-      ctx.fillStyle = '#D8B894';
-      ctx.font = 'bold 12px serif';
-      ctx.fillText(`P1: ${p1Team[p1Index]?.name}`, p1.x - 10, p1.y - 10);
-
-      // P1 Dialogue Bubble
-      if (p1Dialogue) {
-        ctx.fillStyle = 'rgba(233,226,215,0.95)';
-        ctx.fillRect(p1.x - 20, p1.y - 50, 150, 30);
-        ctx.fillStyle = '#0d0f0e';
-        ctx.font = '11px sans-serif';
-        ctx.fillText(p1Dialogue, p1.x - 15, p1.y - 32);
-      }
-
-      // P2 Sprite & Tunic Overlay
-      ctx.fillStyle = p2.animState === 'hit' ? '#ffffff' : p2.isBlocking ? '#d9534f' : '#8A7D6B';
-      ctx.fillRect(p2.x, p2.y, p2.width, p2.height);
-      // Roman/Greek Tunic overlay
-      ctx.fillStyle = '#D8B894';
-      ctx.fillRect(p2.x + 5, p2.y + 35, p2.width - 10, p2.height - 35);
-      ctx.fillStyle = '#8A7D6B';
-      ctx.fillRect(p2.x + 5, p2.y + 35, p2.width - 10, 6); // Tunic Sash
-      ctx.fillStyle = '#E9E2D7';
-      ctx.font = 'bold 12px serif';
-      ctx.fillText(`P2: ${p2Team[p2Index]?.name}`, p2.x - 10, p2.y - 10);
-
-      // P2 Dialogue Bubble
-      if (p2Dialogue) {
-        ctx.fillStyle = 'rgba(233,226,215,0.95)';
-        ctx.fillRect(p2.x - 20, p2.y - 50, 150, 30);
-        ctx.fillStyle = '#0d0f0e';
-        ctx.font = '11px sans-serif';
-        ctx.fillText(p2Dialogue, p2.x - 15, p2.y - 32);
-      }
-    }
-
-    function loop() {
-      update();
-      draw();
-      requestAnimationFrame(loop);
-    }
-
-    document.getElementById("btnHostPVP").onclick = () => {
-      isPVP = true;
-      document.getElementById("lobbyModeText").textContent = "Matchmaking Mode: Host Room Active (P2P Listening on Channel #777)";
-      alert("PVP Host Room created! Player 2 can connect and attack in real time.");
-    };
-
-    document.getElementById("btnJoinPVP").onclick = () => {
-      isPVP = true;
-      document.getElementById("lobbyModeText").textContent = "Matchmaking Mode: Connected to Peer Room #777";
-      alert("Connected to Host Room! Use Arrow Keys & I / O to control Player 2 in real-time PVP!");
-    };
-
-    document.getElementById("btnPracticeAI").onclick = () => {
-      isPVP = false;
-      document.getElementById("lobbyModeText").textContent = "Matchmaking Mode: Companion AI Active";
-      alert("Switched to Companion AI Mode.");
-    };
-
-    // Attach button controls
-    document.getElementById("btnLeft").onclick = () => p1.x -= 15;
-    document.getElementById("btnRight").onclick = () => p1.x += 15;
-    document.getElementById("btnJump").onclick = () => { if(p1.isGrounded) { p1.vy = -12; p1.isGrounded = false; } };
-    document.getElementById("btnPunch").onclick = () => performAttack('punch');
-    document.getElementById("btnKick").onclick = () => performAttack('kick');
-    document.getElementById("btnSpecial").onclick = () => performAttack('special');
-    document.getElementById("btnBlock").onclick = () => { p1.isBlocking = !p1.isBlocking; };
-    document.getElementById("btnTag1").onclick = () => switchP1(0);
-    document.getElementById("btnTag2").onclick = () => switchP1(1);
-    document.getElementById("btnTag3").onclick = () => switchP1(2);
-
-    renderHUD();
-    loop();
-  </script>
+    </script>
 </body>
 </html>
