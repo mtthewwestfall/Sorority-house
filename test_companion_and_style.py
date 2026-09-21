@@ -7,9 +7,8 @@ import main
 EXACT_PROMPT = (
     "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, "
-    "soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks."
+    "Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents), highlighting an attractive hourglass physique and figure, with long hair draped, medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Tasteful, alluring, natural expression. No text, no watermarks."
 )
 
 class TestCompanionAndStyles(unittest.TestCase):
@@ -19,7 +18,7 @@ class TestCompanionAndStyles(unittest.TestCase):
 
     def test_1_companion_portrait_style_variable(self):
         self.assertIn("Background: a Greek temple among tall pines, soft golden daylight.", main._COMPANION_PORTRAIT_STYLE)
-        self.assertIn("Subject in ancient Greek dress (toga or chiton with laurel accents)", main._COMPANION_PORTRAIT_STYLE)
+        self.assertIn("Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents)", main._COMPANION_PORTRAIT_STYLE)
         self.assertIn("Use the photo ONLY as a likeness reference for the face.", main._COMPANION_PORTRAIT_STYLE)
         self.assertIn("Never reproduce the photo itself.", main._COMPANION_PORTRAIT_STYLE)
 

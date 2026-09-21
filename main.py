@@ -3575,9 +3575,9 @@ def generate_picture(girl, name, avatar_url, portrait=None, scenes=None):
               f"same face, hair, skin tone and overall art style. "
               "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
               "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-              "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
+              "Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents), highlighting an attractive hourglass physique and figure, with long hair draped, medium close-up from the "
               f"chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Scene: {scene}. "
-              "Fully clothed, tasteful, natural expression, phone-camera framing. "
+              "Tasteful, alluring, natural expression, phone-camera framing. "
               "No text, no watermarks.")
     parts = [{"text": prompt}]
     if portrait is None:
@@ -3791,8 +3791,8 @@ _PHOTO_DESCRIBE_PROMPT = (
 _COMPANION_PORTRAIT_STYLE = (
     "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Fully clothed, tasteful, natural expression. "
+    "Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents), highlighting an attractive hourglass physique and figure, with long hair draped, medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Tasteful, alluring, natural expression. "
     "Use the photo ONLY as a likeness reference for the face. Never reproduce the photo itself. No text, no watermarks."
 )
 
@@ -4666,8 +4666,8 @@ def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_
 AVATAR_STYLE = (
     "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
     "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
+    "Subject in form-fitting ancient Greek dress or top (fitted toga, chiton, or top with laurel accents), highlighting an attractive hourglass physique and figure, with long hair draped, medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines, soft golden daylight. Tasteful, alluring, natural expression. No text, no watermarks. "
     "The person depicted is: "
 )
 

@@ -2200,7 +2200,113 @@ const PRESET_FACES = {
       });
     }
 
-    // Creator Form Event Listeners
+    // Creator Form Event Listeners & Voice Layer Integration
+    let activeVoiceDraft = null;
+
+    const btnApplyVoice = document.getElementById('btn-apply-voice');
+    if (btnApplyVoice) {
+      btnApplyVoice.addEventListener('click', async () => {
+        const girl = document.getElementById('creator-sister-select').value;
+        const recordingId = document.getElementById('creator-media-url').value || 'rec_live_take_1';
+        if (previewStatusMsg) previewStatusMsg.textContent = `Applying voice profile for ${girl}...`;
+        try {
+          const res = await fetch('/admin/creator/apply-voice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recording_id: recordingId, character_id: girl })
+          });
+          const data = await res.json();
+          if (res.ok && data.draft) {
+            activeVoiceDraft = data.draft;
+            const container = document.getElementById('voice-preview-container');
+            const player = document.getElementById('transformed-audio-player');
+            if (container) container.style.display = 'block';
+            if (player) player.src = `data:audio/mp3;base64,${data.draft.transformed_audio_b64}`;
+            if (previewStatusMsg) previewStatusMsg.textContent = `Voice profile '${data.draft.voice_profile.name}' applied! Listen to admin preview below.`;
+          } else {
+            if (previewStatusMsg) previewStatusMsg.textContent = 'Voice transformation error: ' + (data.detail || 'Unknown error');
+          }
+        } catch (err) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Network error: ' + err.message;
+        }
+      });
+    }
+
+    const btnApproveVoice = document.getElementById('btn-approve-voice');
+    if (btnApproveVoice) {
+      btnApproveVoice.addEventListener('click', async () => {
+        if (!activeVoiceDraft) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'No active voice draft to approve.';
+          return;
+        }
+        const tierAccess = document.getElementById('creator-tier-select').value;
+        try {
+          const res = await fetch('/admin/creator/approve-media', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ draft_id: activeVoiceDraft.id, tier_access: tierAccess })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            if (previewStatusMsg) previewStatusMsg.textContent = `Approved! ${data.message}`;
+          } else {
+            if (previewStatusMsg) previewStatusMsg.textContent = 'Approval error: ' + (data.detail || 'Unknown error');
+          }
+        } catch (err) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Network error: ' + err.message;
+        }
+      });
+    }
+
+    const btnReplaceVoice = document.getElementById('btn-replace-voice');
+    if (btnReplaceVoice) {
+      btnReplaceVoice.addEventListener('click', async () => {
+        if (!activeVoiceDraft) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'No active voice draft to replace with.';
+          return;
+        }
+        try {
+          const res = await fetch('/admin/creator/replace-media', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ existing_media_id: 'media_existing', new_draft_id: activeVoiceDraft.id })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            if (previewStatusMsg) previewStatusMsg.textContent = `Replaced existing media with newly approved draft!`;
+          } else {
+            if (previewStatusMsg) previewStatusMsg.textContent = 'Replace error: ' + (data.detail || 'Unknown error');
+          }
+        } catch (err) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Network error: ' + err.message;
+        }
+      });
+    }
+
+    const btnDeleteVoice = document.getElementById('btn-delete-voice');
+    if (btnDeleteVoice) {
+      btnDeleteVoice.addEventListener('click', async () => {
+        if (!activeVoiceDraft) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'No active draft to delete.';
+          return;
+        }
+        try {
+          const res = await fetch(`/admin/creator/media/${activeVoiceDraft.id}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (res.ok) {
+            activeVoiceDraft = null;
+            const container = document.getElementById('voice-preview-container');
+            if (container) container.style.display = 'none';
+            if (previewStatusMsg) previewStatusMsg.textContent = `Bad take deleted successfully.`;
+          } else {
+            if (previewStatusMsg) previewStatusMsg.textContent = 'Delete error: ' + (data.detail || 'Unknown error');
+          }
+        } catch (err) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Network error: ' + err.message;
+        }
+      });
+    }
+
     const creatorCaptureForm = document.getElementById('creator-capture-form');
     if (creatorCaptureForm) {
       creatorCaptureForm.addEventListener('submit', async (e) => {
@@ -2209,19 +2315,47 @@ const PRESET_FACES = {
         const tierAccess = document.getElementById('creator-tier-select').value;
         const mediaUrl = document.getElementById('creator-media-url').value;
         if (!mediaUrl) {
-          if (previewStatusMsg) previewStatusMsg.textContent = 'Please enter a Media URL.';
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Please enter a Media URL or Recording ID.';
           return;
         }
-        if (previewStatusMsg) previewStatusMsg.textContent = `Assigned ${mediaUrl} to ${girl} (${tierAccess}).`;
+        try {
+          const res = await fetch('/admin/creator/capture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ girl: girl, media_type: 'video', tier_access: tierAccess, media_url: mediaUrl })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            if (previewStatusMsg) previewStatusMsg.textContent = `Media assigned to ${girl} for tier '${tierAccess}'.`;
+          } else {
+            if (previewStatusMsg) previewStatusMsg.textContent = 'Capture save error: ' + (data.detail || 'Unknown error');
+          }
+        } catch (err) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Network error: ' + err.message;
+        }
       });
     }
 
     const btnSaveSkin = document.getElementById('btn-save-skin');
     if (btnSaveSkin) {
-      btnSaveSkin.addEventListener('click', () => {
+      btnSaveSkin.addEventListener('click', async () => {
         const girl = document.getElementById('creator-sister-select').value;
         const skinColor = document.getElementById('creator-skin-color').value;
-        if (previewStatusMsg) previewStatusMsg.textContent = `Custom skin ${skinColor} applied for ${girl}.`;
+        try {
+          const res = await fetch('/admin/creator/skinning', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ girl: girl, theme_color: skinColor })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            if (previewStatusMsg) previewStatusMsg.textContent = `Custom skin ${skinColor} saved for ${girl}!`;
+          } else {
+            if (previewStatusMsg) previewStatusMsg.textContent = 'Skin save error: ' + (data.detail || 'Unknown error');
+          }
+        } catch (err) {
+          if (previewStatusMsg) previewStatusMsg.textContent = 'Network error: ' + err.message;
+        }
       });
     }
 
