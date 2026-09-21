@@ -280,6 +280,29 @@ def _send_audit(token, girl):
     return data
 
 
+def _fetch_keyhole_shows(token=None):
+    r = _get("/keyhole/shows", token=token)
+    if r.status_code != 200:
+        raise BackendError("Could not load KEYHOLE show schedule")
+    return r.json().get("shows", [])
+
+
+def _request_private_show(token, character_id):
+    if character_id.lower() not in ALLOWED_MODELS:
+        raise BackendError("Private shows are only available for Chloe and Bailey.")
+    r = _post("/keyhole/shows/private/request", {"character_id": character_id.lower()}, token=token)
+    if r.status_code != 200:
+        raise BackendError("Could not request private show")
+    return r.json().get("show")
+
+
+def _purchase_show(token, show_id):
+    r = _post(f"/keyhole/shows/{show_id}/purchase", {}, token=token)
+    if r.status_code != 200:
+        raise BackendError("Could not process show pass purchase")
+    return r.json().get("show")
+
+
 async def login(*args):
     return await asyncio.to_thread(_login, *args)
 
@@ -303,6 +326,15 @@ async def send_chat(*args):
 
 async def send_audit(*args):
     return await asyncio.to_thread(_send_audit, *args)
+
+async def fetch_keyhole_shows(*args):
+    return await asyncio.to_thread(_fetch_keyhole_shows, *args)
+
+async def request_private_show(*args):
+    return await asyncio.to_thread(_request_private_show, *args)
+
+async def purchase_show(*args):
+    return await asyncio.to_thread(_purchase_show, *args)
 
 
 # Roster & presentation helpers ------------------------------------------------
@@ -811,11 +843,42 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=_plans_markup(rec))
 
 
+async def cmd_shows(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_login(update):
+        return
+    try:
+        shows = await _call(update, fetch_keyhole_shows)
+    except (BackendError, RuntimeError, NetError) as exc:
+        await _txt(update, f"Could not load show schedule: {exc}")
+        return
+
+    if not shows:
+        await _txt(update, "📹 No public shows currently scheduled. Use /models to request a private show with Chloe or Bailey!")
+        return
+
+    lines = ["📹 Upcoming & Live KEYHOLE WebCam Shows:\n"]
+    btns = []
+    for s in shows:
+        st = s.get("status", "SCHEDULED")
+        status_icon = "🔴 LIVE NOW" if st == "LIVE" else "📅 SCHEDULED"
+        char = (s.get("character_id") or "").capitalize()
+        title = s.get("title") or f"Show with {char}"
+        price = s.get("price", 4.99)
+        lines.append(f"• {status_icon} — {title}\n  Model: {char} | Price: ${price}")
+        btns.append([InlineKeyboardButton(f"🎟️ Get Pass (${price}) — {char}", callback_data=f"buy_show:{s['show_id']}")])
+
+    await update.effective_message.reply_text(
+        "\n\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(btns) if btns else None
+    )
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
          "KEYHOLE WebCam Show — Command Reference:\n"
          "/models — view featured live models (Chloe & Bailey)\n"
          "/model <chloe|bailey> — connect with a model\n"
+         "/shows — view upcoming & live public webcam shows\n"
          "/preview — view live webcam media preview\n"
          "/show — return to the main lounge\n"
          "/audit — view model profile & state\n"
@@ -848,6 +911,7 @@ def main():
     app.add_handler(CommandHandler("logout", cmd_logout))
     app.add_handler(CommandHandler(["models", "girls"], cmd_models))
     app.add_handler(CommandHandler(["model", "girl"], cmd_girl))
+    app.add_handler(CommandHandler("shows", cmd_shows))
     app.add_handler(CommandHandler("preview", cmd_preview))
     app.add_handler(CommandHandler(["show", "house"], cmd_house))
     app.add_handler(CommandHandler("audit", cmd_audit))

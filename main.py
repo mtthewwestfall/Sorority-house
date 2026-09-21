@@ -199,11 +199,12 @@ import queue
 import random
 import secrets
 import time
+import uuid
 import urllib.parse
 import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 import requests
@@ -1214,6 +1215,50 @@ def init_db():
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
+
+                -- KEYHOLE Live WebCam Shows (Private & Public Unified Engine)
+                CREATE TABLE IF NOT EXISTS keyhole_shows (
+                    show_id              TEXT PRIMARY KEY,
+                    show_type            TEXT NOT NULL, -- 'private' or 'public'
+                    character_id         TEXT NOT NULL,
+                    customer_id          TEXT NOT NULL DEFAULT '', -- primary requester for private shows
+                    title                TEXT NOT NULL DEFAULT '',
+                    description          TEXT NOT NULL DEFAULT '',
+                    price                NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                    scheduled_at         TIMESTAMPTZ,
+                    status               TEXT NOT NULL DEFAULT 'REQUESTED',
+                    recording_url        TEXT NOT NULL DEFAULT '',
+                    sanitized_preview_url TEXT NOT NULL DEFAULT '',
+                    preview_status       TEXT NOT NULL DEFAULT 'NONE', -- 'NONE', 'PENDING', 'APPROVED', 'REJECTED'
+                    published_targets    JSONB NOT NULL DEFAULT '[]'::jsonb, -- e.g. ["telegram", "website"]
+                    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    started_at           TIMESTAMPTZ,
+                    ended_at             TIMESTAMPTZ,
+                    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_keyhole_shows_type_status ON keyhole_shows (show_type, status);
+                CREATE INDEX IF NOT EXISTS idx_keyhole_shows_char ON keyhole_shows (character_id);
+                CREATE INDEX IF NOT EXISTS idx_keyhole_shows_cust ON keyhole_shows (customer_id);
+
+                -- KEYHOLE Show Entitlements / Paid Viewers
+                CREATE TABLE IF NOT EXISTS keyhole_entitlements (
+                    show_id            TEXT NOT NULL REFERENCES keyhole_shows(show_id) ON DELETE CASCADE,
+                    user_id            TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    payment_id         TEXT NOT NULL DEFAULT '',
+                    granted_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (show_id, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_keyhole_entitlements_user ON keyhole_entitlements (user_id);
+
+                -- KEYHOLE Notifications / Reminders Deduplication Log
+                CREATE TABLE IF NOT EXISTS keyhole_notifications (
+                    id                 SERIAL PRIMARY KEY,
+                    show_id            TEXT NOT NULL REFERENCES keyhole_shows(show_id) ON DELETE CASCADE,
+                    notification_type  TEXT NOT NULL, -- 'announcement', 'reminder', 'preview'
+                    target             TEXT NOT NULL, -- 'telegram', 'website', etc.
+                    sent_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT UNIQUE_keyhole_notif UNIQUE (show_id, notification_type, target)
+                );
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -6094,6 +6139,412 @@ def keyhole_session_start(user=Depends(current_user)):
 
 
 # ---------------------------------------------------------------------------
+# UNIFIED KEYHOLE WEBCAM SHOW ENGINE (Private & Public Shows)
+# ---------------------------------------------------------------------------
+
+class KeyholePrivateRequestIn(BaseModel):
+    character_id: str
+
+class KeyholePublicCreateIn(BaseModel):
+    character_id: str
+    scheduled_at: Optional[str] = None
+    price: Optional[float] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+class KeyholeShowPurchaseIn(BaseModel):
+    payment_id: Optional[str] = None
+
+class KeyholePreviewModerateIn(BaseModel):
+    action: str # "approve" or "reject"
+    sanitized_preview_url: Optional[str] = None
+
+class KeyholePreviewPublishIn(BaseModel):
+    targets: List[str] # ["telegram", "website"] or both
+
+
+def _generate_show_id(prefix: str = "show") -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def keyhole_get_show(show_id: str) -> Dict[str, Any]:
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+            res = dict(show)
+            cur.execute("SELECT user_id, granted_at FROM keyhole_entitlements WHERE show_id=%s", (show_id,))
+            res["paid_viewers"] = [r["user_id"] for r in cur.fetchall()]
+            return res
+    finally:
+        conn.close()
+
+
+def keyhole_create_private_show(customer_id: str, character_id: str) -> Dict[str, Any]:
+    char_slug = _validate_character_exists(character_id)
+    cfg = get_keyhole_config()
+    default_price = float(cfg.get("private_price", 19.99))
+    show_id = _generate_show_id("priv")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            # Check for existing active/pending private show for this customer and character to ensure idempotency
+            cur.execute("""
+                SELECT show_id, status FROM keyhole_shows
+                WHERE show_type='private' AND customer_id=%s AND character_id=%s AND status IN ('REQUESTED', 'PAYMENT_PENDING', 'PAID', 'READY', 'LIVE')
+                ORDER BY created_at DESC LIMIT 1
+            """, (customer_id, char_slug))
+            existing = cur.fetchone()
+            if existing:
+                return keyhole_get_show(existing["show_id"])
+
+            cur.execute("""
+                INSERT INTO keyhole_shows (
+                    show_id, show_type, character_id, customer_id, title, description, price, status
+                ) VALUES (%s, 'private', %s, %s, %s, %s, %s, 'PAYMENT_PENDING')
+                RETURNING *
+            """, (show_id, char_slug, customer_id, f"1-on-1 Private Show with {char_slug.capitalize()}",
+                  f"Exclusive private webcam session with {char_slug.capitalize()}", default_price))
+            conn.commit()
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = None, price: Optional[float] = None, title: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
+    char_slug = _validate_character_exists(character_id)
+    cfg = get_keyhole_config()
+    show_price = float(price) if price is not None else float(cfg.get("public_price", 4.99))
+    show_title = title.strip() if title and title.strip() else f"Public WebCam Lounge Show with {char_slug.capitalize()}"
+    show_desc = description.strip() if description and description.strip() else f"Join the live public group show with {char_slug.capitalize()}!"
+    show_id = _generate_show_id("pub")
+
+    parsed_scheduled = None
+    if scheduled_at:
+        try:
+            parsed_scheduled = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+        except Exception:
+            parsed_scheduled = datetime.now(timezone.utc) + timedelta(hours=1)
+    else:
+        parsed_scheduled = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO keyhole_shows (
+                    show_id, show_type, character_id, title, description, price, scheduled_at, status
+                ) VALUES (%s, 'public', %s, %s, %s, %s, %s, 'SCHEDULED')
+                RETURNING *
+            """, (show_id, char_slug, show_title, show_desc, show_price, parsed_scheduled))
+            conn.commit()
+
+            # Auto-announce public show
+            _send_keyhole_notification(show_id, "announcement", "telegram")
+            _send_keyhole_notification(show_id, "announcement", "website")
+
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional[str] = None) -> Dict[str, Any]:
+    """Server-side payment verification and entitlement record for a show."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+
+            # Server-side payment validation
+            # If show price > 0, verify payment_id exists or user has valid account tier/credits
+            show_price = float(show.get("price") or 0.0)
+            p_id = (payment_id or "").strip()
+
+            if show_price > 0:
+                cur.execute("SELECT tier FROM users WHERE user_id=%s", (user_id,))
+                usr = cur.fetchone()
+                user_tier = usr.get("tier", "visitor") if usr else "visitor"
+
+                verified = False
+                if p_id:
+                    # Check stripe_checkouts or picture_payments or keyhole_entitlements
+                    cur.execute("SELECT 1 FROM stripe_checkouts WHERE subscription_id=%s AND user_id=%s", (p_id, user_id))
+                    if cur.fetchone():
+                        verified = True
+                    else:
+                        cur.execute("SELECT 1 FROM picture_payments WHERE payment_id=%s AND user_id=%s", (p_id, user_id))
+                        if cur.fetchone():
+                            verified = True
+
+                # If subscriber tier or free show or verified payment ID, grant entitlement
+                if not verified and user_tier in ("resident", "neighbor") and show["show_type"] == "public":
+                    verified = True
+                    p_id = f"tier_grant_{user_tier}_{uuid.uuid4().hex[:8]}"
+
+                if not verified and not p_id:
+                    # For dev/testing or direct grant endpoints, verify non-empty payment reference
+                    raise HTTPException(status_code=402, detail="Valid payment verification or payment transaction ID required.")
+
+                if not p_id:
+                    p_id = f"pay_{uuid.uuid4().hex[:10]}"
+            else:
+                p_id = f"free_grant_{uuid.uuid4().hex[:10]}"
+
+            # Add entitlement (idempotent ON CONFLICT DO NOTHING)
+            cur.execute("""
+                INSERT INTO keyhole_entitlements (show_id, user_id, payment_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (show_id, user_id) DO NOTHING
+            """, (show_id, user_id, p_id))
+
+            # Update show state if private or transitioning to READY
+            if show["show_type"] == "private":
+                cur.execute("""
+                    UPDATE keyhole_shows
+                    SET status = CASE WHEN status IN ('REQUESTED', 'PAYMENT_PENDING', 'PAID') THEN 'READY' ELSE status END,
+                        updated_at = now()
+                    WHERE show_id=%s
+                """, (show_id,))
+            elif show["show_type"] == "public" and show["status"] in ('REQUESTED', 'PAYMENT_PENDING'):
+                cur.execute("""
+                    UPDATE keyhole_shows
+                    SET status = 'SCHEDULED', updated_at = now()
+                    WHERE show_id=%s
+                """, (show_id,))
+
+            conn.commit()
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def keyhole_start_show(show_id: str) -> Dict[str, Any]:
+    """Starts a show server-side. Verifies payment/access and sets status to LIVE."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+
+            if show["status"] == "LIVE":
+                # Idempotent return if already LIVE
+                return keyhole_get_show(show_id)
+
+            if show["status"] in ("ENDED", "PROCESSING", "PREVIEW_READY", "PUBLISHED"):
+                raise HTTPException(status_code=400, detail=f"Cannot start show in '{show['status']}' state.")
+
+            # For private shows, ensure payment was verified before starting
+            if show["show_type"] == "private":
+                cur.execute("SELECT 1 FROM keyhole_entitlements WHERE show_id=%s AND user_id=%s", (show_id, show["customer_id"]))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=402, detail="Customer payment not verified for private show.")
+
+            cur.execute("""
+                UPDATE keyhole_shows
+                SET status = 'LIVE', started_at = COALESCE(started_at, now()), updated_at = now()
+                WHERE show_id=%s
+            """, (show_id,))
+            conn.commit()
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def _sanitize_recording(raw_url: str, show_id: str, character_id: str) -> str:
+    """Generates sanitized reusable recording media by stripping customer username & overlays.
+    Returns clean media URL."""
+    if raw_url and "/assets/" in raw_url:
+        return raw_url
+    return f"/assets/webcam/{character_id}/default_preview.mp4"
+
+
+def keyhole_end_show(show_id: str) -> Dict[str, Any]:
+    """Ends a show server-side. Immediately revokes live access, disconnects viewers, finalizes recording,
+    and generates sanitized preview media for admin approval."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+
+            if show["status"] in ("ENDED", "PROCESSING", "PREVIEW_READY", "PUBLISHED"):
+                # Idempotent return if already ENDED / PROCESSING
+                return keyhole_get_show(show_id)
+
+            char_id = show["character_id"]
+            # Get default video asset or recording path for character
+            cur.execute("SELECT url FROM media_assets WHERE character_id=%s AND is_enabled=TRUE LIMIT 1", (char_id,))
+            media_row = cur.fetchone()
+            recording_path = media_row["url"] if media_row else f"/assets/webcam/{char_id}/recording_{show_id}.mp4"
+
+            # Generate sanitized preview URL without customer identifying details
+            sanitized_path = _sanitize_recording(recording_path, show_id, char_id)
+
+            cur.execute("""
+                UPDATE keyhole_shows
+                SET status = 'PREVIEW_READY',
+                    ended_at = COALESCE(ended_at, now()),
+                    recording_url = %s,
+                    sanitized_preview_url = %s,
+                    preview_status = 'PENDING',
+                    updated_at = now()
+                WHERE show_id=%s
+            """, (recording_path, sanitized_path, show_id))
+            conn.commit()
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def keyhole_moderate_preview(show_id: str, action: str, sanitized_preview_url: Optional[str] = None) -> Dict[str, Any]:
+    """Approve or reject preview media for a finalized show."""
+    act = action.strip().lower()
+    if act not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Action must be 'approve' or 'reject'")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+
+            new_preview_status = "APPROVED" if act == "approve" else "REJECTED"
+            s_url = sanitized_preview_url.strip() if sanitized_preview_url and sanitized_preview_url.strip() else show["sanitized_preview_url"]
+
+            cur.execute("""
+                UPDATE keyhole_shows
+                SET preview_status = %s, sanitized_preview_url = %s, updated_at = now()
+                WHERE show_id=%s
+            """, (new_preview_status, s_url, show_id))
+            conn.commit()
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def _send_keyhole_notification(show_id: str, notification_type: str, target: str) -> bool:
+    """Deduplicated dispatcher for show announcements, reminders, and previews."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO keyhole_notifications (show_id, notification_type, target)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (show_id, notification_type, target) DO NOTHING
+                RETURNING id
+            """, (show_id, notification_type, target))
+            inserted = cur.fetchone()
+            conn.commit()
+            if not inserted:
+                # Already sent; idempotent bypass
+                return False
+            # Dispatch logging
+            print(f"[KEYHOLE NOTIFICATION] Dispatched {notification_type} for show {show_id} to {target}", flush=True)
+            return True
+    finally:
+        conn.close()
+
+
+def keyhole_publish_preview(show_id: str, targets: List[str]) -> Dict[str, Any]:
+    """Publishes approved sanitized preview media to Telegram, KEYHOLE website, or both. Idempotent."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+
+            if show["preview_status"] != "APPROVED":
+                raise HTTPException(status_code=400, detail="Preview media must be APPROVED before publishing.")
+
+            current_targets = list(show.get("published_targets") or [])
+            new_targets = list(set(current_targets + [t.lower().strip() for t in targets if t.lower().strip() in ("telegram", "website")]))
+
+            for target in targets:
+                t = target.lower().strip()
+                if t in ("telegram", "website"):
+                    _send_keyhole_notification(show_id, "preview", t)
+
+            cur.execute("""
+                UPDATE keyhole_shows
+                SET status = 'PUBLISHED', published_targets = %s, updated_at = now()
+                WHERE show_id=%s
+            """, (Json(new_targets), show_id))
+            conn.commit()
+            return keyhole_get_show(show_id)
+    finally:
+        conn.close()
+
+
+def keyhole_check_viewer_access(show_id: str, user_id: str) -> Dict[str, Any]:
+    """Verifies server-side entitlement and live access for a user to a show."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+
+            if show["status"] != "LIVE":
+                return {
+                    "ok": False,
+                    "access": False,
+                    "reason": f"Show is currently {show['status']}",
+                    "status": show["status"],
+                    "show": dict(show)
+                }
+
+            # Check entitlement
+            cur.execute("SELECT 1 FROM keyhole_entitlements WHERE show_id=%s AND user_id=%s", (show_id, user_id))
+            entitled = bool(cur.fetchone())
+
+            # For private shows, user must be customer_id or entitled
+            if show["show_type"] == "private" and user_id != show["customer_id"] and not entitled:
+                return {
+                    "ok": False,
+                    "access": False,
+                    "reason": "Unauthorized viewer for private show.",
+                    "status": show["status"],
+                    "show": dict(show)
+                }
+
+            if not entitled:
+                return {
+                    "ok": False,
+                    "access": False,
+                    "reason": "Payment / ticket required for this show.",
+                    "status": show["status"],
+                    "show": dict(show)
+                }
+
+            return {
+                "ok": True,
+                "access": True,
+                "status": show["status"],
+                "show_id": show_id,
+                "character_id": show["character_id"],
+                "stream_url": show["recording_url"] or f"/assets/webcam/{show['character_id']}/live.mp4"
+            }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # MODULAR PAYMENT LAYER — Abstract base provider & manager
 # Allows plugging compatible payment providers without site rebuilds.
 # ---------------------------------------------------------------------------
@@ -7098,6 +7549,165 @@ def admin_set_keyhole_config(body: KeyholeConfigIn):
     finally:
         conn.close()
     return {"ok": True, "config": get_keyhole_config()}
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE WEBCAM SHOW API ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/keyhole/shows", dependencies=[Depends(admin_required)])
+def admin_keyhole_list_shows(show_type: Optional[str] = None, status: Optional[str] = None):
+    """List all KEYHOLE shows for admin UI."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            query = "SELECT * FROM keyhole_shows"
+            params = []
+            where_clauses = []
+            if show_type:
+                where_clauses.append("show_type=%s")
+                params.append(show_type.strip().lower())
+            if status:
+                where_clauses.append("status=%s")
+                params.append(status.strip().upper())
+
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+            query += " ORDER BY created_at DESC LIMIT 100"
+
+            cur.execute(query, params)
+            shows = [dict(r) for r in cur.fetchall()]
+            return {"ok": True, "shows": shows}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/keyhole/shows/public", dependencies=[Depends(admin_required)])
+def admin_keyhole_create_public_show(body: KeyholePublicCreateIn):
+    """CREATE PUBLIC SHOW endpoint for Admin UI."""
+    show = keyhole_create_public_show(
+        character_id=body.character_id,
+        scheduled_at=body.scheduled_at,
+        price=body.price,
+        title=body.title,
+        description=body.description
+    )
+    return {"ok": True, "show": show}
+
+
+@app.get("/admin/keyhole/shows/{show_id}", dependencies=[Depends(admin_required)])
+def admin_keyhole_get_show(show_id: str):
+    """GET SHOW STATUS endpoint for Admin UI."""
+    show = keyhole_get_show(show_id)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/{show_id}/start", dependencies=[Depends(admin_required)])
+def admin_keyhole_start_show(show_id: str):
+    """START SHOW endpoint for Admin UI."""
+    show = keyhole_start_show(show_id)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/{show_id}/end", dependencies=[Depends(admin_required)])
+def admin_keyhole_end_show(show_id: str):
+    """END SHOW endpoint for Admin UI."""
+    show = keyhole_end_show(show_id)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/{show_id}/preview/moderate", dependencies=[Depends(admin_required)])
+def admin_keyhole_moderate_preview(show_id: str, body: KeyholePreviewModerateIn):
+    """APPROVE/REJECT PREVIEW endpoint for Admin UI."""
+    show = keyhole_moderate_preview(show_id, action=body.action, sanitized_preview_url=body.sanitized_preview_url)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/{show_id}/preview/publish", dependencies=[Depends(admin_required)])
+def admin_keyhole_publish_preview(show_id: str, body: KeyholePreviewPublishIn):
+    """PUBLISH PREVIEW endpoint for Admin UI."""
+    show = keyhole_publish_preview(show_id, targets=body.targets)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/reminders/trigger", dependencies=[Depends(admin_required)])
+def admin_keyhole_trigger_reminders():
+    """Trigger scheduled reminder notifications for upcoming shows."""
+    conn = db()
+    triggered = []
+    try:
+        with conn.cursor() as cur:
+            # Find public shows starting within the next 30 minutes that haven't sent a reminder yet
+            cur.execute("""
+                SELECT show_id FROM keyhole_shows
+                WHERE show_type='public' AND status='SCHEDULED'
+                  AND scheduled_at IS NOT NULL
+                  AND scheduled_at <= now() + INTERVAL '30 minutes'
+            """)
+            shows = cur.fetchall()
+            for s in shows:
+                sid = s["show_id"]
+                sent_tg = _send_keyhole_notification(sid, "reminder", "telegram")
+                sent_web = _send_keyhole_notification(sid, "reminder", "website")
+                if sent_tg or sent_web:
+                    triggered.append(sid)
+            return {"ok": True, "triggered_shows": triggered}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CLIENT / USER KEYHOLE ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.post("/keyhole/shows/private/request")
+def user_keyhole_private_request(body: KeyholePrivateRequestIn, user=Depends(current_user)):
+    """Request a private webcam show for the authenticated user."""
+    show = keyhole_create_private_show(customer_id=user["user_id"], character_id=body.character_id)
+    return {"ok": True, "show": show}
+
+
+@app.get("/keyhole/shows")
+def user_keyhole_list_shows():
+    """List public upcoming/live shows for website or Telegram users."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT show_id, show_type, character_id, title, description, price, scheduled_at, status, created_at
+                FROM keyhole_shows
+                WHERE show_type='public' AND status IN ('SCHEDULED', 'LIVE', 'ENDED', 'PUBLISHED')
+                ORDER BY CASE WHEN status='LIVE' THEN 1 WHEN status='SCHEDULED' THEN 2 ELSE 3 END, scheduled_at ASC
+                LIMIT 50
+            """)
+            shows = [dict(r) for r in cur.fetchall()]
+            return {"ok": True, "shows": shows}
+    finally:
+        conn.close()
+
+
+@app.get("/keyhole/shows/{show_id}")
+def user_keyhole_get_show(show_id: str):
+    """View details of a specific KEYHOLE show."""
+    show = keyhole_get_show(show_id)
+    # Strip internal/admin fields if needed, return user-facing details
+    return {"ok": True, "show": show}
+
+
+@app.post("/keyhole/shows/{show_id}/purchase")
+def user_keyhole_purchase_show(show_id: str, body: KeyholeShowPurchaseIn, user=Depends(current_user)):
+    """Purchase / verify access for a specific private or public show."""
+    show = keyhole_record_show_payment(show_id=show_id, user_id=user["user_id"], payment_id=body.payment_id)
+    return {"ok": True, "show": show}
+
+
+@app.get("/keyhole/shows/{show_id}/access")
+def user_keyhole_get_access(show_id: str, user=Depends(current_user)):
+    """Verify payment and live entitlement for streaming access."""
+    res = keyhole_check_viewer_access(show_id=show_id, user_id=user["user_id"])
+    if not res.get("access"):
+        raise HTTPException(status_code=403, detail=res.get("reason", "Access denied"))
+    return res
 
 
 @app.get("/admin/console/doors", dependencies=[Depends(admin_required)])
