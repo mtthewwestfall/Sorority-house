@@ -2459,7 +2459,7 @@ const PRESET_FACES = {
 
     async function streamCompanionReply(message, typing) {
       const companionId = currentCompanionId;
-      turnSeq++;
+      const seq = ++turnSeq;
       abortStream();
       const controller = new AbortController();
       streamAbort = controller;
@@ -2488,7 +2488,7 @@ const PRESET_FACES = {
       let failed = null;
 
       const handle = (event, data) => {
-        if (companionId !== currentCompanionId) return;   // room changed; drop the rest
+        if (seq !== turnSeq || companionId !== currentCompanionId) return;   // room or turn changed; drop the rest
         if (event === 'delta' && data.t) {
           if (!bubble) { typing.remove(); markRead(); bubble = addMessage('her', ''); }
           bubble.textContent += data.t;
@@ -2518,7 +2518,7 @@ const PRESET_FACES = {
         }
       }
       if (streamAbort === controller) streamAbort = null;
-      if (!bubble && companionId === currentCompanionId) {
+      if (!bubble && seq === turnSeq && companionId === currentCompanionId) {
         typing.remove();
         addMessage('error', failed === 'she_did_not_answer' ? 'They went quiet. Try again in a moment.' : (failed || 'They did not answer. Try again in a moment.'));
       }
@@ -2527,7 +2527,7 @@ const PRESET_FACES = {
 
     async function sendCompanionReply(message, typing) {
       const companionId = currentCompanionId;
-      turnSeq++;
+      const seq = ++turnSeq;
       abortStream();
       const controller = new AbortController();
       streamAbort = controller;
@@ -2540,7 +2540,7 @@ const PRESET_FACES = {
       const data = await response.json().catch(() => null);
       if (streamAbort === controller) streamAbort = null;
       typing.remove();
-      if (companionId !== currentCompanionId) return;   // room changed; drop the reply
+      if (seq !== turnSeq || companionId !== currentCompanionId) return;   // room or turn changed; drop the reply
       if (response.status === 401) {
         addMessage('note', 'Your session ended. Sign in to keep talking.');
         handleUnauthorized();
@@ -2570,6 +2570,8 @@ const PRESET_FACES = {
       if (currentCompanionId) {
         try {
           if (!streamSupported || !(await streamCompanionReply(message, typing))) {
+            // Note: if streamCompanionReply returned false (404/405), fallback to sendCompanionReply.
+            // Allowance was not decremented on stream 404/405 because preflight runs per endpoint.
             await sendCompanionReply(message, typing);
           }
         } catch (error) {

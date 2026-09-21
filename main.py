@@ -2306,12 +2306,29 @@ async def _type_out_companion(request, user_id, companion_id, comp, msgs, user_m
 
         reply = "".join(typed).strip()
         if not reply:
-            yield _sse("error", {"detail": "she_did_not_answer"})
+            if not await request.is_disconnected():
+                yield _sse("error", {"detail": "she_did_not_answer"})
             return
         await asyncio.to_thread(_persist_companion_turn, user_id, companion_id, user_message, reply)
         logged = True
-        _BRAIN_POOL.submit(_refresh_companion_brain, user_id, companion_id)
-        done_payload = {"remaining": remaining, "milestone": int(comp.get("milestone", 1))}
+        # Run companion brain refresh synchronously to reflect any milestone advance immediately
+        await asyncio.to_thread(_refresh_companion_brain, user_id, companion_id)
+        # Fetch updated milestone if advanced
+        current_milestone = int(comp.get("milestone", 1))
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT milestone FROM companions WHERE id=%s AND user_id=%s", (companion_id, user_id))
+                    m_row = cur.fetchone()
+                    if m_row:
+                        current_milestone = int(m_row["milestone"])
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+        done_payload = {"remaining": remaining, "milestone": current_milestone}
         if picture_due:
             done_payload["picture_due"] = True
         yield _sse("done", done_payload)
