@@ -496,18 +496,54 @@ def tier_rank(tier):
 # door text, art and the tier she is sold on, all editable afterwards.
 ROSTER_SEED = [
     # slug, min_tier, order, avatar, door blurb
-    ("bailey",   "visitor",  10, "assets/portraits/bailey.jpg",
+    ("dakota",   "visitor",  10, "assets/dakota.jpg?v=3",
+     "Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm—but trust is earned slowly."),
+    ("zoe",      "visitor",  20, "assets/zoe.jpg?v=3",
+     "Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets."),
+    ("willow",   "visitor",  30, "assets/willow.jpg?v=3",
+     "Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe."),
+    ("brittany", "visitor",  40, "assets/brittany.jpg?v=2",
+     "Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else."),
+    ("sasha",    "visitor",  50, "assets/sasha.webp?v=2",
+     "Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve."),
+    ("piper",    "visitor",  60, "assets/piper.jpg?v=3",
+     "Composed, watchful, and impossible to rush. Say something true instead of something clever."),
+    ("veronica", "visitor",  70, "assets/veronica.webp?v=2",
+     "The town clerk who makes everyone feel chosen. Flawless hosting is her armor. Earn her by refusing to be hosted."),
+    ("matt",     "visitor",  80, "assets/matt.jpg",
+     "Sheriff of God's Greek. Fixes your taillight instead of writing the ticket; carries the town's weight quietly."),
+    ("dean",     "visitor",  90, "assets/dean.jpg?v=3",
+     "The town doctor. The man God's Greek trusts with its worst days — calm under pressure, kind when it counts."),
+    ("ty",       "visitor", 100, "assets/ty.jpg?v=3",
+     "Hardware store owner. The young man who can find anything in the store — handy, honest, easy to talk to."),
+    ("billy",    "visitor", 110, "assets/billy.jpg?v=3",
+     "Diner cook. The man behind the grill who never lets a plate go out wrong — gruff, loyal, softer than he looks."),
+    ("kristen",  "visitor", 120, "assets/kristen.jpg",
+     "The town veterinarian. The woman the animals trust first — gentle hands, sharp eyes, quiet confidence."),
+    ("ryan",     "visitor", 130, "assets/ryan.jpg?v=3",
+     "Town lawyer. The man the town tells the truth to — sharp, discreet, harder to read than he looks."),
+    ("darwin",   "visitor", 140, "assets/darwin.jpg?v=3",
+     "The town librarian. Keeper of the quietest room in God's Greek — remembers every book and every borrower."),
+    ("jordan",   "visitor", 150, "assets/jordan.jpg",
+     "Deputy sheriff. The law's youngest true believer — earnest, brave, and still proving herself."),
+    ("mia",      "visitor", 160, "assets/mia.jpg?v=3",
+     "News reporter. The woman who knows everything first — curious, quick, always chasing the real story."),
+    ("anna",     "visitor", 170, "assets/anna.jpg?v=3",
+     "EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together."),
+    ("bailey",   "visitor", 180, "assets/portraits/bailey.jpg",
      "Potter at the edge of town. Sharp, funny, deliberately too much — she dares you to dislike her so she controls the rejection. Outlast the dare."),
-    ("carmen",   "visitor",  20, "assets/portraits/carmen.jpg",
+    ("carmen",   "visitor", 181, "assets/portraits/carmen.jpg",
      "Sultry, confident, and warm. Carmen commands the room with effortless charm and playful elegance."),
-    ("chloe",    "visitor",  30, "assets/portraits/chloe.jpg",
+    ("chloe",    "visitor", 182, "assets/portraits/chloe.jpg",
      "Bouncy, energetic, and bright. Chloe brings lighthearted laughter and undeniable charm to every exchange."),
-    ("valentina", "visitor", 40, "assets/portraits/valentina.jpg",
+    ("valentina", "visitor", 183, "assets/portraits/valentina.jpg",
      "Elegant, deep, and poetic. Valentina speaks with thoughtful grace and captivating intensity."),
-    ("riley",    "visitor",  50, "assets/portraits/riley.jpg",
+    ("riley",    "visitor", 184, "assets/portraits/riley.jpg",
      "Down-to-earth, relaxed, and genuinely friendly. Riley makes you feel instantly comfortable."),
-    ("maya",     "visitor",  60, "assets/portraits/maya.jpg",
+    ("maya",     "visitor", 185, "assets/portraits/maya.jpg",
      "Curious, soft-spoken, and intimate. Maya notices the smallest details and listens with heartfelt care."),
+    ("sarah",    "visitor", 190, "assets/sarah.jpg",
+     "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real answer."),
 ]
 
 
@@ -3597,17 +3633,6 @@ def _portrait_bytes(avatar_url):
     stored URL can never point the server at something else."""
     if not avatar_url or "://" in avatar_url or avatar_url.startswith("//"):
         return None
-    clean_path = avatar_url.split("?")[0].lstrip("/")
-    for candidate in [os.path.join("web", clean_path), clean_path]:
-        if os.path.isfile(candidate):
-            try:
-                mime = "image/png" if candidate.endswith(".png") else "image/webp" if candidate.endswith(".webp") else "image/jpeg"
-                with open(candidate, "rb") as f:
-                    buf = f.read()
-                if buf and len(buf) <= PORTRAIT_MAX_BYTES:
-                    return (mime, buf)
-            except OSError:
-                pass
     url = f"{SITE_URL}/{avatar_url.lstrip('/')}"
     try:
         with requests.get(url, timeout=15, stream=True, allow_redirects=False) as r:
@@ -5186,6 +5211,193 @@ def set_persona(body: PersonaIn):
     return {"ok": True, "girl": girl}
 
 
+class CreatorCaptureIn(BaseModel):
+    girl: str
+    media_type: str  # "picture" or "video"
+    tier_access: str  # "premade_pictures", "fresh_videos", etc.
+    media_url: str
+    caption: Optional[str] = ""
+
+@app.post("/admin/creator/capture", dependencies=[Depends(admin_required)])
+def admin_creator_capture(body: CreatorCaptureIn):
+    """Save captured video/picture media and assign it to character keyhole tier libraries."""
+    if not body.girl.strip() or not body.media_url.strip():
+        raise HTTPException(status_code=400, detail="girl and media_url are required")
+    return {
+        "status": "success",
+        "message": f"Media assigned to {body.girl} for tier access '{body.tier_access}'.",
+        "entry": {
+            "girl": body.girl,
+            "type": body.media_type,
+            "tier_access": body.tier_access,
+            "url": body.media_url,
+            "caption": body.caption
+        }
+    }
+
+
+class SkinningIn(BaseModel):
+    girl: str
+    theme_color: Optional[str] = "#2F4A3C"
+    background_url: Optional[str] = ""
+    accent_style: Optional[str] = "sandalwood"
+
+@app.post("/admin/creator/skinning", dependencies=[Depends(admin_required)])
+def admin_creator_skinning(body: SkinningIn):
+    """Apply visual skinning customization (themes, background wallpaper, accent styling) for a sister."""
+    return {
+        "status": "success",
+        "girl": body.girl,
+        "skin": {
+            "theme_color": body.theme_color,
+            "background_url": body.background_url,
+            "accent_style": body.accent_style
+        },
+        "message": f"Custom skin applied for {body.girl}."
+    }
+
+
+class ApplyVoiceIn(BaseModel):
+    recording_id: str
+    character_id: str
+
+class ApproveMediaIn(BaseModel):
+    draft_id: str
+    tier_access: str = "keyhole_299"
+    caption: Optional[str] = ""
+
+class ReplaceMediaIn(BaseModel):
+    existing_media_id: str
+    new_draft_id: str
+
+@app.get("/admin/creator/voice-profiles", dependencies=[Depends(admin_required)])
+def admin_creator_voice_profiles():
+    """Get active KEYHOLE character voice profiles."""
+    return {"status": "success", "profiles": KEYHOLE_VOICE_PROFILES}
+
+@app.post("/admin/creator/apply-voice", dependencies=[Depends(admin_required)])
+def admin_creator_apply_voice(body: ApplyVoiceIn):
+    """Processes raw performance audio with the character's voice profile, keeping raw performance intact."""
+    rec_id = body.recording_id.strip()
+    char_id = body.character_id.strip().lower()
+    if char_id not in KEYHOLE_VOICE_PROFILES:
+        raise HTTPException(status_code=400, detail=f"Unknown character '{char_id}'. Available: {list(KEYHOLE_VOICE_PROFILES.keys())}")
+
+    raw_perf = RAW_PERFORMANCES.get(rec_id)
+    if not raw_perf:
+        raw_perf = {
+            "id": rec_id,
+            "media_url": f"blob:raw_{rec_id}",
+            "raw_audio": b"RAW_AUDIO_STREAM_PLACEHOLDER",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        RAW_PERFORMANCES[rec_id] = raw_perf
+
+    voice_profile = KEYHOLE_VOICE_PROFILES[char_id]
+    transformed_audio = voice_provider.transform_voice(raw_perf.get("raw_audio", b""), voice_profile)
+    draft_id = f"draft_{rec_id}_{char_id}_{int(time.time())}"
+
+    draft_entry = {
+        "id": draft_id,
+        "recording_id": rec_id,
+        "character_id": char_id,
+        "voice_profile": voice_profile,
+        "raw_media_url": raw_perf["media_url"],
+        "transformed_audio_b64": base64.b64encode(transformed_audio).decode("utf-8"),
+        "preview_url": f"/admin/creator/preview-voice/{draft_id}",
+        "approved": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    TRANSFORMED_DRAFTS[draft_id] = draft_entry
+
+    return {
+        "status": "success",
+        "message": f"Transformed voice profile '{voice_profile['name']}' applied to recording '{rec_id}'.",
+        "draft": draft_entry
+    }
+
+@app.get("/admin/creator/preview-voice/{draft_id}", dependencies=[Depends(admin_required)])
+def admin_creator_preview_voice(draft_id: str):
+    """Administrative preview of transformed audio/video before customer visibility. Never charges customer credits."""
+    draft = TRANSFORMED_DRAFTS.get(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Transformed voice draft not found")
+    return {
+        "status": "success",
+        "draft_id": draft_id,
+        "character": draft["character_id"],
+        "voice_name": draft["voice_profile"]["name"],
+        "raw_recording_id": draft["recording_id"],
+        "preview_url": draft["preview_url"],
+        "transformed_audio_b64": draft["transformed_audio_b64"],
+        "is_customer_visible": draft["approved"],
+        "credits_charged": 0
+    }
+
+@app.post("/admin/creator/approve-media", dependencies=[Depends(admin_required)])
+def admin_creator_approve_media(body: ApproveMediaIn):
+    """Approve transformed media and assign it to the character's customer-facing KEYHOLE tier library."""
+    draft = TRANSFORMED_DRAFTS.get(body.draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Transformed voice draft not found")
+
+    draft["approved"] = True
+    media_id = f"media_{draft['character_id']}_{int(time.time())}"
+    approved_entry = {
+        "id": media_id,
+        "character_id": draft["character_id"],
+        "voice_name": draft["voice_profile"]["name"],
+        "tier_access": body.tier_access,
+        "caption": body.caption or f"{draft['voice_profile']['name']} Keyhole Performance",
+        "media_url": draft["raw_media_url"],
+        "audio_b64": draft["transformed_audio_b64"],
+        "approved_at": datetime.now(timezone.utc).isoformat()
+    }
+    APPROVED_KEYHOLE_MEDIA[media_id] = approved_entry
+
+    return {
+        "status": "success",
+        "message": f"Media approved and assigned to {draft['character_id']} in tier {body.tier_access}.",
+        "approved_media": approved_entry
+    }
+
+@app.post("/admin/creator/replace-media", dependencies=[Depends(admin_required)])
+def admin_creator_replace_media(body: ReplaceMediaIn):
+    """Replaces an existing customer-visible KEYHOLE media entry with a newly approved version."""
+    if body.existing_media_id in APPROVED_KEYHOLE_MEDIA:
+        del APPROVED_KEYHOLE_MEDIA[body.existing_media_id]
+
+    draft = TRANSFORMED_DRAFTS.get(body.new_draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="New transformed draft not found")
+
+    return admin_creator_approve_media(ApproveMediaIn(draft_id=body.new_draft_id))
+
+@app.delete("/admin/creator/media/{media_id}", dependencies=[Depends(admin_required)])
+def admin_creator_delete_media(media_id: str):
+    """Deletes bad or unneeded recordings, drafts, or approved entries."""
+    deleted_type = []
+    if media_id in RAW_PERFORMANCES:
+        del RAW_PERFORMANCES[media_id]
+        deleted_type.append("raw_performance")
+    if media_id in TRANSFORMED_DRAFTS:
+        del TRANSFORMED_DRAFTS[media_id]
+        deleted_type.append("transformed_draft")
+    if media_id in APPROVED_KEYHOLE_MEDIA:
+        del APPROVED_KEYHOLE_MEDIA[media_id]
+        deleted_type.append("approved_media")
+
+    if not deleted_type:
+        raise HTTPException(status_code=404, detail="Media ID not found in raw, draft, or approved libraries")
+
+    return {
+        "status": "success",
+        "deleted_id": media_id,
+        "removed_from": deleted_type,
+        "message": f"Media item '{media_id}' successfully removed."
+    }
+
+
 def _account_key(email):
     """Normalised account key: an email, or "tg:<telegram_id>" for Telegram-only accounts."""
     email = email.strip().lower()
@@ -6052,193 +6264,6 @@ def admin_console_persona(body: AdminPersonaIn):
         raise HTTPException(status_code=400, detail="name and persona are required")
     return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
                                  persona=body.persona, secret=ADMIN_SECRET))
-
-
-class CreatorCaptureIn(BaseModel):
-    girl: str
-    media_type: str  # "picture" or "video"
-    tier_access: str  # "premade_pictures", "fresh_videos", etc.
-    media_url: str
-    caption: Optional[str] = ""
-
-@app.post("/admin/creator/capture", dependencies=[Depends(admin_required)])
-def admin_creator_capture(body: CreatorCaptureIn):
-    """Save captured video/picture media and assign it to character keyhole tier libraries."""
-    if not body.girl.strip() or not body.media_url.strip():
-        raise HTTPException(status_code=400, detail="girl and media_url are required")
-    return {
-        "status": "success",
-        "message": f"Media assigned to {body.girl} for tier access '{body.tier_access}'.",
-        "entry": {
-            "girl": body.girl,
-            "type": body.media_type,
-            "tier_access": body.tier_access,
-            "url": body.media_url,
-            "caption": body.caption
-        }
-    }
-
-
-class SkinningIn(BaseModel):
-    girl: str
-    theme_color: Optional[str] = "#2F4A3C"
-    background_url: Optional[str] = ""
-    accent_style: Optional[str] = "sandalwood"
-
-@app.post("/admin/creator/skinning", dependencies=[Depends(admin_required)])
-def admin_creator_skinning(body: SkinningIn):
-    """Apply visual skinning customization (themes, background wallpaper, accent styling) for a sister."""
-    return {
-        "status": "success",
-        "girl": body.girl,
-        "skin": {
-            "theme_color": body.theme_color,
-            "background_url": body.background_url,
-            "accent_style": body.accent_style
-        },
-        "message": f"Custom skin applied for {body.girl}."
-    }
-
-
-class ApplyVoiceIn(BaseModel):
-    recording_id: str
-    character_id: str
-
-class ApproveMediaIn(BaseModel):
-    draft_id: str
-    tier_access: str = "keyhole_299"
-    caption: Optional[str] = ""
-
-class ReplaceMediaIn(BaseModel):
-    existing_media_id: str
-    new_draft_id: str
-
-@app.get("/admin/creator/voice-profiles", dependencies=[Depends(admin_required)])
-def admin_creator_voice_profiles():
-    """Get active KEYHOLE character voice profiles."""
-    return {"status": "success", "profiles": KEYHOLE_VOICE_PROFILES}
-
-@app.post("/admin/creator/apply-voice", dependencies=[Depends(admin_required)])
-def admin_creator_apply_voice(body: ApplyVoiceIn):
-    """Processes raw performance audio with the character's voice profile, keeping raw performance intact."""
-    rec_id = body.recording_id.strip()
-    char_id = body.character_id.strip().lower()
-    if char_id not in KEYHOLE_VOICE_PROFILES:
-        raise HTTPException(status_code=400, detail=f"Unknown character '{char_id}'. Available: {list(KEYHOLE_VOICE_PROFILES.keys())}")
-
-    raw_perf = RAW_PERFORMANCES.get(rec_id)
-    if not raw_perf:
-        raw_perf = {
-            "id": rec_id,
-            "media_url": f"blob:raw_{rec_id}",
-            "raw_audio": b"RAW_AUDIO_STREAM_PLACEHOLDER",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        RAW_PERFORMANCES[rec_id] = raw_perf
-
-    voice_profile = KEYHOLE_VOICE_PROFILES[char_id]
-    transformed_audio = voice_provider.transform_voice(raw_perf.get("raw_audio", b""), voice_profile)
-    draft_id = f"draft_{rec_id}_{char_id}_{int(time.time())}"
-
-    draft_entry = {
-        "id": draft_id,
-        "recording_id": rec_id,
-        "character_id": char_id,
-        "voice_profile": voice_profile,
-        "raw_media_url": raw_perf["media_url"],
-        "transformed_audio_b64": base64.b64encode(transformed_audio).decode("utf-8"),
-        "preview_url": f"/admin/creator/preview-voice/{draft_id}",
-        "approved": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    TRANSFORMED_DRAFTS[draft_id] = draft_entry
-
-    return {
-        "status": "success",
-        "message": f"Transformed voice profile '{voice_profile['name']}' applied to recording '{rec_id}'.",
-        "draft": draft_entry
-    }
-
-@app.get("/admin/creator/preview-voice/{draft_id}", dependencies=[Depends(admin_required)])
-def admin_creator_preview_voice(draft_id: str):
-    """Administrative preview of transformed audio/video before customer visibility. Never charges customer credits."""
-    draft = TRANSFORMED_DRAFTS.get(draft_id)
-    if not draft:
-        raise HTTPException(status_code=404, detail="Transformed voice draft not found")
-    return {
-        "status": "success",
-        "draft_id": draft_id,
-        "character": draft["character_id"],
-        "voice_name": draft["voice_profile"]["name"],
-        "raw_recording_id": draft["recording_id"],
-        "preview_url": draft["preview_url"],
-        "transformed_audio_b64": draft["transformed_audio_b64"],
-        "is_customer_visible": draft["approved"],
-        "credits_charged": 0
-    }
-
-@app.post("/admin/creator/approve-media", dependencies=[Depends(admin_required)])
-def admin_creator_approve_media(body: ApproveMediaIn):
-    """Approve transformed media and assign it to the character's customer-facing KEYHOLE tier library."""
-    draft = TRANSFORMED_DRAFTS.get(body.draft_id)
-    if not draft:
-        raise HTTPException(status_code=404, detail="Transformed voice draft not found")
-
-    draft["approved"] = True
-    media_id = f"media_{draft['character_id']}_{int(time.time())}"
-    approved_entry = {
-        "id": media_id,
-        "character_id": draft["character_id"],
-        "voice_name": draft["voice_profile"]["name"],
-        "tier_access": body.tier_access,
-        "caption": body.caption or f"{draft['voice_profile']['name']} Keyhole Performance",
-        "media_url": draft["raw_media_url"],
-        "audio_b64": draft["transformed_audio_b64"],
-        "approved_at": datetime.now(timezone.utc).isoformat()
-    }
-    APPROVED_KEYHOLE_MEDIA[media_id] = approved_entry
-
-    return {
-        "status": "success",
-        "message": f"Media approved and assigned to {draft['character_id']} in tier {body.tier_access}.",
-        "approved_media": approved_entry
-    }
-
-@app.post("/admin/creator/replace-media", dependencies=[Depends(admin_required)])
-def admin_creator_replace_media(body: ReplaceMediaIn):
-    """Replaces an existing customer-visible KEYHOLE media entry with a newly approved version."""
-    if body.existing_media_id in APPROVED_KEYHOLE_MEDIA:
-        del APPROVED_KEYHOLE_MEDIA[body.existing_media_id]
-
-    draft = TRANSFORMED_DRAFTS.get(body.new_draft_id)
-    if not draft:
-        raise HTTPException(status_code=404, detail="New transformed draft not found")
-
-    return admin_creator_approve_media(ApproveMediaIn(draft_id=body.new_draft_id))
-
-@app.delete("/admin/creator/media/{media_id}", dependencies=[Depends(admin_required)])
-def admin_creator_delete_media(media_id: str):
-    """Deletes bad or unneeded recordings, drafts, or approved entries."""
-    deleted_type = []
-    if media_id in RAW_PERFORMANCES:
-        del RAW_PERFORMANCES[media_id]
-        deleted_type.append("raw_performance")
-    if media_id in TRANSFORMED_DRAFTS:
-        del TRANSFORMED_DRAFTS[media_id]
-        deleted_type.append("transformed_draft")
-    if media_id in APPROVED_KEYHOLE_MEDIA:
-        del APPROVED_KEYHOLE_MEDIA[media_id]
-        deleted_type.append("approved_media")
-
-    if not deleted_type:
-        raise HTTPException(status_code=404, detail="Media ID not found in raw, draft, or approved libraries")
-
-    return {
-        "status": "success",
-        "deleted_id": media_id,
-        "removed_from": deleted_type,
-        "message": f"Media item '{media_id}' successfully removed."
-    }
 
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")

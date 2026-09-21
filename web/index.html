@@ -1044,35 +1044,56 @@
 
       <div id="preview-status-msg" style="font-size: 0.85rem; color: var(--gold); margin-bottom: 12px; min-height: 18px;"></div>
 
-      <!-- Creator Capture & Skinning Studio -->
+      <!-- Creator Capture, Voice Transformation & Skinning Studio -->
       <div style="border-top: 1px solid #3a4a40; padding-top: 16px; margin-top: 12px; text-align: left;">
-        <h3 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 8px;">Creator Capture & Skinning Studio</h3>
+        <h3 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 8px;">KEYHOLE Voice & Media Studio</h3>
 
         <form id="creator-capture-form" style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: flex; gap: 10px;">
             <div style="flex: 1;">
-              <label style="font-size: 0.8rem; color: var(--gold);">Select Sister</label>
+              <label style="font-size: 0.8rem; color: var(--gold);">Select Sister & Character Voice</label>
               <select id="creator-sister-select" style="width: 100%; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
-                <option value="bailey">Bailey</option>
-                <option value="carmen">Carmen</option>
-                <option value="chloe">Chloe</option>
-                <option value="valentina">Valentina</option>
-                <option value="riley">Riley</option>
-                <option value="maya">Maya</option>
+                <option value="bailey">Bailey (Sharp & Teasing)</option>
+                <option value="carmen">Carmen (Sultry & Warm)</option>
+                <option value="chloe">Chloe (Bouncy & Bright)</option>
+                <option value="valentina">Valentina (Elegant & Poetic)</option>
+                <option value="riley">Riley (Relaxed & Friendly)</option>
+                <option value="maya">Maya (Curious & Soft-spoken)</option>
               </select>
             </div>
             <div style="flex: 1;">
-              <label style="font-size: 0.8rem; color: var(--gold);">Tier Access</label>
+              <label style="font-size: 0.8rem; color: var(--gold);">Tier Access Target</label>
               <select id="creator-tier-select" style="width: 100%; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
-                <option value="premade_pictures">Pre-made Pictures ($2.99+)</option>
-                <option value="fresh_videos">Fresh Generated Videos ($14.99 VIP Only)</option>
+                <option value="keyhole_299">Keyhole Peek ($2.99)</option>
+                <option value="keyhole_599">Keyhole Standard ($5.99)</option>
+                <option value="keyhole_999">Keyhole Extended ($9.99)</option>
+                <option value="keyhole_1499">Keyhole VIP Exclusive ($14.99)</option>
               </select>
             </div>
           </div>
 
           <div>
-            <label style="font-size: 0.8rem; color: var(--gold);">Media URL (Picture or Video)</label>
-            <input type="text" id="creator-media-url" placeholder="assets/portraits/bailey.jpg or video URL" style="width: 100%; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
+            <label style="font-size: 0.8rem; color: var(--gold);">Raw Recording ID / Media Source</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="creator-media-url" placeholder="rec_bailey_001" value="rec_live_take_1" style="flex: 1; padding: 6px; background: #1a221d; color: white; border: 1px solid #3a4a40; border-radius: 4px;">
+              <button id="btn-apply-voice" class="button" style="padding: 6px 12px; font-size: 0.8rem; background: #2F4A3C; border: 1px solid var(--gold); color: var(--gold);" type="button">🎙️ Apply Character Voice</button>
+            </div>
+          </div>
+
+          <!-- Voice Transformation Admin Preview Controls -->
+          <div id="voice-preview-container" style="background: #141c17; border: 1px solid #3a4a40; border-radius: 6px; padding: 10px; margin-top: 4px; display: none;">
+            <div style="font-size: 0.85rem; color: var(--gold); font-weight: bold; margin-bottom: 6px;">
+              🔊 Admin Transformed Voice Preview (0 Credits Charged)
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+              <audio id="transformed-audio-player" controls style="flex: 1; height: 32px;"></audio>
+              <span id="voice-preview-tag" style="font-size: 0.75rem; color: #aaa; background: #222; padding: 4px 8px; border-radius: 4px;">Draft Ready</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btn-approve-voice" class="button button-gold" style="flex: 1; padding: 6px; font-size: 0.8rem;" type="button">✅ Approve & Assign</button>
+              <button id="btn-replace-voice" class="button" style="flex: 1; padding: 6px; font-size: 0.8rem;" type="button">🔄 Replace Existing</button>
+              <button id="btn-delete-voice" class="button" style="padding: 6px 10px; font-size: 0.8rem; background: #8b0000; color: white;" type="button">🗑️ Delete Bad Take</button>
+            </div>
           </div>
 
           <div>
@@ -1083,17 +1104,24 @@
             </div>
           </div>
 
-          <button id="btn-submit-capture" class="button button-gold" style="padding: 8px; font-size: 0.85rem; margin-top: 4px;" type="submit">Assign Media to Keyhole Library</button>
+          <button id="btn-submit-capture" class="button button-gold" style="padding: 8px; font-size: 0.85rem; margin-top: 4px;" type="submit">Assign Approved Media to Keyhole Library</button>
         </form>
 
-        <!-- iPhone Mobile Recording Step-by-Step Guide -->
+        <!-- Exact Step-by-Step Mobile & iPhone Instructions -->
         <div style="border-top: 1px dashed #3a4a40; margin-top: 14px; padding-top: 10px;">
-          <h4 style="color: var(--gold); font-size: 0.95rem; margin-bottom: 6px;">📱 iPhone & Mobile Creator Guide</h4>
-          <ol style="font-size: 0.8rem; color: #d0d0d0; padding-left: 18px; margin: 0; display: flex; flex-direction: column; gap: 4px;">
-            <li><strong>Open Safari / Chrome on iPhone:</strong> Tap <em>"Live Preview Studio"</em> in the footer.</li>
-            <li><strong>Camera Permission:</strong> Allow camera access when prompted.</li>
-            <li><strong>Flip Camera / Screen:</strong> Tap <code>🔄 Switch Front / Rear Camera</code> to toggle selfie vs main camera, and <code>↔️ Flip Screen (Mirror)</code> to adjust orientation for selfie recording.</li>
-            <li><strong>Record & Skin:</strong> Capture photo or video, apply custom hex theme color or background wallpaper, and assign to your sister's keyhole tier library.</li>
+          <h4 style="color: var(--gold); font-size: 0.95rem; margin-bottom: 6px;">📱 iPhone Creator Guide: Voice & Movement Pipeline</h4>
+          <ol style="font-size: 0.8rem; color: #d0d0d0; padding-left: 18px; margin: 0; display: flex; flex-direction: column; gap: 6px;">
+            <li><strong>Record Performance:</strong> Tap <code>Start Camera Test</code> on your iPhone. Record your movement and speech. Your raw video/audio is saved separately so you can re-voice without re-recording movements.</li>
+            <li><strong>Choose Character & Voice:</strong> Select the target sister (Bailey, Carmen, Chloe, Valentina, Riley, or Maya) in <code>Select Sister & Character Voice</code>.</li>
+            <li><strong>Apply Voice Layer:</strong> Tap <code>🎙️ Apply Character Voice</code>. This transforms your raw performance into her distinct character voice profile.</li>
+            <li><strong>Admin Preview (0 Credits):</strong> Play the transformed preview in the audio player. Listen to the result before making it visible to customers. No credits are charged.</li>
+            <li><strong>Approve, Replace, or Delete:</strong>
+              <ul style="margin-top: 2px; padding-left: 16px;">
+                <li>Tap <code>✅ Approve & Assign</code> to publish to her KEYHOLE tier library.</li>
+                <li>Tap <code>🔄 Replace Existing</code> to overwrite a previous version.</li>
+                <li>Tap <code>🗑️ Delete Bad Take</code> to trash a bad recording or start over.</li>
+              </ul>
+            </li>
           </ol>
         </div>
       </div>
