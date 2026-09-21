@@ -154,9 +154,6 @@ Env vars (Railway -> Variables):
                     on both services.
   STRIPE_PRICE_COMMUNITY / STRIPE_PRICE_RESIDENT / STRIPE_PRICE_NEIGHBOR
                     price ids behind the three Payment Links (defaults are the live ones).
-  SITE_PASSWORD / GAME_PASSWORD
-                    site-wide password gate (e.g. Treykiller13!). If unset or empty,
-                    the site password gate is disabled.
   ADMIN_SECRET      optional key for /admin/* endpoints. If unset, admin endpoints are
                     open (fine for personal seeding). Set it once you go live.
   CORS_ORIGINS      comma list, default * (restrict to your site later)
@@ -248,7 +245,7 @@ BRAIN = _role_config("BRAIN", CHAT_MODEL)     # memory digest, a turn behind
 AUDIT = (_role_config("AUDIT", AUDIT_MODEL) if os.environ.get("AUDIT_BASE_URL")
          else {**MOUTH, "model": os.environ.get("AUDIT_MODEL") or MOUTH["model"]})
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
-SITE_PASSWORD = ""
+SITE_PASSWORD = os.environ.get("SITE_PASSWORD", os.environ.get("GAME_PASSWORD", ""))
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", "God's Greek <no-reply@example.com>")
@@ -906,6 +903,16 @@ async def security_matrix_filter(request: Request, call_next):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=403, content={"detail": "Invalid admin secret"})
 
+    if SITE_PASSWORD:
+        path = request.url.path
+        exempt_exact = {"/gate/status", "/gate/verify", "/health", "/docs", "/openapi.json"}
+        exempt_prefixes = ("/webhooks/", "/auth/telegram", "/auth/verify")
+        if path not in exempt_exact and not any(path.startswith(prefix) for prefix in exempt_prefixes):
+            pwd = request.headers.get("x-site-password") or request.headers.get("x-gate-password") or ""
+            if not pwd or not hmac.compare_digest(pwd.encode(), SITE_PASSWORD.encode()):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=401, content={"detail": "site_password_required", "gate_active": True})
+
     response = await call_next(request)
     return response
 
@@ -917,17 +924,6 @@ def serve_media_file(filename: str):
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Media file not found")
     return FileResponse(file_path)
-
-
-@app.middleware("http")
-async def site_password_middleware(request: Request, call_next):
-    if SITE_PASSWORD:
-        path = request.url.path
-        if request.method != "OPTIONS" and path not in ("/gate/status", "/gate/verify", "/health", "/docs", "/openapi.json"):
-            pwd = request.headers.get("x-site-password") or request.headers.get("x-gate-password") or ""
-            if not pwd or not hmac.compare_digest(pwd.encode(), SITE_PASSWORD.encode()):
-                return JSONResponse(status_code=401, content={"detail": "site_password_required", "gate_active": True})
-    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -3329,24 +3325,6 @@ if(SECRET){$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen
 # ---------------------------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------------------------
-class GateVerifyIn(BaseModel):
-    password: str
-
-
-@app.get("/gate/status")
-def gate_status():
-    return {"gate_active": bool(SITE_PASSWORD)}
-
-
-@app.post("/gate/verify")
-def gate_verify(body: GateVerifyIn):
-    if not SITE_PASSWORD:
-        return {"ok": True, "gate_active": False}
-    if hmac.compare_digest(body.password.encode(), SITE_PASSWORD.encode()):
-        return {"ok": True, "gate_active": True}
-    raise HTTPException(status_code=401, detail="Invalid site password")
-
-
 class SignupIn(BaseModel):
     email: str
     password: str
@@ -7998,6 +7976,24 @@ def get_media_asset_detail(asset_id: int):
             return {"ok": True, "asset": dict(asset)}
     finally:
         conn.close()
+
+
+class GateVerifyIn(BaseModel):
+    password: str
+
+
+@app.get("/gate/status")
+def gate_status():
+    return {"gate_active": bool(SITE_PASSWORD)}
+
+
+@app.post("/gate/verify")
+def gate_verify(body: GateVerifyIn):
+    if not SITE_PASSWORD:
+        return {"ok": True, "gate_active": False}
+    if hmac.compare_digest(body.password.encode(), SITE_PASSWORD.encode()):
+        return {"ok": True, "gate_active": True}
+    raise HTTPException(status_code=401, detail="Invalid site password")
 
 
 @app.get("/admin", response_class=HTMLResponse)
