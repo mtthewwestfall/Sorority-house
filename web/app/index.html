@@ -1102,6 +1102,26 @@
     })();
     function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
     function isLoggedIn() { return !!getToken(); }
+
+    // The public demo is frictionless: create a visitor session automatically.
+    // Keep the token locally so refreshes preserve the same demo progress.
+    async function ensureDemoSession() {
+      if (getToken()) return true;
+      try {
+        const response = await fetch(API_BASE_URL + '/auth/demo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || !data.token) return false;
+        localStorage.setItem(TOKEN_KEY, data.token);
+        updateAuthLinks();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    ensureDemoSession();
     function authHeaders() {
       const h = { 'Content-Type': 'application/json' };
       const t = getToken();
