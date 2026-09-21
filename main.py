@@ -1214,6 +1214,25 @@ def init_db():
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
+
+                -- KEYHOLE Webcam Shows & Admin Management
+                CREATE TABLE IF NOT EXISTS keyhole_shows (
+                    id                 TEXT PRIMARY KEY,
+                    show_type          TEXT NOT NULL, -- 'private' or 'public'
+                    customer           TEXT DEFAULT '',
+                    character          TEXT NOT NULL,
+                    status             TEXT NOT NULL, -- 'READY', 'LIVE', 'ENDED', 'PROCESSING', 'PREVIEW_READY', 'PUBLISHED'
+                    scheduled_at       TEXT DEFAULT '',
+                    price              TEXT DEFAULT '',
+                    details            TEXT DEFAULT '',
+                    viewer_count       INT DEFAULT 0,
+                    preview_url        TEXT DEFAULT '',
+                    published_telegram BOOLEAN DEFAULT FALSE,
+                    published_website  BOOLEAN DEFAULT FALSE,
+                    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_keyhole_shows_type_status ON keyhole_shows (show_type, status);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -2702,9 +2721,42 @@ pre{white-space:pre-wrap;margin:0}
 .bars{display:flex;align-items:flex-end;gap:4px;height:90px;margin-top:8px}.bars div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;min-height:2px;position:relative}.bars div span{position:absolute;bottom:-18px;left:0;right:0;text-align:center;font-size:10px;color:var(--mut)}
 .chat{max-height:420px;overflow:auto;background:#0c0c10;border:1px solid var(--line);border-radius:8px;padding:10px}.msg{margin:6px 0;padding:6px 10px;border-radius:8px;max-width:80%}.msg.user{background:#242433;margin-left:auto}.msg.assistant{background:#2b1a24}.msg .t{font-size:10px;color:var(--mut)}
 .plist{display:flex;gap:6px;flex-wrap:wrap}.plist button.on{border-color:var(--acc);color:var(--acc)}
+
+/* KEYHOLE SHOW CONTROL PANEL MOBILE-FIRST STYLES */
+.kh-container { max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.kh-show-card { background: #1c1c24; border: 2px solid var(--line); border-radius: 14px; padding: 20px; color: var(--fg); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+.kh-show-card.live { border-color: #ef4444; background: #221518; }
+.kh-show-card.ready { border-color: var(--ok); }
+.kh-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.kh-title { font-size: 20px; font-weight: 700; margin: 0; color: #fff; text-transform: uppercase; letter-spacing: 0.5px; }
+.kh-badge { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 700; text-transform: uppercase; }
+.kh-badge.paid { background: rgba(79, 195, 138, 0.2); color: #4fc38a; border: 1px solid #4fc38a; }
+.kh-badge.ready { background: rgba(79, 195, 138, 0.25); color: #4fc38a; border: 1px solid #4fc38a; }
+.kh-badge.live { background: #ef4444; color: #fff; animation: kh-pulse 1.5s infinite; }
+.kh-badge.scheduled { background: rgba(224, 85, 156, 0.2); color: var(--acc); border: 1px solid var(--acc); }
+.kh-badge.ended { background: rgba(154, 154, 176, 0.2); color: var(--mut); border: 1px solid var(--mut); }
+.kh-badge.processing { background: rgba(240, 179, 74, 0.2); color: var(--warn); border: 1px solid var(--warn); }
+@keyframes kh-pulse { 0%{opacity:1} 50%{opacity:0.6} 100%{opacity:1} }
+.kh-detail-row { font-size: 16px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #2a2a38; padding-bottom: 8px; }
+.kh-label { color: var(--mut); font-weight: 500; }
+.kh-val { color: #fff; font-weight: 600; }
+.kh-btn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; padding: 14px 20px; border-radius: 12px; font-size: 18px; font-weight: 700; border: none; cursor: pointer; transition: all 0.15s ease; margin-top: 14px; text-align: center; color: #fff; -webkit-tap-highlight-color: transparent; }
+.kh-btn-start { background: #10b981; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3); }
+.kh-btn-start:active { background: #059669; transform: scale(0.98); }
+.kh-btn-end { background: #ef4444; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); }
+.kh-btn-end:active { background: #dc2626; transform: scale(0.98); }
+.kh-btn-pub { background: var(--acc); box-shadow: 0 4px 12px rgba(224, 85, 156, 0.3); }
+.kh-btn-sec { background: #2a2a38; color: var(--fg); border: 1px solid #3a3a4c; }
+.kh-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
+.kh-toggle-group { display: flex; gap: 12px; margin: 12px 0; }
+.kh-toggle-label { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; background: #121218; border: 1px solid var(--line); border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; user-select: none; }
+.kh-toggle-label input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--acc); cursor: pointer; }
+.kh-preview-box { margin: 12px 0; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.kh-preview-box video { width: 100%; max-height: 280px; display: block; }
 </style></head><body>
 <header><h1>God's Greek · Admin</h1>
-<nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
+<nav><button id="tabKhShow" class="on" onclick="show('khShow')">🔴 Keyhole Show Control</button>
+<button id="tabOvw" onclick="show('ovw')">Overview</button>
 <button id="tabAcc" onclick="showAccounts()">Website Accounts</button>
 <button id="tabWebcamAcc" onclick="showWebcamAccounts()">🎥 WebCam Show Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
@@ -2717,6 +2769,52 @@ pre{white-space:pre-wrap;margin:0}
 <div id="login" class="card"><h3>Admin secret</h3>
 <div class="row2"><input id="secret" type="password" placeholder="ADMIN_SECRET" style="min-width:280px">
 <button class="p" onclick="login()">Unlock</button></div><div class="mut">Set ADMIN_SECRET on the server; it is required for every action here.</div></div>
+
+<section id="khShow">
+  <div class="kh-container">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; background:#121218; padding:10px; border-radius:8px; border:1px solid var(--line);">
+      <span style="font-size:12px; color:var(--mut); width:100%">⚡ Quick Testing Simulation Controls:</span>
+      <button class="s" style="flex:1" onclick="simulateDemoAction('private_request')">+ Private Request</button>
+      <button class="s" style="flex:1" onclick="simulateDemoAction('reset')">↻ Reset Panel</button>
+    </div>
+
+    <div id="khShowsList">
+      <div style="text-align:center; padding:30px; color:var(--mut);">Loading Keyhole Show Panel...</div>
+    </div>
+
+    <div class="kh-show-card" style="margin-top:8px;">
+      <h3 style="margin-top:0; margin-bottom:12px; font-size:18px; color:var(--acc);">NEW PUBLIC SHOW</h3>
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Character</label>
+          <select id="khPubChar" style="width:100%; height:44px; font-size:16px;">
+            <option value="Chloe">Chloe</option>
+            <option value="Bailey">Bailey</option>
+            <option value="Carmen">Carmen</option>
+            <option value="Valentina">Valentina</option>
+            <option value="Riley">Riley</option>
+            <option value="Maya">Maya</option>
+          </select>
+        </div>
+        <div>
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Date / Time</label>
+          <input id="khPubTime" type="text" placeholder="e.g. Tonight — 8:00 PM" value="Tonight — 8:00 PM" style="width:100%; height:44px; font-size:16px;">
+        </div>
+        <div>
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Price ($)</label>
+          <input id="khPubPrice" type="text" placeholder="$4.99" value="$4.99" style="width:100%; height:44px; font-size:16px;">
+        </div>
+        <div>
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Optional Details</label>
+          <input id="khPubDetails" type="text" placeholder="e.g. Special live Q&A session" style="width:100%; height:44px; font-size:16px;">
+        </div>
+        <button id="btnCreatePubShow" class="kh-btn kh-btn-start" onclick="createPublicShow()">
+          ANNOUNCE &amp; SCHEDULE SHOW
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
 
 <section id="ovw" class="hid">
 <div class="row2" style="justify-content:flex-end"><button class="s" onclick="loadOverview()">Refresh</button></div>
@@ -2959,7 +3057,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
+const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -2981,7 +3079,341 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow')loadKeyholeShows();if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+
+let currentKhShows = [];
+
+async function loadKeyholeShows() {
+  const container = $('#khShowsList');
+  if (!container) return;
+  try {
+    const res = await api('/admin/keyhole/shows');
+    currentKhShows = res.shows || [];
+    renderKeyholeCards(currentKhShows);
+  } catch (err) {
+    container.innerHTML = `<div class="kh-show-card" style="color:#ef4444; font-size:16px; padding:16px;">Failed to load Keyhole shows: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderKeyholeCards(shows) {
+  const container = $('#khShowsList');
+  if (!container) return;
+  if (!shows || shows.length === 0) {
+    container.innerHTML = `
+      <div class="kh-show-card" style="text-align:center; padding:24px;">
+        <h3 style="margin:0 0 8px 0; color:var(--mut);">NO ACTIVE WEBCAM SHOWS</h3>
+        <p style="margin:0; font-size:14px; color:var(--mut);">An incoming private request or scheduled public show will appear here automatically.</p>
+      </div>`;
+    return;
+  }
+
+  let html = '';
+  shows.forEach(s => {
+    const isLive = s.status === 'LIVE';
+    const isReady = s.status === 'READY';
+    const isSched = s.status === 'SCHEDULED';
+    const isPrevReady = s.status === 'PREVIEW_READY';
+    const isPub = s.status === 'PUBLISHED';
+
+    let cardClass = 'kh-show-card';
+    if (isLive) cardClass += ' live';
+    else if (isReady) cardClass += ' ready';
+
+    html += `<div class="${cardClass}" id="card-${s.id}">`;
+
+    if (s.show_type === 'private') {
+      if (isReady) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">PRIVATE SHOW</span>
+            <span class="kh-badge ready">READY ✓</span>
+          </div>
+          <div class="kh-detail-row"><span class="kh-label">Customer</span><span class="kh-val">${esc(s.customer || 'Anonymous User')}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Character</span><span class="kh-val">${esc(s.character)}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Payment</span><span class="kh-badge paid">PAID ✓</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Status</span><span class="kh-val" style="color:#4fc38a;">READY ✓</span></div>
+          <button class="kh-btn kh-btn-start" onclick="startKeyholeShow('${s.id}', this)">
+            START SHOW
+          </button>`;
+      } else if (isLive) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())}</span>
+            <span class="kh-badge live">🔴 LIVE</span>
+          </div>
+          <div style="text-align:center; padding:16px 0;">
+            <div style="font-size:24px; font-weight:800; color:#ef4444; letter-spacing:1px;">1-ON-1 PRIVATE SHOW LIVE</div>
+            <div style="font-size:14px; color:var(--mut); margin-top:4px;">Customer Connected &amp; Viewing</div>
+          </div>
+          <button class="kh-btn kh-btn-end" onclick="endKeyholeShow('${s.id}', this)">
+            END SHOW
+          </button>`;
+      } else if (isPrevReady) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())} · PREVIEW READY</span>
+            <span class="kh-badge ready">PREVIEW READY</span>
+          </div>
+          ${s.preview_url ? `
+          <div class="kh-preview-box">
+            <video controls poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
+          </div>` : ''}
+          <div style="font-size:16px; font-weight:700; margin:12px 0 6px 0; text-align:center;">USE AS PREVIEW?</div>
+          <div style="display:flex; gap:12px;">
+            <button class="kh-btn kh-btn-start" style="flex:1;" onclick="choosePreviewChoice('${s.id}', true, this)">[ YES ]</button>
+            <button class="kh-btn kh-btn-sec" style="flex:1;" onclick="choosePreviewChoice('${s.id}', false, this)">[ NO ]</button>
+          </div>
+          <div id="pub-box-${s.id}" style="margin-top:16px; padding-top:12px; border-top:1px dashed var(--line);">
+            <div style="font-size:16px; font-weight:700; margin-bottom:8px; color:var(--acc);">PUBLISH PREVIEW</div>
+            <div class="kh-toggle-group">
+              <label class="kh-toggle-label">
+                <input type="checkbox" id="tg-${s.id}" checked> Telegram ✓
+              </label>
+              <label class="kh-toggle-label">
+                <input type="checkbox" id="web-${s.id}" checked> Website ✓
+              </label>
+            </div>
+            <button class="kh-btn kh-btn-pub" onclick="publishPreviewShow('${s.id}', this)">
+              PUBLISH
+            </button>
+          </div>`;
+      } else if (isPub) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())} · PUBLISHED</span>
+            <span class="kh-badge paid">PUBLISHED ✓</span>
+          </div>
+          <div style="padding:10px 0; font-size:15px; color:#4fc38a;">
+            Preview published to ${s.published_telegram ? 'Telegram ✓ ' : ''}${s.published_website ? 'Website ✓' : ''}
+          </div>`;
+      } else {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())}</span>
+            <span class="kh-badge ended">${esc(s.status)}</span>
+          </div>
+          <div style="padding:10px 0; font-size:14px; color:var(--mut);">Show completed.</div>`;
+      }
+    } else {
+      if (isSched) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">PUBLIC SHOW SCHEDULED ✓</span>
+            <span class="kh-badge scheduled">SCHEDULED</span>
+          </div>
+          <div class="kh-detail-row"><span class="kh-label">Character</span><span class="kh-val">${esc(s.character)}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Time</span><span class="kh-val">${esc(s.scheduled_at)}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Price</span><span class="kh-val">${esc(s.price)}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Announcements</span><span class="kh-val" style="color:#4fc38a;">Telegram ✓ Website ✓</span></div>
+
+          <div style="margin-top:12px; background:#121218; padding:12px; border-radius:10px;">
+            <div class="kh-detail-row" style="border:none; padding:0;"><span class="kh-label">Paid Viewers</span><span class="kh-badge paid">${s.viewer_count} PAID</span></div>
+            <div class="kh-detail-row" style="border:none; padding:0; margin-top:4px;"><span class="kh-label">Access State</span><span class="kh-val" style="color:#4fc38a;">READY ✓</span></div>
+          </div>
+
+          <button class="kh-btn kh-btn-start" onclick="startKeyholeShow('${s.id}', this)">
+            START SHOW
+          </button>`;
+      } else if (isReady) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())}</span>
+            <span class="kh-badge ready">READY ✓</span>
+          </div>
+          <div class="kh-detail-row"><span class="kh-label">Schedule</span><span class="kh-val">${esc(s.scheduled_at)}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Price</span><span class="kh-val">${esc(s.price)}</span></div>
+          <div class="kh-detail-row"><span class="kh-label">Viewers</span><span class="kh-badge paid">${s.viewer_count} PAID</span></div>
+          <button class="kh-btn kh-btn-start" onclick="startKeyholeShow('${s.id}', this)">
+            START SHOW
+          </button>`;
+      } else if (isLive) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())}</span>
+            <span class="kh-badge live">🔴 LIVE</span>
+          </div>
+          <div style="text-align:center; padding:16px 0;">
+            <div style="font-size:28px; font-weight:800; color:#ef4444; letter-spacing:1px;">${s.viewer_count} VIEWERS</div>
+            <div style="font-size:14px; color:var(--mut); margin-top:4px;">Group WebCam Show Live</div>
+          </div>
+          <button class="kh-btn kh-btn-end" onclick="endKeyholeShow('${s.id}', this)">
+            END SHOW
+          </button>`;
+      } else if (isPrevReady) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())} · PREVIEW READY</span>
+            <span class="kh-badge ready">PREVIEW READY</span>
+          </div>
+          ${s.preview_url ? `
+          <div class="kh-preview-box">
+            <video controls poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
+          </div>` : ''}
+          <div style="font-size:16px; font-weight:700; margin:12px 0 6px 0; text-align:center;">USE AS PREVIEW?</div>
+          <div style="display:flex; gap:12px;">
+            <button class="kh-btn kh-btn-start" style="flex:1;" onclick="choosePreviewChoice('${s.id}', true, this)">[ YES ]</button>
+            <button class="kh-btn kh-btn-sec" style="flex:1;" onclick="choosePreviewChoice('${s.id}', false, this)">[ NO ]</button>
+          </div>
+          <div id="pub-box-${s.id}" style="margin-top:16px; padding-top:12px; border-top:1px dashed var(--line);">
+            <div style="font-size:16px; font-weight:700; margin-bottom:8px; color:var(--acc);">PUBLISH PREVIEW</div>
+            <div class="kh-toggle-group">
+              <label class="kh-toggle-label">
+                <input type="checkbox" id="tg-${s.id}" checked> Telegram ✓
+              </label>
+              <label class="kh-toggle-label">
+                <input type="checkbox" id="web-${s.id}" checked> Website ✓
+              </label>
+            </div>
+            <button class="kh-btn kh-btn-pub" onclick="publishPreviewShow('${s.id}', this)">
+              PUBLISH
+            </button>
+          </div>`;
+      } else if (isPub) {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())} · PUBLISHED</span>
+            <span class="kh-badge paid">PUBLISHED ✓</span>
+          </div>
+          <div style="padding:10px 0; font-size:15px; color:#4fc38a;">
+            Preview published to ${s.published_telegram ? 'Telegram ✓ ' : ''}${s.published_website ? 'Website ✓' : ''}
+          </div>`;
+      } else {
+        html += `
+          <div class="kh-header-row">
+            <span class="kh-title">${esc(s.character.toUpperCase())}</span>
+            <span class="kh-badge ended">${esc(s.status)}</span>
+          </div>
+          <div style="padding:10px 0; font-size:14px; color:var(--mut);">Public show ended.</div>`;
+      }
+    }
+
+    html += `</div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+async function startKeyholeShow(id, btn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const oldText = btn.innerHTML;
+  btn.innerHTML = '<span>⏳ Starting Show...</span>';
+  try {
+    await api(`/admin/keyhole/shows/${encodeURIComponent(id)}/start`, { method: 'POST' });
+    toast('Show is now LIVE 🔴');
+    await loadKeyholeShows();
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = oldText;
+    toast(err.message, true);
+  }
+}
+
+async function endKeyholeShow(id, btn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const oldText = btn.innerHTML;
+  btn.innerHTML = '<span>⏳ Ending Show...</span>';
+  try {
+    await api(`/admin/keyhole/shows/${encodeURIComponent(id)}/end`, { method: 'POST' });
+    toast('Show ended — Processing recording preview...');
+    await loadKeyholeShows();
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = oldText;
+    toast(err.message, true);
+  }
+}
+
+async function choosePreviewChoice(id, useAsPreview, btn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const oldText = btn.innerHTML;
+  btn.innerHTML = '<span>⏳ Processing...</span>';
+  try {
+    await api(`/admin/keyhole/shows/${encodeURIComponent(id)}/preview-choice`, {
+      method: 'POST',
+      body: JSON.stringify({ use_as_preview: useAsPreview })
+    });
+    if (!useAsPreview) {
+      toast('Preview discarded. Show ended.');
+    } else {
+      toast('Preview selected for publication!');
+    }
+    await loadKeyholeShows();
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = oldText;
+    toast(err.message, true);
+  }
+}
+
+async function publishPreviewShow(id, btn) {
+  if (btn.disabled) return;
+  const tgBox = $('#tg-' + id);
+  const webBox = $('#web-' + id);
+  btn.disabled = true;
+  const oldText = btn.innerHTML;
+  btn.innerHTML = '<span>⏳ Publishing...</span>';
+  try {
+    await api(`/admin/keyhole/shows/${encodeURIComponent(id)}/publish-preview`, {
+      method: 'POST',
+      body: JSON.stringify({
+        publish_telegram: tgBox ? tgBox.checked : true,
+        publish_website: webBox ? webBox.checked : true
+      })
+    });
+    toast('Preview successfully published! ✓');
+    await loadKeyholeShows();
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = oldText;
+    toast(err.message, true);
+  }
+}
+
+async function createPublicShow() {
+  const btn = $('#btnCreatePubShow');
+  if (btn && btn.disabled) return;
+  const char = $('#khPubChar')?.value || 'Chloe';
+  const time = $('#khPubTime')?.value || 'Tonight — 8:00 PM';
+  const price = $('#khPubPrice')?.value || '$4.99';
+  const details = $('#khPubDetails')?.value || '';
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳ Announcing &amp; Scheduling...</span>';
+  }
+
+  try {
+    await api('/admin/keyhole/shows/create-public', {
+      method: 'POST',
+      body: JSON.stringify({ character: char, scheduled_at: time, price, details })
+    });
+    toast('PUBLIC SHOW SCHEDULED ✓');
+    await loadKeyholeShows();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'ANNOUNCE &amp; SCHEDULE SHOW';
+    }
+  }
+}
+
+async function simulateDemoAction(action) {
+  try {
+    await api('/admin/keyhole/shows/demo-simulate', {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    });
+    toast(`Simulated: ${action}`);
+    await loadKeyholeShows();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
 
 async function loadMediaAssets(){
   const charId=($('#mFilterChar')?.value||'').trim().toLowerCase();
@@ -3190,7 +3622,7 @@ async function deleteMediaAsset(id){
 async function loadDoors(){try{const r=await api('/admin/console/doors');$('#dLocked').checked=r.doors_locked;$('#dRule').classList.toggle('hid',!r.doors_locked);$('#dSet').value=r.door_set;
  $('#dStage').innerHTML=[1,2,3,4,5,6,7,8].map(s=>`<option value="${s}"${s===r.unlock_stage?' selected':''}>M${s}</option>`).join('')}catch(e){toast(e.message,true)}}
 async function saveDoors(){try{await api('/admin/console/doors',{method:'POST',body:JSON.stringify({doors_locked:$('#dLocked').checked,door_set:+$('#dSet').value,unlock_stage:+$('#dStage').value})});toast('Saved - live on the next reload');loadDoors()}catch(e){toast(e.message,true)}}
-async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
+async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('khShow');loadKeyholeShows();loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
 function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');for(const k in TABS)$('#'+k).classList.add('hid')}
 async function loadOverview(){try{const s=await api('/admin/overview');const st=(l,v,sub)=>`<div class="card"><div class="lbl">${l}</div><div class="stat">${v}</div>${sub?`<div class="mut">${sub}</div>`:''}</div>`;
  $('#stats').innerHTML=st('Accounts',s.accounts,`+${s.accounts_7d} this week · ${s.telegram||0} on Telegram`)+st('Paying',s.tiers.sophomore+s.tiers.junior+s.tiers.senior,`${s.tiers.senior} sr · ${s.tiers.junior} jr · ${s.tiers.sophomore} so`)+st('Trial',s.tiers.freshman)+st('Comped',s.comped)
@@ -3354,7 +3786,7 @@ async function runGenerator(){
   }
 }
 
-if(SECRET){$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}
+if(SECRET){$('#login').classList.add('hid');show('khShow');loadKeyholeShows();loadAccounts();countOpen()}
 </script></body></html>"""
 
 
@@ -7098,6 +7530,274 @@ def admin_set_keyhole_config(body: KeyholeConfigIn):
     finally:
         conn.close()
     return {"ok": True, "config": get_keyhole_config()}
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE SHOW CONTROL PANEL (ADMIN API)
+# ---------------------------------------------------------------------------
+
+_KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {
+    "demo_priv_1": {
+        "id": "demo_priv_1",
+        "show_type": "private",
+        "customer": "alex.rivera@example.com",
+        "character": "Chloe",
+        "status": "READY",
+        "scheduled_at": "",
+        "price": "$19.99",
+        "details": "",
+        "viewer_count": 1,
+        "preview_url": "",
+        "published_telegram": False,
+        "published_website": False,
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z"
+    }
+}
+
+
+def _get_all_shows_db() -> List[Dict[str, Any]]:
+    if not DATABASE_URL:
+        return list(_KEYHOLE_SHOWS_CACHE.values())
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM keyhole_shows ORDER BY created_at DESC")
+                rows = cur.fetchall()
+                if not rows:
+                    return list(_KEYHOLE_SHOWS_CACHE.values())
+                res = []
+                for r in rows:
+                    res.append({
+                        "id": str(r["id"]),
+                        "show_type": str(r["show_type"]),
+                        "customer": str(r.get("customer") or ""),
+                        "character": str(r.get("character") or "Chloe"),
+                        "status": str(r.get("status") or "READY"),
+                        "scheduled_at": str(r.get("scheduled_at") or ""),
+                        "price": str(r.get("price") or "$19.99"),
+                        "details": str(r.get("details") or ""),
+                        "viewer_count": int(r.get("viewer_count") or 0),
+                        "preview_url": str(r.get("preview_url") or ""),
+                        "published_telegram": bool(r.get("published_telegram")),
+                        "published_website": bool(r.get("published_website")),
+                        "created_at": str(r.get("created_at") or ""),
+                        "updated_at": str(r.get("updated_at") or "")
+                    })
+                return res
+        finally:
+            conn.close()
+    except Exception:
+        return list(_KEYHOLE_SHOWS_CACHE.values())
+
+
+def _save_show_db(show: Dict[str, Any]) -> None:
+    _KEYHOLE_SHOWS_CACHE[show["id"]] = dict(show)
+    if not DATABASE_URL:
+        return
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO keyhole_shows (
+                        id, show_type, customer, character, status, scheduled_at, price, details, viewer_count, preview_url, published_telegram, published_website, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (id) DO UPDATE SET
+                        show_type = EXCLUDED.show_type,
+                        customer = EXCLUDED.customer,
+                        character = EXCLUDED.character,
+                        status = EXCLUDED.status,
+                        scheduled_at = EXCLUDED.scheduled_at,
+                        price = EXCLUDED.price,
+                        details = EXCLUDED.details,
+                        viewer_count = EXCLUDED.viewer_count,
+                        preview_url = EXCLUDED.preview_url,
+                        published_telegram = EXCLUDED.published_telegram,
+                        published_website = EXCLUDED.published_website,
+                        updated_at = now()
+                """, (
+                    show["id"],
+                    show["show_type"],
+                    show.get("customer", ""),
+                    show["character"],
+                    show["status"],
+                    show.get("scheduled_at", ""),
+                    show.get("price", ""),
+                    show.get("details", ""),
+                    show.get("viewer_count", 0),
+                    show.get("preview_url", ""),
+                    show.get("published_telegram", False),
+                    show.get("published_website", False)
+                ))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+@app.get("/admin/keyhole/shows", dependencies=[Depends(admin_required)])
+def admin_get_keyhole_shows():
+    """Returns active private show requests, scheduled public shows, live shows, and previews."""
+    shows = _get_all_shows_db()
+    return {"ok": True, "shows": shows}
+
+
+class CreatePublicShowIn(BaseModel):
+    character: str
+    scheduled_at: str
+    price: Optional[str] = "$4.99"
+    details: Optional[str] = ""
+
+
+@app.post("/admin/keyhole/shows/create-public", dependencies=[Depends(admin_required)])
+def admin_create_public_show(body: CreatePublicShowIn):
+    show_id = f"pub_{int(time.time()*1000)}"
+    char = (body.character or "Chloe").strip()
+    show = {
+        "id": show_id,
+        "show_type": "public",
+        "customer": "",
+        "character": char.capitalize(),
+        "status": "SCHEDULED",
+        "scheduled_at": body.scheduled_at or "Tonight — 8:00 PM",
+        "price": body.price or "$4.99",
+        "details": body.details or "",
+        "viewer_count": 23,
+        "preview_url": "",
+        "published_telegram": True,
+        "published_website": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    _save_show_db(show)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/{show_id}/start", dependencies=[Depends(admin_required)])
+def admin_start_keyhole_show(show_id: str):
+    shows = {s["id"]: s for s in _get_all_shows_db()}
+    show = shows.get(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    show["status"] = "LIVE"
+    show["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_show_db(show)
+    return {"ok": True, "show": show}
+
+
+@app.post("/admin/keyhole/shows/{show_id}/end", dependencies=[Depends(admin_required)])
+def admin_end_keyhole_show(show_id: str):
+    shows = {s["id"]: s for s in _get_all_shows_db()}
+    show = shows.get(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+
+    show["status"] = "PREVIEW_READY"
+    show["preview_url"] = f"/assets/webcam/{show['character'].lower()}_preview.mp4"
+    show["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_show_db(show)
+    return {"ok": True, "show": show}
+
+
+class PreviewChoiceIn(BaseModel):
+    use_as_preview: bool
+
+
+@app.post("/admin/keyhole/shows/{show_id}/preview-choice", dependencies=[Depends(admin_required)])
+def admin_preview_choice(show_id: str, body: PreviewChoiceIn):
+    shows = {s["id"]: s for s in _get_all_shows_db()}
+    show = shows.get(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+
+    if not body.use_as_preview:
+        show["status"] = "ENDED"
+    else:
+        show["status"] = "PREVIEW_READY"
+    show["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_show_db(show)
+    return {"ok": True, "show": show}
+
+
+class PublishPreviewIn(BaseModel):
+    publish_telegram: bool = True
+    publish_website: bool = True
+
+
+@app.post("/admin/keyhole/shows/{show_id}/publish-preview", dependencies=[Depends(admin_required)])
+def admin_publish_preview(show_id: str, body: PublishPreviewIn):
+    shows = {s["id"]: s for s in _get_all_shows_db()}
+    show = shows.get(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+
+    show["published_telegram"] = bool(body.publish_telegram)
+    show["published_website"] = bool(body.publish_website)
+    show["status"] = "PUBLISHED"
+    show["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_show_db(show)
+    return {"ok": True, "show": show}
+
+
+class DemoSimulateIn(BaseModel):
+    action: str  # 'private_request', 'reset'
+
+
+@app.post("/admin/keyhole/shows/demo-simulate", dependencies=[Depends(admin_required)])
+def admin_demo_simulate(body: DemoSimulateIn):
+    act = body.action.lower()
+    if act == "private_request":
+        show_id = f"priv_{int(time.time()*1000)}"
+        show = {
+            "id": show_id,
+            "show_type": "private",
+            "customer": "alex.rivera@example.com",
+            "character": "Chloe",
+            "status": "READY",
+            "scheduled_at": "",
+            "price": "$19.99",
+            "details": "",
+            "viewer_count": 1,
+            "preview_url": "",
+            "published_telegram": False,
+            "published_website": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        _save_show_db(show)
+    elif act == "reset":
+        _KEYHOLE_SHOWS_CACHE.clear()
+        _KEYHOLE_SHOWS_CACHE["demo_priv_1"] = {
+            "id": "demo_priv_1",
+            "show_type": "private",
+            "customer": "alex.rivera@example.com",
+            "character": "Chloe",
+            "status": "READY",
+            "scheduled_at": "",
+            "price": "$19.99",
+            "details": "",
+            "viewer_count": 1,
+            "preview_url": "",
+            "published_telegram": False,
+            "published_website": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        if DATABASE_URL:
+            try:
+                conn = db()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM keyhole_shows")
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+    return {"ok": True, "shows": _get_all_shows_db()}
 
 
 @app.get("/admin/console/doors", dependencies=[Depends(admin_required)])
