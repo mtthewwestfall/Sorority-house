@@ -3417,17 +3417,14 @@ def _classify_verdict(text):
 def _deepseek_classify(description):
     """Judge 1: DeepSeek (BRAIN role) classifies a neutral visual description.
     DeepSeek's API is text-only, so Gemini first renders the photo into words.
-    Returns RED/YELLOW/GREEN, or None when DeepSeek isn't configured or fails."""
-    try:
-        if BRAIN.get("provider") != "openai" or not BRAIN.get("api_key"):
-            return None
-        text = _openai(BRAIN, [
-            {"role": "system", "content": _MODERATION_CRITERIA},
-            {"role": "user", "content": "Photo description:\n" + description},
-        ], max_tokens=10, temperature=0.0)
-        return _classify_verdict(text)
-    except Exception:
+    Returns RED/YELLOW/GREEN, or None when DeepSeek isn't configured."""
+    if BRAIN.get("provider") != "openai" or not BRAIN.get("api_key"):
         return None
+    text = _openai(BRAIN, [
+        {"role": "system", "content": _MODERATION_CRITERIA},
+        {"role": "user", "content": "Photo description:\n" + description},
+    ], max_tokens=10, temperature=0.0)
+    return _classify_verdict(text)
 
 
 def moderate_companion_photo(image_bytes, mime, user_id):
@@ -3463,13 +3460,11 @@ def moderate_companion_photo(image_bytes, mime, user_id):
         if second is None:
             raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
         return "allow"
-    except HTTPException as e:
-        if e.status_code == 400:
-            raise
-        raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[photo-moderation] Exception during photo moderation: {e}", flush=True)
-        raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
+        raise HTTPException(status_code=502, detail=f"Photo moderation unavailable: {e}")
 
 
 def generate_avatar_from_photo(image_bytes, mime, first_name, gender):

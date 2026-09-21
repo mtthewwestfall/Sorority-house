@@ -1705,13 +1705,14 @@ const PRESET_FACES = {
         const data = await res.json();
         const comps = data.companions || [];
         const maxSlots = data.max_slots || 1;
-        const deletesRem = data.deletes_remaining !== undefined ? data.deletes_remaining : 0;
+        const deletesRem = data.deletes_remaining !== undefined ? data.deletes_remaining : 2;
 
         let html = '';
 
         if (comps.length > 0) {
           comps.forEach(c => {
             const name = escapeHtml(c.first_name);
+            const rawName = String(c.first_name || '').replace(/"/g, '&quot;');
             const title = (c.is_married ? 'Married / Spouse' : 'Your Custom Companion') + (c.gender === 'male' ? ' \u00B7 Him' : ' \u00B7 Her');
             const avatar = c.portrait_url ? (c.portrait_url.startsWith('data:') ? c.portrait_url : 'data:image/png;base64,' + c.portrait_url) : '';
 
@@ -1725,7 +1726,7 @@ const PRESET_FACES = {
               '<p>' + escapeHtml(c.personality) + '</p>' +
               '<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">' +
               '<button class="button door-cta open-companion-chat-btn" type="button" data-companion-id="' + c.id + '" style="flex: 1;">Talk to ' + name + '</button>' +
-              (deletesRem > 0 ? '<button class="button dark delete-companion-btn" type="button" data-companion-id="' + c.id + '" data-companion-name="' + name + '" style="background: #3a1c1c; border-color: #8b3a3a; color: #ff8888;">Delete</button>' : '') +
+              (deletesRem > 0 ? '<button class="button dark delete-companion-btn" type="button" data-companion-id="' + c.id + '" data-companion-name="' + rawName + '" style="background: #3a1c1c; border-color: #8b3a3a; color: #ff8888;">Delete</button>' : '') +
               '</div>' +
               '</div></article>';
           });
@@ -1745,13 +1746,14 @@ const PRESET_FACES = {
         }
 
         container.innerHTML = html;
-        bindCompanionEvents();
+        bindCompanionEvents(container);
       } catch (e) {
         container.innerHTML = '';
       }
     }
 
-    function bindCompanionEvents() {
+    function bindCompanionEvents(container) {
+      if (!container) container = document.getElementById('companion-card-container');
       const createBtn = document.getElementById('open-companion-create-btn');
       if (createBtn) {
         createBtn.addEventListener('click', () => {
@@ -1780,7 +1782,6 @@ const PRESET_FACES = {
           } catch (err) { alert('Purchase failed'); }
         });
       }
-      const container = document.getElementById('companion-card-container');
       if (container) {
         container.querySelectorAll('.delete-companion-btn').forEach(btn => {
           btn.addEventListener('click', async (e) => {
