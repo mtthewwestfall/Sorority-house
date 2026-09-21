@@ -1825,7 +1825,7 @@ const PRESET_FACES = {
       if (gender === 'female') return PRESET_FACES.female;
       return PRESET_FACES.female.concat(PRESET_FACES.male);
     }
-    function renderFacePicker(pickerId, hiddenId, gender, autoSelect = false) {
+    function renderFacePicker(pickerId, hiddenId, gender, autoSelect = true) {
       const picker = document.getElementById(pickerId);
       const hidden = document.getElementById(hiddenId);
       if (!picker || !hidden) return;

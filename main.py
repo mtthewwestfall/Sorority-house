@@ -3447,6 +3447,8 @@ def moderate_companion_photo(image_bytes, mime, user_id):
             if verdict == "RED":
                 _moderation_log(user_id, "RED (gemini-only)")
                 raise HTTPException(status_code=400, detail="Photo not allowed.")
+            if verdict is None:
+                raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
             return "allow"
         if verdict == "RED":
             _moderation_log(user_id, "RED (deepseek)")
@@ -3458,9 +3460,13 @@ def moderate_companion_photo(image_bytes, mime, user_id):
         if second == "RED":
             _moderation_log(user_id, "RED (gemini double-check)")
             raise HTTPException(status_code=400, detail="Photo not allowed.")
+        if second is None:
+            raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
         return "allow"
-    except HTTPException:
-        raise
+    except HTTPException as e:
+        if e.status_code == 400:
+            raise
+        raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
     except Exception as e:
         print(f"[photo-moderation] Exception during photo moderation: {e}", flush=True)
         raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
