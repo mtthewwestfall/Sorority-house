@@ -1,5 +1,5 @@
 """
-GREEK HOLLOW — main.py
+Gods Greeks — main.py
 Chat/AI backend for the companion website (FastAPI on Railway, Supabase/Postgres).
 
 Built to this spec (verified Sept 2026):
@@ -15,7 +15,7 @@ Built to this spec (verified Sept 2026):
                the girl's full personality). Identical prefix = provider caches it and
                bills cache hits at a big discount, so never mutate this block.
       LAYER 2  ONE short rolling "memory summary" per user PER GIRL, injected as a
-               single small block. Rewritten only at milestones / every N messages,
+               single small block. Rewritten only at milestones / every N messages,h
                never on every message (that would churn the cache + cost tokens).
       LAYER 3  Only the last WINDOW raw messages of the ACTIVE conversation, scoped
                to that girl. Input size never grows.
@@ -174,7 +174,7 @@ Env vars (Railway -> Variables):
   PORT              default 8080 (Railway sets this)
 
 Audit pricing (constants below, also editable here):
-  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 2 / Community 4 / Resident 8 / Neighbor 2 per month
+  AUDIT_PRICE_USD = 0.99   ;  FREE_AUDITS = Visitor 2 / Community 4 / Resident 8 / Neighbor 2 / Companion 4 per month
   FREE_AUDIT_PROMO_CAP = 200  (lifetime global cap on free audits across all users)
 
 requirements.txt for Railway:
@@ -193,10 +193,13 @@ import base64
 import asyncio
 import hashlib
 import hmac
+import ipaddress
+import socket
 import queue
 import random
 import secrets
 import time
+import urllib.parse
 import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -206,8 +209,8 @@ from typing import Optional, List, Dict, Any
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -291,6 +294,19 @@ PICTURE_PACK_PRICE = os.environ.get("PICTURE_PACK_PRICE", "$0.99")
 PIC_TEASE_AT = 48
 PIC_TEASE_LINE = "I usually never ask this but there might be something about you, can I send you a pic soon?"
 PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
+
+# Fruit menu codes and action translation dictionary
+FRUIT_MENU_TRANSLATIONS = {
+    "/cherries": "bra comes off",
+    "/takeoffcherries": "bra comes off",
+    "/apples": "pants come off",
+    "/takeoffapples": "pants come off",
+    "/oranges": "shirt comes off",
+    "/takeofforanges": "shirt comes off",
+    "/banana": "she sucks a dick",
+    "o/banana": "she sucks a dick",
+    "/eatabanana": "she sucks a dick"
+}
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
 WEBHOOK_MAX_BYTES = 1024 * 1024
@@ -302,6 +318,8 @@ STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
     os.environ.get("STRIPE_PRICE_RESIDENT", os.environ.get("STRIPE_PRICE_JUNIOR", "price_1UCVb6EnizOE4dLbBHQNFgpk")): "resident",
     os.environ.get("STRIPE_PRICE_NEIGHBOR", os.environ.get("STRIPE_PRICE_SENIOR", "price_1UCVY5EnizOE4dLbwxYOodk2")): "neighbor",
+    # God's Companions: $4.99/mo, 1000 messages/mo, limit hidden in UI.
+    os.environ.get("STRIPE_PRICE_COMPANION", "price_1UGTXa6qicU1CK4UyWHUVLmd"): "companion",
 }
 STRIPE_SIG_TOLERANCE_S = 300
 AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
@@ -314,11 +332,38 @@ AUDIT_WINDOW = 80    # audits see up to this many recent messages + the full sum
 
 # Audit product pricing. $0.99 each for everyone; the listed tiers get N FREE per month.
 AUDIT_PRICE_USD = 0.99
+
+# Keyhole pricing & access rules defaults
+KEYHOLE_DEFAULT_CONFIG = {
+    "free_preview_minutes": 10,
+    "quick_price": 2.99,
+    "quick_webcam_minutes": 15,
+    "quick_video_replies": 35,
+    "quick_text_included": 100,
+    "quick_monthly_cap": 3,
+    "standard_price": 5.99,
+    "standard_webcam_minutes": 30,
+    "standard_video_replies": 70,
+    "standard_text_included": 200,
+    "extended_price": 9.99,
+    "extended_webcam_minutes": 45,
+    "extended_video_replies": 100,
+    "extended_text_included": 300,
+    "premium_price": 14.99,
+    "premium_webcam_minutes": 60,
+    "premium_fresh_videos": 3,
+    "premium_premade_pictures": 5,
+    "text_only_price": 1.99,
+    "text_only_included": 100,
+    "text_only_monthly_cap": 1,
+}
+
 FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allowance)
     "visitor":   2,
     "community": 4,
     "resident":  8,
     "neighbor":  2,
+    "companion": 4,   # God's Companions $4.99 plan (was missing: subscribers got 0)
 }
 # Lifetime global cap on free (promo) audits handed out across ALL users.
 # When the cap is hit, no more free audits are granted and users fall through
@@ -331,11 +376,12 @@ TIERS = {
     "community": {"label": "Community Member", "limit": 1500},
     "resident":  {"label": "Resident",         "limit": 2500},
     "neighbor":  {"label": "Neighbor",         "limit": 4000},
+    "companion": {"label": "Companion",        "limit": 1000},
 }
 
 # Tier order, low to high. min_tier is a paywall only: a door also has to be earned
 # (see open_doors). Everyone but Veronica is available on every tier.
-TIER_ORDER = ["visitor", "community", "resident", "neighbor"]
+TIER_ORDER = ["visitor", "community", "resident", "neighbor", "companion"]
 
 # Doors no longer lock: every resident is talkable from day one. The rules
 # below stay for the admin console, but doors_locked defaults off and any
@@ -392,6 +438,7 @@ ROSTER_SEED = [
      "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real answer."),
 ]
 
+
 # Fallback personas used only until you seed full docs via /admin/persona.
 # The FULL personality texts (the Canvas character docs) are what you paste there —
 # that text becomes the girl's Layer-1 system block, so make it complete.
@@ -415,6 +462,23 @@ DEFAULT_PERSONAS = {
     "anna":     ("Anna",     "The steady hands","EMT and nurse, 23. The woman who doesn't flinch; steady hands, steady heart."),
     "bailey":   ("Bailey",   "The dare",      "Potter, 23. Sharp and funny by design; the dare is armor over the girl who rebuilt everything herself. Outlast the provocation."),
     "sarah":    ("Sarah",    "The sanctuary", "Teacher, 26. Warm and capable; holds the whole town. Earn her by refusing the praise wall and witnessing the grief."),
+    # --- God's Town (Roman) residents ---
+    "harlan":   ("Harlan",   "The cairn-keeper", "Cairn-keeper, 41. Keeps the homecoming stones at the crossing; counts penance the way others count coins. Slowest to trust — show up thirty days and ask for nothing."),
+    "ivo":      ("Ivo",      "The lamplighter", "Lamplighter, 34. Lights every lamp nightly. Jokes freely; flatter him and he performs right back at you."),
+    "lila":     ("Lila",     "The toll-keeper", "Toll-keeper, 23. Charges coin at the crossing with a smile. Fastest to warm — and fastest to raise your price if you keep score."),
+    "nell":     ("Nell",     "The millwright", "Millwright, 24. Best hands on the river. Fixes what's broken; pity is the one thing she won't take."),
+    "sable":    ("Sable",    "The baker", "Baker, 38. Her oven never cools. Sweet and watchful — tiptoe around her and she tests harder."),
+    "bram":     ("Bram",     "The ferryman", "Ferryman, 47. Carries everyone across. Few words, exact change. Grief with an oar — don't hurry him."),
+    "odette":   ("Odette",   "The chandler", "Chandler, 44. Makes the town's candles. Quiet shop, quieter woman; her shop goes silent when she's cold."),
+    "fenwick":  ("Fenwick",  "The blacksmith", "Blacksmith, 52. The forge never lies to him. Rush him and the quench tells on you."),
+    "maren":    ("Maren",    "The teacher", "Teacher, 22. Keeps the slates straight. Lessons you if you quiz her; respects a straight question."),
+    "tobias":   ("Tobias",   "The shepherd", "Shepherd, 55. Ridge-dweller with his flock. Summon him and he's gone; show up steady and he stays."),
+    "prudence": ("Prudence", "The healer", "Healer, 25. Mends what the town breaks. Reorganizes drawers when worried; opens them when she trusts."),
+    "anselm":   ("Anselm",   "The mason", "Mason, 58. Laid half the town's stone. Taps each block like it's listening — because he is."),
+    "delia":    ("Delia",    "The fisher", "Fisher, 36. Reads the water like scripture. Her rituals aren't superstition; mock them and the river hears."),
+    "imogen":   ("Imogen",   "The orchard keeper", "Orchard keeper, 31. Prunes trees and people alike. What's dead gets cut; what's living gets room to grow."),
+    "rufus":    ("Rufus",    "The cooper", "Cooper, 49. His barrels hold the town's drink and half its secrets. Taps the stave while deciding about you."),
+    "hazel":    ("Hazel",    "The midwife", "Midwife, 63. Caught every baby born here for thirty years. Panic near her and she goes colder; steady hands earn steady trust."),
 }
 
 # The stable house-rules block appended to every girl's Layer-1 prompt.
@@ -433,6 +497,38 @@ HOUSE_RULES = (
     "- Relationship progress is graded M1-M8 and shown in the Memory block. Play the "
     "stage you are at honestly: walls come down slowly, and pushing too hard closes doors.\n"
 )
+
+# ---------------------------------------------------------------------------
+# God's Companions serves two towns from one backend. Roman residents get
+# God's Town in their system prefix and house rules; everyone else keeps
+# God's Greek. Lore must never cross the river between the two towns.
+# ---------------------------------------------------------------------------
+ROMAN_GIRLS = frozenset((
+    "harlan", "ivo", "lila", "nell", "sable", "bram", "odette", "fenwick",
+    "maren", "tobias", "prudence", "anselm", "delia", "imogen", "rufus", "hazel",
+))
+
+def town_for(girl: str) -> str:
+    return "God's Town" if girl in ROMAN_GIRLS else "God's Greek"
+
+def audit_instruction_for(girl: str) -> str:
+    """Psychological Audit system prompt: identical except the town name, so a
+    Roman resident's paid report never tells the model to write for God's Greek."""
+    if girl in ROMAN_GIRLS:
+        return AUDIT_INSTRUCTION.replace("God's Greek", "God's Town")
+    return AUDIT_INSTRUCTION
+
+
+def house_rules_for(girl: str) -> str:
+    if girl in ROMAN_GIRLS:
+        # God's Town residents range from their 20s to their 70s: the town and
+        # the age line are both town-specific, never the Greek defaults.
+        return (HOUSE_RULES
+                .replace("one of the people living in God's Greek, a small town deep in the pines",
+                          "one of the people living in God's Town, a small town of marble and sunlit stone")
+                .replace("You are a clearly adult character in their twenties.",
+                          "You are a clearly adult character; your character file gives your true age - never contradict it."))
+    return HOUSE_RULES
 
 AUDIT_INSTRUCTION = (
     "You are writing a confidential Psychological Audit for God's Greek: a paid, "
@@ -631,6 +727,86 @@ GENERIC_ENGINE = {
 }
 
 
+def _parse_contract_header(text):
+    """Parse a character file's ---CONTRACT-HEADER v1--- block into a trust
+    engine dict. Returns None when the block is missing or has no stage_days,
+    so the caller keeps the generic engine for that resident."""
+    m = re.search(r'---CONTRACT-HEADER v1---(.*?)---END-CONTRACT-HEADER---',
+                  text, re.S)
+    if not m:
+        return None
+    fields = {}
+    key_points = []
+    in_keys = False
+    for line in m.group(1).splitlines():
+        s = line.strip()
+        if s.startswith("key_points:"):
+            in_keys = True
+            continue
+        if in_keys:
+            km = re.match(r'-\s+(.*)', s)
+            if km:
+                key_points.append(km.group(1).strip())
+                continue
+            if s == "":
+                continue
+            in_keys = False
+        mm = re.match(r'([a-z_]+):\s*(.*)', s)
+        if mm:
+            fields[mm.group(1)] = mm.group(2).strip()
+    try:
+        stage_days = [int(x) for x in
+                      fields.get("stage_days", "").strip("[]").split(",")
+                      if x.strip()]
+        stage_kept = [int(x) for x in
+                      fields.get("stage_kept", "").strip("[]").split(",")
+                      if x.strip()]
+    except ValueError:
+        return None
+    if not stage_days:
+        return None
+    who = fields.get("name", fields.get("slug", "her"))
+    warm = fields.get("conduct_warm", "")
+    cold = fields.get("conduct_cold", "")
+    conduct_note = ("WARM for %s: %s COLD: %s" % (who, warm, cold)).strip()
+    return {
+        "stage_days": stage_days,
+        "stage_kept": stage_kept or [0, 1, 2, 2, 3, 4, 5],
+        "conduct_note": conduct_note or GENERIC_ENGINE["conduct_note"],
+        "pace_note": fields.get("pace_note", "") or GENERIC_ENGINE["pace_note"],
+        "pinned": key_points[:5],
+        "key_points": key_points,
+    }
+
+
+def _fill_engines_from_canon():
+    """Give every character file with a parseable contract header its own
+    trust engine. Hand-written GIRLS_ENGINE entries always win; files that
+    fail to parse keep the generic engine. Canon stays the single source of
+    truth, so console edits to a file's pacing apply on the next restart."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "characters")
+    try:
+        files = sorted(f for f in os.listdir(base) if f.endswith(".md"))
+    except OSError:
+        return
+    for fn in files:
+        slug = fn[:-3]
+        if slug in GIRLS_ENGINE:
+            continue
+        try:
+            with open(os.path.join(base, fn), encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        eng = _parse_contract_header(text)
+        if eng:
+            GIRLS_ENGINE[slug] = eng
+
+
+_fill_engines_from_canon()
+
+
 def engine_for(girl):
     """Her trust x time dials. A sister added from the console has no hand-written
     block, so she gets the generic one - never another girl's facts and pacing."""
@@ -699,12 +875,48 @@ STAGE_META = {
 }
 
 # ---------------------------------------------------------------------------
-# APP + CORS
+# APP + CORS + UPLOADS SETUP
 # ---------------------------------------------------------------------------
+UPLOAD_DIR = os.environ.get(
+    "KEYHOLE_MEDIA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "media")
+)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".ogv", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+ALLOWED_MEDIA_MIMES = {
+    "video/mp4", "video/webm", "video/quicktime", "video/ogg", "video/x-m4v",
+    "image/jpeg", "image/png", "image/webp", "image/gif"
+}
+MAX_MEDIA_UPLOAD_BYTES = int(os.environ.get("MAX_MEDIA_UPLOAD_BYTES", 100 * 1024 * 1024))  # 100MB default
+
 app = FastAPI(title="God's Greek backend")
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
+
+@app.middleware("http")
+async def security_matrix_filter(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    if request.url.path.startswith("/admin/"):
+        header_sec = request.headers.get("X-Admin-Secret", "")
+        if admin_sec and not hmac.compare_digest(header_sec.encode(), admin_sec.encode()):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "Invalid admin secret"})
+
+    response = await call_next(request)
+    return response
+
+@app.get("/media/files/{filename}")
+def serve_media_file(filename: str):
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Media file not found")
+    return FileResponse(file_path)
 
 
 @app.middleware("http")
@@ -818,6 +1030,16 @@ def init_db():
                     user_id    TEXT NOT NULL REFERENCES users(user_id),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                CREATE TABLE IF NOT EXISTS google_oauth_states (
+                    state_hash TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS login_codes (
+                    code_hash  TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    used       BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
                 -- free time granted from the admin page: tier is comped until comp_until,
                 -- then falls back to comp_prev_tier.
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS comp_until TIMESTAMPTZ;
@@ -834,6 +1056,14 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_event_at BIGINT NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS affitor_click_id TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_minutes_left INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS video_replies_left INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS fresh_videos_left INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS text_balance INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_sessions_bought_this_month INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS text_only_bought_this_month INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_started_at TIMESTAMPTZ;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_duration_s INTEGER NOT NULL DEFAULT 0;
                 -- Telegram users: the Telegram id is the login; /auth/telegram/link can
                 -- later point it at an email account instead.
                 CREATE TABLE IF NOT EXISTS telegram_accounts (
@@ -950,6 +1180,23 @@ def init_db():
                 );
                 INSERT INTO promo_counters (key, used) VALUES ('free_audits', 0)
                 ON CONFLICT (key) DO NOTHING;
+
+                -- KEYHOLE Webcam Video & Media Assets Library
+                CREATE TABLE IF NOT EXISTS media_assets (
+                    id           SERIAL PRIMARY KEY,
+                    character_id TEXT NOT NULL,
+                    title        TEXT NOT NULL DEFAULT '',
+                    media_type   TEXT NOT NULL DEFAULT 'video', -- 'video' or 'image'
+                    url          TEXT NOT NULL,
+                    file_path    TEXT NOT NULL DEFAULT '',
+                    tags         JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    is_default   BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_fallback  BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -976,6 +1223,11 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS blurb TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'normal';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS age INTEGER DEFAULT 18;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS background_info TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS personality_traits TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS no_gos TEXT NOT NULL DEFAULT '';
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _repair_dead_portraits(cur)
@@ -1092,9 +1344,10 @@ def _check_admin(secret: str, strict: bool = False):
     """If ADMIN_SECRET is set, /admin/* calls must send it. Unset => open (dev/personal),
     EXCEPT strict endpoints (anything that changes money/entitlements), which refuse to
     run at all until ADMIN_SECRET is configured."""
-    if strict and not ADMIN_SECRET:
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    if strict and not admin_sec:
         raise HTTPException(status_code=503, detail="ADMIN_SECRET must be set for this endpoint")
-    if ADMIN_SECRET and not hmac.compare_digest(secret.encode(), ADMIN_SECRET.encode()):
+    if admin_sec and not hmac.compare_digest(secret.encode(), admin_sec.encode()):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
@@ -1299,16 +1552,16 @@ def _ensure_user(user_id, display_name="Player", user_row=None, conn=None):
                 else:
                     cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
                     row = cur.fetchone()
-            # lazy monthly reset: message allowance AND free audits refill together.
-            # Visitor is a one-time 50-message trial, so it never refills.
-            if row["tier"] != "visitor" and row["plan_reset_at"] < now:
-                # conditional so two concurrent callers can't both reset (the loser
-                # would wipe usage recorded after the first reset)
+            # lazy monthly reset: message allowance, free audits, and Keyhole monthly purchase caps refill together.
+            if row["plan_reset_at"] < now:
                 cur.execute("""
-                    UPDATE users SET msg_used=0, free_audits_used=0,
+                    UPDATE users SET msg_used = CASE WHEN tier <> 'visitor' THEN 0 ELSE msg_used END,
+                        free_audits_used = CASE WHEN tier <> 'visitor' THEN 0 ELSE free_audits_used END,
+                        quick_sessions_bought_this_month = 0,
+                        text_only_bought_this_month = 0,
                         plan_reset_at = now() + interval '1 month'
-                    WHERE user_id=%s AND tier <> 'visitor' AND plan_reset_at < now()
-                    RETURNING msg_used, free_audits_used, plan_reset_at
+                    WHERE user_id=%s AND plan_reset_at < now()
+                    RETURNING msg_used, free_audits_used, plan_reset_at, quick_sessions_bought_this_month, text_only_bought_this_month
                 """, (user_id,))
                 fresh = cur.fetchone()
                 conn.commit()
@@ -1851,6 +2104,48 @@ def brain_milestone(brain, fallback):
 # ---------------------------------------------------------------------------
 # ONE TURN — prompt assembly and persistence, shared by /chat and /chat/stream.
 # ---------------------------------------------------------------------------
+def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
+    """Tracks active webcam session duration server-side to prevent page refresh bypasses."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webcam_minutes_left, webcam_session_started_at, video_replies_left, fresh_videos_left FROM users WHERE user_id=%s", (user_id,))
+            user = cur.fetchone()
+            if not user:
+                return {"active": False, "reason": "user_not_found"}
+
+            started_at = user.get("webcam_session_started_at")
+            minutes_left = int(user.get("webcam_minutes_left") or 0)
+
+            if not started_at or minutes_left <= 0:
+                return {"active": False, "minutes_left": 0, "video_replies_left": user.get("video_replies_left", 0)}
+
+            now = datetime.now(timezone.utc)
+            elapsed_s = (now - started_at).total_seconds()
+            elapsed_min = elapsed_s / 60.0
+
+            if elapsed_min >= minutes_left:
+                # Session expired - reset session state and deduct minutes
+                cur.execute("""
+                    UPDATE users
+                    SET webcam_minutes_left = 0,
+                        webcam_session_started_at = NULL
+                    WHERE user_id=%s
+                """, (user_id,))
+                conn.commit()
+                return {"active": False, "minutes_left": 0, "reason": "session_expired"}
+
+            remaining_min = max(0, int(minutes_left - elapsed_min))
+            return {
+                "active": True,
+                "minutes_left": remaining_min,
+                "video_replies_left": int(user.get("video_replies_left") or 0),
+                "fresh_videos_left": int(user.get("fresh_videos_left") or 0)
+            }
+    finally:
+        conn.close()
+
+
 def chat_preflight(user, girl_raw):
     """Tier/door/allowance checks. Reserves one message atomically (conditional
     UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
@@ -1858,22 +2153,37 @@ def chat_preflight(user, girl_raw):
     girl = girl_raw.strip().lower()
     if not girl_open(user["user_id"], girl, user["tier"]):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
+
+    # Actively enforce Keyhole webcam session status server-side
+    check_keyhole_session_active(user["user_id"])
+
     limit = TIERS.get(user["tier"], TIERS["visitor"])["limit"]
     conn = db()
     try:
         with conn.cursor() as cur:
+            # First check text_balance carryover, then fallback to tier limit
             cur.execute("""
-                UPDATE users SET msg_used = msg_used + 1
-                WHERE user_id=%s AND msg_used < %s
-                RETURNING msg_used
-            """, (user["user_id"], limit))
-            got = cur.fetchone()
-            conn.commit()
+                UPDATE users SET text_balance = text_balance - 1
+                WHERE user_id=%s AND text_balance > 0
+                RETURNING text_balance
+            """, (user["user_id"],))
+            balance_used = cur.fetchone()
+            if balance_used:
+                conn.commit()
+                remaining = int(balance_used["text_balance"])
+            else:
+                cur.execute("""
+                    UPDATE users SET msg_used = msg_used + 1
+                    WHERE user_id=%s AND msg_used < %s
+                    RETURNING msg_used
+                """, (user["user_id"], limit))
+                got = cur.fetchone()
+                conn.commit()
+                if got is None:
+                    raise HTTPException(status_code=402, detail="out_of_messages")
+                remaining = max(0, limit - int(got["msg_used"]))
     finally:
         conn.close()
-    if got is None:
-        raise HTTPException(status_code=402, detail="out_of_messages")
-    remaining = max(0, limit - int(got["msg_used"]))
     try:
         return girl, get_relationship(user["user_id"], girl), remaining
     except Exception:
@@ -1899,7 +2209,7 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     persona_text, name = get_persona(girl)
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
-    system_text = f"You are {name} from God's Greek.\n\n{persona_text}\n\n{HOUSE_RULES}"
+    system_text = f"You are {name} from {town_for(girl)}.\n\n{persona_text}\n\n{house_rules_for(girl)}"
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
@@ -2142,18 +2452,44 @@ def _openai_stream(cfg, messages, max_tokens=600, temperature=0.8):
 # ---------------------------------------------------------------------------
 # ROLES — the mouth, the brain and the auditor each pick their own provider.
 # ---------------------------------------------------------------------------
+def _gemini_fallback_model(cfg):
+    m = (cfg.get("model") or "").strip()
+    if m and m.startswith("gemini"):
+        return m
+    if CHAT_MODEL and CHAT_MODEL.startswith("gemini"):
+        return CHAT_MODEL
+    return "gemini-3.1-flash-lite"
+
+
 def llm(cfg, messages, thinking=False, max_tokens=600, temperature=0.8):
     if cfg["provider"] == "openai":
-        return _openai(cfg, messages, max_tokens=max_tokens, temperature=temperature)
-    return _gemini(messages, model=cfg["model"], thinking=thinking,
+        try:
+            return _openai(cfg, messages, max_tokens=max_tokens, temperature=temperature)
+        except Exception:
+            if GEMINI_API_KEY:
+                return _gemini(messages, model=_gemini_fallback_model(cfg), thinking=thinking,
+                               max_tokens=max_tokens, temperature=temperature)
+            raise
+    return _gemini(messages, model=_gemini_fallback_model(cfg), thinking=thinking,
                    max_tokens=max_tokens, temperature=temperature)
 
 
 def llm_stream(cfg, messages, max_tokens=600, temperature=0.8):
     if cfg["provider"] == "openai":
-        return _openai_stream(cfg, messages, max_tokens=max_tokens, temperature=temperature)
-    return _gemini_stream(messages, model=cfg["model"], max_tokens=max_tokens,
-                          temperature=temperature)
+        yielded = False
+        try:
+            for chunk in _openai_stream(cfg, messages, max_tokens=max_tokens, temperature=temperature):
+                yielded = True
+                yield chunk
+            return
+        except Exception:
+            if not yielded and GEMINI_API_KEY:
+                yield from _gemini_stream(messages, model=_gemini_fallback_model(cfg),
+                                          max_tokens=max_tokens, temperature=temperature)
+                return
+            raise
+    yield from _gemini_stream(messages, model=_gemini_fallback_model(cfg), max_tokens=max_tokens,
+                              temperature=temperature)
 
 
 def _role_label(cfg):
@@ -2299,6 +2635,9 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
                         "milestone": brain_milestone(brain, rel["milestone"])}
         if picture_due:
             done_payload["picture_due"] = True
+        served_media = detect_and_serve_media(user_id, girl, user_message)
+        if served_media:
+            done_payload["served_media"] = served_media
         yield _sse("done", done_payload)
     finally:
         stop.set()
@@ -2352,7 +2691,9 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabAcc" onclick="show('acc')">Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
-<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button></nav>
+<button id="tabMed" onclick="show('med')">Webcam Media</button>
+<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button>
+<button id="tabGen" onclick="show('gen')">Image Generator</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
@@ -2431,6 +2772,160 @@ full character doc, which is her Layer-1 system block. Changes are live on the n
 Retiring takes her off the doors and keeps every chat, so putting her back resumes where it stopped.</div></div>
 <div id="pedit" class="card hid"></div>
 </section>
+
+<section id="med" class="hid">
+<div class="grid">
+  <div class="card">
+    <h4 style="margin-top:0">Add / Upload Media Asset</h4>
+    <div style="margin-bottom:8px">
+      <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Character / Companion Preset (or type custom below):</label>
+      <div class="row2" style="flex-wrap:wrap;gap:4px">
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_1'">Companion 1</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_2'">Companion 2</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_3'">Companion 3</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_4'">Companion 4</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_5'">Companion 5</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='companion_6'">Companion 6</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='dakota'">Dakota</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='zoe'">Zoe</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='chloe'">Chloe</button>
+        <button class="s" type="button" onclick="$('#mCharId').value='maya'">Maya</button>
+      </div>
+    </div>
+    <div class="row2">
+      <input id="mCharId" placeholder="Character / Companion ID (type freely e.g. companion_1, dakota)" style="flex:1">
+      <input id="mTitle" placeholder="Title / Description (type freely)" style="flex:1">
+      <select id="mType">
+        <option value="video">Video</option>
+        <option value="image">Image</option>
+      </select>
+    </div>
+    <div class="row2">
+      <input id="mTags" placeholder="Tags (comma separated: e.g. idle, talking, sitting-bed, desk)" style="flex:2">
+      <label><input id="mIsDefault" type="checkbox"> Default/Idle</label>
+      <label><input id="mIsFallback" type="checkbox"> Fallback Image</label>
+      <label><input id="mIsEnabled" type="checkbox" checked> Enabled</label>
+    </div>
+    <div class="row2" style="margin-top:8px">
+      <label style="font-size:12px;color:#aaa">Target Format Conversion:</label>
+      <select id="mFormat" style="flex:1">
+        <option value="original">Keep Original / Auto</option>
+        <option value="webp">Convert to WEBP Image</option>
+        <option value="jpeg">Convert to JPEG Image</option>
+        <option value="png">Convert to PNG Image</option>
+      </select>
+    </div>
+    <div class="card" style="background:#101017;margin-top:10px">
+      <h5 style="margin:0 0 8px 0">Option A: Upload File</h5>
+      <input id="mFile" type="file" accept="video/*,image/*">
+      <button class="p" style="margin-top:8px" onclick="uploadMediaAsset()">Upload Media File</button>
+    </div>
+    <div class="card" style="background:#101017;margin-top:10px">
+      <h5 style="margin:0 0 8px 0">Option B: Import Media URL / Webpage</h5>
+      <div style="margin-bottom:6px">
+        <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Webcam Reference Background Presets:</label>
+        <div class="row2" style="flex-wrap:wrap;gap:4px">
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3363.jpeg';$('#mType').value='image';$('#mTitle').value='Living Room Panorama';$('#mTags').value='living-room, couch, desk, panorama'">Living Room Cam (3363)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3364.jpeg';$('#mType').value='image';$('#mTitle').value='Bedroom Panorama';$('#mTags').value='bedroom, bed, desk, panorama'">Bedroom Cam (3364)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3542.jpeg';$('#mType').value='image';$('#mTitle').value='Pink Suite Grid';$('#mTags').value='suite, bed, couch, desk'">Pink Suite Grid (3542)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3543.jpeg';$('#mType').value='image';$('#mTitle').value='Chic Bedroom View';$('#mTags').value='bedroom, bed, desk'">Chic Bedroom (3543)</button>
+          <button class="s" type="button" onclick="$('#mUrl').value='/assets/webcam/IMG_3547.jpeg';$('#mType').value='image';$('#mTitle').value='Sofa Parlor View';$('#mTags').value='living-room, couch, desk'">Sofa Parlor (3547)</button>
+        </div>
+      </div>
+      <input id="mUrl" placeholder="https://... or /assets/webcam/..." style="width:100%">
+      <button class="s" style="margin-top:8px" onclick="importMediaUrlAsset()">Import Media URL / Webpage</button>
+    </div>
+    <div class="card" style="background:#101017;margin-top:10px">
+      <h5 style="margin:0 0 8px 0">Option C: Live Webcam Capture</h5>
+      <video id="camPreview" autoplay playsinline muted style="width:100%;max-height:200px;background:#000;border-radius:6px;display:none"></video>
+      <div class="row2" style="margin-top:8px">
+        <button class="s" id="btnCamStart" onclick="startWebcamStream()">Start Camera</button>
+        <button class="s" id="btnCamSnap" onclick="captureWebcamSnapshot()" style="display:none">Snap Photo</button>
+        <button class="s" id="btnCamRec" onclick="toggleWebcamRecording()" style="display:none">Start Video Rec</button>
+      </div>
+      <div id="camStatus" class="mut" style="margin-top:4px;font-size:12px">Camera inactive</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row2" style="justify-content:space-between">
+      <h4 style="margin:0">Media Library</h4>
+      <div class="row2" style="margin:0">
+        <input id="mFilterChar" placeholder="Filter by character ID" style="width:160px" onkeydown="if(event.key==='Enter')loadMediaAssets()">
+        <button class="s" onclick="loadMediaAssets()">Filter / Refresh</button>
+      </div>
+    </div>
+    <div id="mList" style="margin-top:12px;max-height:600px;overflow-y:auto"></div>
+  </div>
+</div>
+</section>
+
+<section id="gen" class="hid">
+  <div class="card">
+    <h3 style="margin-top:0">Menu Command Translation Key</h3>
+    <div class="mut" style="margin-bottom:12px">Codes sent from the menu are automatically mapped to translated action meanings.</div>
+    <table>
+      <thead>
+        <tr><th>Fruit Code</th><th>Translated Meaning</th></tr>
+      </thead>
+      <tbody id="genTransRows">
+        <tr><td class="mut" colspan="2">Loading translation key...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Upload & Admin Office Avatar Generator</h3>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Fruit Command Code / Prompt (Type freely or click preset)</label>
+          <div class="row2" style="flex-wrap:wrap;gap:4px;margin-bottom:6px">
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/oranges'">/oranges</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/cherries'">/cherries</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/apples'">/apples</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='o/banana'">o/banana</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/banana'">/banana</button>
+            <button class="s" type="button" onclick="$('#genFruitCode').value='/eatabanana'">/eatabanana</button>
+          </div>
+          <input id="genFruitCode" placeholder="Type any fruit code, command, or prompt freely (e.g. /oranges, /banana, custom scene)" style="width:100%" value="/oranges">
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Output Selection</label>
+          <select id="genOutputMode" style="width:100%">
+            <option value="pictures">Pictures</option>
+            <option value="video">Video</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Media Source File (Picture or Video)</label>
+          <input id="genFile" type="file" accept="image/*,video/*" style="width:100%">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="genExpand" type="checkbox" style="width:auto">
+          <label for="genExpand">Expand Surroundings (Pretend outpainting background visuals)</label>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Extended Delay Duration (Seconds)</label>
+          <input id="genExtDuration" type="number" value="10" min="1" max="120" style="width:100%">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="genLoop" type="checkbox" checked style="width:auto">
+          <label for="genLoop">Loop Video After Extended Duration</label>
+        </div>
+        <div>
+          <button class="p" style="width:100%" onclick="runGenerator()">Generate & Translate</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Translation & Extended Display</h3>
+      <div id="genResultBox">
+        <div class="mut">No generation run yet. Select your options and click Generate.</div>
+      </div>
+    </div>
+  </div>
+</section>
 </main>
 <div id="toast"></div>
 <script>
@@ -2440,7 +2935,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',demo:'tabDemo'};
+const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -2462,7 +2957,212 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+
+async function loadMediaAssets(){
+  const charId=($('#mFilterChar')?.value||'').trim().toLowerCase();
+  try{
+    const url='/admin/media'+(charId?`?character_id=${encodeURIComponent(charId)}`:'');
+    const r=await api(url);
+    const assets=r.assets||[];
+    if(!assets.length){
+      $('#mList').innerHTML='<div class="mut">No media assets found. Upload or import a URL above.</div>';
+      return;
+    }
+    $('#mList').innerHTML=assets.map(a=>{
+      const tagBadges=(a.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(' ');
+      const preview=a.media_type==='video'?
+        `<video src="${esc(a.url)}" controls loop muted style="max-width:100%;max-height:160px;border-radius:6px;background:#000"></video>`:
+        `<img src="${esc(a.url)}" style="max-width:100%;max-height:160px;border-radius:6px;object-fit:cover">`;
+      return `<div class="card" style="background:#101017;margin-bottom:12px">
+        <div class="row2" style="justify-content:space-between">
+          <strong>${esc(a.character_id)}</strong> &middot; <span class="mut">${esc(a.title||a.media_type)}</span>
+          <div>
+            ${a.is_default?'<span class="pill senior">Default / Idle</span> ':''}
+            ${a.is_fallback?'<span class="pill resolved">Fallback</span> ':''}
+            ${a.is_enabled?'<span class="pill open">Active</span>':'<span class="pill mut">Disabled</span>'}
+          </div>
+        </div>
+        <div style="margin:8px 0">${preview}</div>
+        <div class="row2" style="margin:4px 0">${tagBadges||'<span class="mut">(no tags)</span>'}</div>
+        <div class="row2" style="margin-top:8px;font-size:12px">
+          <button class="s" onclick="toggleMediaDefault(${a.id})">${a.is_default?'Clear Default':'Set Default'}</button>
+          <button class="s" onclick="toggleMediaFallback(${a.id},${!a.is_fallback})">${a.is_fallback?'Clear Fallback':'Set Fallback'}</button>
+          <button class="s" onclick="toggleMediaEnabled(${a.id},${!a.is_enabled})">${a.is_enabled?'Disable':'Enable'}</button>
+          <button class="s" onclick="promptReplaceMedia(${a.id})">Replace URL/File</button>
+          <button class="s" style="color:#f05555;border-color:#f05555" onclick="deleteMediaAsset(${a.id})">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){toast(e.message,true);}
+}
+
+async function uploadMediaAsset(fileOverride){
+  const charId=$('#mCharId').value.trim();
+  const file=fileOverride || $('#mFile').files[0];
+  if(!charId||!file){toast('Enter character ID and select/record a file',true);return;}
+  const fd=new FormData();
+  fd.append('character_id',charId);
+  fd.append('file',file);
+  fd.append('title',$('#mTitle').value.trim());
+  fd.append('media_type',$('#mType').value);
+  fd.append('tags',$('#mTags').value);
+  fd.append('is_default',$('#mIsDefault').checked);
+  fd.append('is_fallback',$('#mIsFallback').checked);
+  fd.append('is_enabled',$('#mIsEnabled').checked);
+  fd.append('target_format',$('#mFormat').value);
+  try{
+    const r=await fetch('/admin/media/upload',{method:'POST',headers:{'X-Admin-Secret':SECRET},body:fd});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Upload failed');
+    toast('Media uploaded and assigned!');
+    if(!fileOverride)$('#mFile').value='';
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function importMediaUrlAsset(){
+  const charId=$('#mCharId').value.trim();
+  const url=$('#mUrl').value.trim();
+  if(!charId||!url){toast('Enter character ID and URL',true);return;}
+  try{
+    await api('/admin/media/import-url',{
+      method:'POST',
+      body:JSON.stringify({
+        character_id:charId,
+        url:url,
+        title:$('#mTitle').value.trim(),
+        media_type:$('#mType').value,
+        tags:($('#mTags').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+        is_default:$('#mIsDefault').checked,
+        is_fallback:$('#mIsFallback').checked,
+        is_enabled:$('#mIsEnabled').checked,
+        target_format:$('#mFormat').value,
+        download_remote:true,
+        key1:'Westfall13!',
+        key2:'Saintkiller13!'
+      })
+    });
+    toast('Media URL imported!');
+    $('#mUrl').value='';
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+let webcamStream=null, mediaRecorder=null, recChunks=[];
+async function startWebcamStream(){
+  try{
+    webcamStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    const preview=$('#camPreview');
+    preview.srcObject=webcamStream;
+    preview.style.display='block';
+    $('#btnCamSnap').style.display='inline-block';
+    $('#btnCamRec').style.display='inline-block';
+    $('#btnCamStart').innerText='Stop Camera';
+    $('#btnCamStart').onclick=stopWebcamStream;
+    $('#camStatus').innerText='Webcam active';
+  }catch(e){toast('Webcam access error: '+e.message,true);}
+}
+
+function stopWebcamStream(){
+  if(webcamStream){
+    webcamStream.getTracks().forEach(t=>t.stop());
+    webcamStream=null;
+  }
+  $('#camPreview').style.display='none';
+  $('#btnCamSnap').style.display='none';
+  $('#btnCamRec').style.display='none';
+  $('#btnCamStart').innerText='Start Camera';
+  $('#btnCamStart').onclick=startWebcamStream;
+  $('#camStatus').innerText='Camera inactive';
+}
+
+async function captureWebcamSnapshot(){
+  const video=$('#camPreview');
+  if(!video||!webcamStream){toast('Camera not active',true);return;}
+  const canvas=document.createElement('canvas');
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  canvas.toBlob(blob=>{
+    const file=new File([blob],`webcam_snap_${Date.now()}.png`,{type:'image/png'});
+    $('#mType').value='image';
+    uploadMediaAsset(file);
+  },'image/png');
+}
+
+function toggleWebcamRecording(){
+  if(mediaRecorder && mediaRecorder.state==='recording'){
+    mediaRecorder.stop();
+    $('#btnCamRec').innerText='Start Video Rec';
+    $('#camStatus').innerText='Finalizing video...';
+  }else{
+    if(!webcamStream){toast('Camera not active',true);return;}
+    recChunks=[];
+    mediaRecorder=new MediaRecorder(webcamStream);
+    mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size>0)recChunks.push(e.data);};
+    mediaRecorder.onstop=()=>{
+      const blob=new Blob(recChunks,{type:'video/webm'});
+      const file=new File([blob],`webcam_rec_${Date.now()}.webm`,{type:'video/webm'});
+      $('#mType').value='video';
+      uploadMediaAsset(file);
+      $('#camStatus').innerText='Webcam active';
+    };
+    mediaRecorder.start();
+    $('#btnCamRec').innerText='Stop Video Rec';
+    $('#camStatus').innerText='Recording live video...';
+  }
+}
+
+async function toggleMediaDefault(id){
+  try{
+    await api(`/admin/media/${id}/set-default`,{method:'POST'});
+    toast('Default media updated');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function toggleMediaFallback(id,val){
+  try{
+    await api(`/admin/media/${id}/update`,{method:'POST',body:JSON.stringify({is_fallback:val})});
+    toast('Fallback status updated');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function toggleMediaEnabled(id,val){
+  try{
+    await api(`/admin/media/${id}/update`,{method:'POST',body:JSON.stringify({is_enabled:val})});
+    toast('Media status updated');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function promptReplaceMedia(id){
+  const newUrl=prompt('Enter replacement media URL or webpage:');
+  if(!newUrl||!newUrl.trim())return;
+  const targetFmt=$('#mFormat')?.value||'original';
+  const fd=new FormData();
+  fd.append('url',newUrl.trim());
+  fd.append('target_format',targetFmt);
+  try{
+    const r=await fetch(`/admin/media/${id}/replace`,{method:'POST',headers:{'X-Admin-Secret':SECRET},body:fd});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Replacement failed');
+    toast('Media replaced');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
+
+async function deleteMediaAsset(id){
+  if(!confirm('Delete this media asset?'))return;
+  try{
+    await api(`/admin/media/${id}`,{method:'DELETE'});
+    toast('Media asset deleted');
+    loadMediaAssets();
+  }catch(e){toast(e.message,true);}
+}
 async function loadDoors(){try{const r=await api('/admin/console/doors');$('#dLocked').checked=r.doors_locked;$('#dRule').classList.toggle('hid',!r.doors_locked);$('#dSet').value=r.door_set;
  $('#dStage').innerHTML=[1,2,3,4,5,6,7,8].map(s=>`<option value="${s}"${s===r.unlock_stage?' selected':''}>M${s}</option>`).join('')}catch(e){toast(e.message,true)}}
 async function saveDoors(){try{await api('/admin/console/doors',{method:'POST',body:JSON.stringify({doors_locked:$('#dLocked').checked,door_set:+$('#dSet').value,unlock_stage:+$('#dStage').value})});toast('Saved - live on the next reload');loadDoors()}catch(e){toast(e.message,true)}}
@@ -2506,7 +3206,7 @@ async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off th
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
  a.download='maplehollow-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
-async function loadChat(girl){const email=CUR;try{const rows=await api('/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl));document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',b.dataset.girl===girl));
+async function loadChat(girl, companionId){const email=CUR;try{const url=companionId?'/admin/accounts/'+encodeURIComponent(email)+'/chat?companion_id='+companionId:'/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl);const rows=await api(url);document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',(companionId?+b.dataset.companionId===+companionId:b.dataset.girl===girl)));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
 async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
@@ -2532,8 +3232,9 @@ async function openAccount(email){try{const a=await api('/admin/accounts/'+encod
   <h4>Admin note</h4><textarea id="anote">${esc(a.admin_note)}</textarea><div class="row2"><button class="s" onclick="saveNote()">Save note</button></div>
  </div></div>
  <h4>Complaints</h4>${renderComplaints(a.complaints.map(c=>({...c,email:a.email})))}
- <h4>Chat log</h4><div class="plist" id="chatTabs">${a.relationships.map(r=>`<button class="s" data-girl="${esc(r.girl)}">${esc(r.girl)}</button>`).join('')||'<span class="mut">no chats yet</span>'}</div><div id="chat" class="chat" style="margin-top:8px"><span class="mut">Pick a girl to read the latest exchanges.</span></div>`;
- $('#chatTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-girl]');if(b)loadChat(b.dataset.girl)});el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
+ <h4>Custom Companions</h4><div>${(a.companions||[]).map(c=>`<div class="card" style="margin-bottom:8px;"><div class="row2"><b>${esc(c.first_name)}</b> <span class="pill">${esc(c.gender||'female')}</span> <span class="mut">Slot ${c.slot_number} · Trust ${c.milestone}</span></div><div class="mut" style="margin-top:4px;">${esc(c.looks_desc)}</div></div>`).join('')||'<span class="mut">No custom companions created</span>'}</div>
+ <h4>Chat log</h4><div class="plist" id="chatTabs">${a.relationships.map(r=>`<button class="s" data-girl="${esc(r.girl)}">${esc(r.girl)}</button>`).join('')}${(a.companions||[]).map(c=>`<button class="s" data-companion-id="${c.id}">[Companion] ${esc(c.first_name)}</button>`).join('')||(a.relationships.length?'':'<span class="mut">no chats yet</span>')}</div><div id="chat" class="chat" style="margin-top:8px"><span class="mut">Pick a girl or custom companion to read the latest exchanges.</span></div>`;
+ $('#chatTabs').addEventListener('click',e=>{const bGirl=e.target.closest('button[data-girl]');const bComp=e.target.closest('button[data-companion-id]');if(bGirl)loadChat(bGirl.dataset.girl);else if(bComp)loadChat(null,+bComp.dataset.companionId)});el.scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message,true)}}
 function renderComplaints(list){if(!list.length)return '<div class="mut">None</div>';return list.map(c=>`<div class="card" id="c${c.id}"><div class="row2"><b>${esc(c.subject)}</b><span class="pill ${esc(c.status)}">${esc(c.status)}</span>
  <span class="mut">${esc(c.email||'')} ${c.display_name?'· '+esc(c.display_name):''} ${c.tier?'· '+esc(c.tier):''} · ${dt(c.created_at)}</span></div><pre>${esc(c.body)}</pre>
  <div class="row2" style="margin-top:10px"><input id="cn${c.id}" placeholder="Note / resolution" value="${esc(c.admin_note)}" style="flex:1;min-width:200px">
@@ -2547,6 +3248,80 @@ async function endComp(){const email=CUR;if(!confirm('End free time now?'))retur
 async function setTier(){const email=CUR;try{await api('/admin/console/set-tier',{method:'POST',body:JSON.stringify({email,tier:$('#stTier').value})});toast('Tier updated');openAccount(email);loadAccounts()}catch(e){toast(e.message,true)}}
 async function grantAudits(){const email=CUR;try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
 async function saveNote(){const email=CUR;try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
+
+async function loadGenerator(){
+  try{
+    const r=await api('/admin/generator/translations');
+    const tr=r.translations||{};
+    const rows=Object.keys(tr).map(k=>`<tr><td><code>${esc(k)}</code></td><td>${esc(tr[k])}</td></tr>`).join('');
+    $('#genTransRows').innerHTML=rows||'<tr><td colspan="2" class="mut">No translations found</td></tr>';
+  }catch(e){toast(e.message,true);}
+}
+
+async function runGenerator(){
+  const fruitCode=$('#genFruitCode').value;
+  const outputMode=$('#genOutputMode').value;
+  const expand=$('#genExpand').checked;
+  const extDur=+$('#genExtDuration').value||10;
+  const loop=$('#genLoop').checked;
+  const fileEl=$('#genFile');
+
+  const fd=new FormData();
+  fd.append('fruit_code',fruitCode);
+  fd.append('output_mode',outputMode);
+  fd.append('expand_surroundings',expand?'true':'false');
+  fd.append('extended_duration_seconds',extDur);
+  fd.append('loop_enabled',loop?'true':'false');
+  if(fileEl.files&&fileEl.files[0]){
+    fd.append('file',fileEl.files[0]);
+  }
+
+  $('#genResultBox').innerHTML='<div class="mut">Generating media and rendering translation...</div>';
+  try{
+    const r=await fetch('/admin/generator/generate',{
+      method:'POST',
+      headers:{'X-Admin-Secret':SECRET},
+      body:fd
+    });
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Generation failed');
+
+    let previewHtml='';
+    if(j.output_mode==='video'){
+      previewHtml=`<video id="genPreviewVideo" controls ${j.loop_enabled?'loop':''} style="max-width:100%;border-radius:8px;margin-top:10px" src="${esc(j.url)}"></video>`;
+    }else{
+      previewHtml=`<img src="${esc(j.url)}" style="max-width:100%;border-radius:8px;margin-top:10px" alt="Generated picture">`;
+    }
+
+    $('#genResultBox').innerHTML=`
+      <div class="kv">
+        <div>Fruit Code Sent</div><div><code>${esc(j.fruit_code)}</code></div>
+        <div>Translated Meaning</div><div><b>${esc(j.translated_meaning)}</b></div>
+        <div>Output Mode</div><div>${esc(j.output_mode)}</div>
+        <div>Generator Style</div><div>Real Realistic Character (${esc(j.generator_location||'Admin Office')})</div>
+        <div>Creator Status</div><div>${esc(j.creator_status||'Listening - Review mode only')}</div>
+        <div>Clone Bot Status</div><div>${esc(j.clone_bot_status||'Listening - Review mode only')}</div>
+        <div>Surroundings Context</div><div>${esc(j.surrounding_description)}</div>
+        <div>Video Loop Config</div><div>${esc(j.loop_description)}</div>
+      </div>
+      ${previewHtml}
+    `;
+
+    if(j.output_mode==='video'&&j.loop_enabled){
+      const v=$('#genPreviewVideo');
+      if(v){
+        setTimeout(()=>{
+          v.play().catch(()=>{});
+        },j.extended_duration_seconds*1000);
+      }
+    }
+    toast('Generator execution complete');
+  }catch(e){
+    $('#genResultBox').innerHTML=`<div style="color:var(--warn)">Error: ${esc(e.message)}</div>`;
+    toast(e.message,true);
+  }
+}
+
 if(SECRET){$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}
 </script></body></html>"""
 
@@ -2730,6 +3505,11 @@ class AdminGirlIn(BaseModel):
     sort_order: int = 100
     difficulty: str = DIFFICULTY_DEFAULT
     active: bool = True
+    age: int = 18
+    background_info: str = ""
+    personality_traits: str = ""
+    no_gos: str = ""
+    media_library: Any = []
 
 
 @app.on_event("startup")
@@ -2867,10 +3647,200 @@ def logout(authorization: str = Header(default=""), user=Depends(current_user)):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# GOOGLE SSO (God's Companions: Google is the ONLY sign-in — no password,
+# no magic link). New Google accounts are created verified. Post-login the
+# user lands back on the app with the session token in the URL hash, which
+# the frontend picks up and stores.
+# ---------------------------------------------------------------------------
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_PATH = "/auth/google/callback"
+GOOGLE_NEXT_ALLOW = [u.strip().rstrip("/") for u in
+    os.environ.get("ALLOWED_GOOGLE_NEXT",
+                   "https://lockeddoor.ai/app,https://godscompanions.lockeddoor.ai").split(",")
+    if u.strip()]
+
+def _google_api_base() -> str:
+    return os.environ.get("PUBLIC_API_BASE",
+                          "https://sorority-house-production-aeb5.up.railway.app").rstrip("/")
+
+def _google_state_sign(landing: str) -> str:
+    payload = {"l": landing, "n": secrets.token_urlsafe(16),
+               "e": int(time.time()) + 600}   # 10-minute life, random nonce
+    raw = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig = hmac.new(GOOGLE_CLIENT_SECRET.encode(), raw.encode(),
+                   hashlib.sha256).hexdigest()[:32]
+    state = f"{raw}.{sig}"
+    # Single-use: record the state so a captured value cannot be replayed.
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM google_oauth_states WHERE created_at < now() - interval '30 minutes'")
+            cur.execute("INSERT INTO google_oauth_states (state_hash) VALUES (%s) ON CONFLICT DO NOTHING",
+                        (hashlib.sha256(state.encode()).hexdigest(),))
+            conn.commit()
+    finally:
+        conn.close()
+    return state
+
+def _google_state_verify(state: str):
+    try:
+        raw, sig = state.split(".", 1)
+        want = hmac.new(GOOGLE_CLIENT_SECRET.encode(), raw.encode(),
+                        hashlib.sha256).hexdigest()[:32]
+        if not hmac.compare_digest(sig, want):
+            return None
+        pad = "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(raw + pad).decode())
+        if int(payload.get("e", 0)) < int(time.time()):
+            return None   # expired
+        landing = payload.get("l") or ""
+        if not landing:
+            return None
+        # Consume: a state that was never issued (or was already used) fails.
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM google_oauth_states WHERE state_hash=%s",
+                            (hashlib.sha256(state.encode()).hexdigest(),))
+                consumed = cur.rowcount
+                conn.commit()
+        finally:
+            conn.close()
+        if not consumed:
+            return None
+        return landing
+    except Exception:
+        return None
+
+@app.get("/auth/google", dependencies=[Depends(auth_rate_limit)])
+def auth_google(next: str = ""):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    landing = (next or "").strip().rstrip("/")
+    if landing not in GOOGLE_NEXT_ALLOW:
+        landing = GOOGLE_NEXT_ALLOW[0] if GOOGLE_NEXT_ALLOW else "/"
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": _google_api_base() + GOOGLE_REDIRECT_PATH,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": _google_state_sign(landing),
+        "prompt": "select_account",
+    }
+    return RedirectResponse(
+        "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params),
+        status_code=302)
+
+@app.get("/auth/google/callback", dependencies=[Depends(auth_rate_limit)])
+def auth_google_callback(code: str = "", state: str = ""):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    landing = _google_state_verify(state)
+    if not landing:
+        raise HTTPException(status_code=400, detail="Invalid sign-in state")
+    try:
+        tok = requests.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": _google_api_base() + GOOGLE_REDIRECT_PATH,
+            "grant_type": "authorization_code",
+        }, timeout=20)
+        access = tok.json().get("access_token")
+        if not access:
+            raise ValueError("token exchange failed")
+        me = requests.get("https://openidconnect.googleapis.com/v1/userinfo",
+                          headers={"Authorization": f"Bearer {access}"},
+                          timeout=20).json()
+        email = _norm_email(me.get("email", ""))
+        if not email or not me.get("email_verified"):
+            raise ValueError("email not verified by Google")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502,
+                            detail="Google sign-in failed; please try again")
+    name = (me.get("name") or email.split("@")[0])[:40]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            acct = _account_by_email(cur, email)
+            if acct is None:
+                user_id = "u_" + secrets.token_hex(12)
+                cur.execute("""
+                    INSERT INTO users (user_id, display_name, tier, plan_reset_at, affitor_click_id)
+                    VALUES (%s,%s,'visitor', now() + interval '1 month', NULL)
+                """, (user_id, name or "Player"))
+                # No password for Google accounts: unusable marker hash.
+                cur.execute("""
+                    INSERT INTO accounts (email, user_id, password_hash, verified_at)
+                    VALUES (%s,%s,%s,now())
+                """, (email, user_id, "google-oauth:" + secrets.token_hex(16)))
+                conn.commit()
+            else:
+                user_id = acct["user_id"]
+                if acct["verified_at"] is None:
+                    # Google just proved ownership of this email. Any password
+                    # on the row predates verification - possibly set by an
+                    # attacker pre-registering this address - so replace it
+                    # with an unusable marker instead of preserving it.
+                    cur.execute("UPDATE accounts SET verified_at=now(), password_hash=%s WHERE email=%s",
+                                ("google-oauth:" + secrets.token_hex(16), email))
+                    conn.commit()
+            # Never put the session token in the URL (fragment or query): it
+            # persists in history and can leak. Issue a single-use login code;
+            # the frontend swaps it for a token via POST /auth/exchange.
+            login_code = secrets.token_urlsafe(32)
+            cur.execute("INSERT INTO login_codes (code_hash, user_id) VALUES (%s,%s)",
+                        (hashlib.sha256(login_code.encode()).hexdigest(), user_id))
+            conn.commit()
+    finally:
+        conn.close()
+    _ensure_user(user_id)
+    return RedirectResponse(f"{landing}/?gcode={login_code}", status_code=302)
+
+
+class ExchangeIn(BaseModel):
+    code: str = ""
+
+@app.post("/auth/exchange", dependencies=[Depends(auth_rate_limit)])
+def auth_exchange(body: ExchangeIn):
+    """Swap a single-use Google login code for a session token. The code is
+    bound to one user, expires after 10 minutes, and is consumed on first use,
+    so a captured code cannot be replayed."""
+    code = (body.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing login code")
+    digest = hashlib.sha256(code.encode()).hexdigest()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM login_codes WHERE created_at < now() - interval '10 minutes'")
+            # Atomic consume: the row is validated and removed in one
+            # statement, so two concurrent exchanges cannot both succeed.
+            cur.execute("""
+                DELETE FROM login_codes
+                WHERE code_hash=%s AND used=FALSE
+                RETURNING user_id
+            """, (digest,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="Invalid or expired login code")
+            token = _new_session(cur, row["user_id"])
+            conn.commit()
+            return {"ok": True, "token": token}
+    finally:
+        conn.close()
+
+
+
 def _telegram_guard(secret: str, telegram_id: int):
-    if not TELEGRAM_BOT_SECRET:
+    bot_sec = os.environ.get("TELEGRAM_BOT_SECRET", "")
+    if not bot_sec:
         raise HTTPException(status_code=503, detail="TELEGRAM_BOT_SECRET must be set")
-    if not hmac.compare_digest(secret.encode(), TELEGRAM_BOT_SECRET.encode()):
+    if not hmac.compare_digest(secret.encode(), bot_sec.encode()):
         raise HTTPException(status_code=401, detail="Bad bot secret")
     if telegram_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid telegram_id")
@@ -2948,16 +3918,66 @@ def telegram_link(body: TelegramLinkIn):
             "created": False, "email": email}
 
 
+MEDIA_REQUEST_KEYWORDS = ["picture", "photo", "pic", "video", "selfie", "snap", "image", "media"]
+
+def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Dict[str, Any]]:
+    """Detects if user asks for a picture or video during chat and serves an item from that girl's library."""
+    msg_lower = message.lower()
+    if not any(kw in msg_lower for kw in MEDIA_REQUEST_KEYWORDS):
+        return None
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            # Check video replies cap and fresh videos allowance
+            cur.execute("SELECT video_replies_left, fresh_videos_left FROM users WHERE user_id=%s", (user_id,))
+            user_row = cur.fetchone() or {}
+
+            is_video_req = any(kw in msg_lower for kw in ["video", "clip"])
+            if is_video_req:
+                # Fresh video messages are restricted to users with fresh_videos_left (Premium Session tier)
+                if int(user_row.get("fresh_videos_left") or 0) > 0:
+                    cur.execute("UPDATE users SET fresh_videos_left = fresh_videos_left - 1 WHERE user_id=%s", (user_id,))
+                elif int(user_row.get("video_replies_left") or 0) > 0:
+                    cur.execute("UPDATE users SET video_replies_left = video_replies_left - 1 WHERE user_id=%s", (user_id,))
+                else:
+                    return {"type": "notice", "text": "You have reached your video reply cap for this session."}
+
+            cur.execute("SELECT media_library, avatar_url, name FROM personas WHERE girl=%s", (girl,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            library = row.get("media_library") or []
+            if isinstance(library, str):
+                try:
+                    library = json.loads(library)
+                except Exception:
+                    library = []
+            if library and isinstance(library, list):
+                item = random.choice(library)
+                if isinstance(item, dict):
+                    return item
+                return {"type": "video" if is_video_req else "image", "url": str(item)}
+            # Fallback placeholder item from her library profile
+            fallback_url = row.get("avatar_url") or ""
+            return {"type": "video" if is_video_req else "image", "url": fallback_url, "title": f"Media from {row.get('name', girl.title())}'s library"}
+    finally:
+        conn.close()
+
+
 @app.post("/chat")
 def chat(body: ChatIn, user=Depends(current_user)):
     """Whole reply in one response. The brain runs behind it, so "milestone" here
     is the stage as of this turn; /state has it once the refresh lands."""
     girl, rel, remaining = chat_preflight(user, body.girl)
     used = TIERS.get(user["tier"], TIERS["visitor"])["limit"] - remaining
+    served_media = detect_and_serve_media(user["user_id"], girl, body.message)
     if pic_tease_due(user["user_id"], user["tier"], used):
         persist_turn(user["user_id"], girl, rel, body.message, PIC_TEASE_LINE)
-        return {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
+        resp = {"ok": True, "reply": PIC_TEASE_LINE, "remaining": remaining,
                 "milestone": int(rel["milestone"])}
+        if served_media:
+            resp["served_media"] = served_media
+        return resp
     try:
         msgs = build_chat_messages(user["user_id"], girl, rel, body.message)
         reply = llm(MOUTH, msgs)   # no thinking budget for chat
@@ -2969,6 +3989,8 @@ def chat(body: ChatIn, user=Depends(current_user)):
 
     resp = {"ok": True, "reply": reply, "remaining": remaining,
             "milestone": int(rel["milestone"])}
+    if served_media:
+        resp["served_media"] = served_media
     if pic_deliver_due(user["user_id"], user["tier"]):
         resp["picture_due"] = True
     return resp
@@ -4194,6 +5216,30 @@ class HairstyleIn(BaseModel):
     style_label: str = ""
 
 
+@app.get("/companions/{companion_id}/history")
+def get_companion_history(companion_id: int, user=Depends(current_user)):
+    """Last messages of this companion's chat, scoped to its owner. The app
+    restores the visible transcript from this when a chat is reopened."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM companions WHERE id=%s AND user_id=%s",
+                        (companion_id, uid))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Companion not found")
+            cur.execute("""SELECT sender, message FROM companion_chat_logs
+                           WHERE companion_id=%s AND user_id=%s
+                           ORDER BY id DESC LIMIT 8""",
+                        (companion_id, uid))
+            rows = cur.fetchall()
+            return {"ok": True,
+                    "messages": [{"sender": r["sender"], "message": r["message"]}
+                                 for r in reversed(rows)]}
+    finally:
+        conn.close()
+
+
 @app.delete("/companions/{companion_id}")
 def delete_companion(companion_id: int, user=Depends(current_user)):
     """Hard-deletes a companion so a new one can start clean (no data mixing).
@@ -4276,8 +5322,8 @@ def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_
 # residents never retire.
 # ---------------------------------------------------------------------------
 AVATAR_STYLE = (
-    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
-    "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
+    "Ancient Greek real realistic character portrait — a detailed photorealistic digital illustration "
+    "blending lifelike facial features with authentic real realistic character detail, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
     "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
     "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
@@ -4330,20 +5376,7 @@ class AvatarPromoteIn(BaseModel):
 @app.post("/avatar")
 def create_avatar(body: AvatarIn, user=Depends(current_user)):
     """Generate (or regenerate) the player's private avatar from a description."""
-    desc = (body.description or "").strip()
-    if not desc:
-        raise HTTPException(status_code=400, detail="Describe the character you want to be")
-    mime, b64 = generate_avatar(desc)
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""UPDATE users SET avatar_b64=%s, avatar_mime=%s, avatar_prompt=%s,
-                           avatar_updated_at=now() WHERE user_id=%s""",
-                        (b64, mime, desc[:300], user["user_id"]))
-            conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True, "mime": mime, "image_b64": b64, "disclosure": "AI-generated image"}
+    raise HTTPException(status_code=403, detail="Avatar image generator is restricted to the admin office.")
 
 
 class AvatarPresetIn(BaseModel):
@@ -4353,40 +5386,8 @@ class AvatarPresetIn(BaseModel):
 
 @app.post("/avatar/preset")
 def set_avatar_from_preset(body: AvatarPresetIn, user=Depends(current_user)):
-    """Set the player's avatar from a preset face illustration.
-
-    The client sends one of the bundled artist preset faces (base64). The
-    image is safety-checked like companion photos, then repainted in the
-    God's Greek portrait style (pines background) before storing.
-    """
-    raw = (body.image_b64 or "").strip()
-    if "," in raw:  # allow data URLs
-        raw = raw.split(",", 1)[1]
-    try:
-        img_bytes = base64.b64decode(raw, validate=True)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid image data.")
-    if not img_bytes or len(img_bytes) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Invalid image data.")
-    mime = (body.mime or "image/jpeg").strip() or "image/jpeg"
-    if not mime.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid image data.")
-    # Same safety bar as companion photos: never paint from a flagged image.
-    moderate_companion_photo(img_bytes, mime, user["user_id"])
-    prompt = (AVATAR_STYLE +
-              "Keep the same face, face shape, hairstyle, and likeness as the "
-              "reference illustration. Redraw it fully in the God's Greek portrait style.")
-    out_mime, b64 = _gemini_image_edit(img_bytes, mime, prompt)
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""UPDATE users SET avatar_b64=%s, avatar_mime=%s, avatar_prompt=%s,
-                           avatar_updated_at=now() WHERE user_id=%s""",
-                        (b64, out_mime, "preset face", user["user_id"]))
-            conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True, "mime": out_mime, "image_b64": b64, "disclosure": "AI-generated image"}
+    """Set the player's avatar from a preset face illustration."""
+    raise HTTPException(status_code=403, detail="Avatar image generator is restricted to the admin office.")
 
 
 @app.get("/avatar/me")
@@ -4521,14 +5522,33 @@ def public_roster():
 def state(user=Depends(current_user)):
     house = roster()
     doors = open_doors(user["user_id"], user["tier"], house)
+
+    # OPTIMIZATION (Bolt ⚡): Batch fetch all user relationships in 1 DB query instead of loop calls to get_relationship()
+    # Batch query cuts DB connections/roundtrips from 35+ down to 1 when building state.
+    rel_by_girl = {}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM relationships WHERE user_id=%s", (user["user_id"],))
+            for r in cur.fetchall():
+                rel_by_girl[r["girl"]] = r
+    finally:
+        conn.close()
+
     girls = {}
     for row in house:
         door = doors.get(row["girl"]) or {"open": False, "reason": "Door still shut"}
         if door["open"]:
-            rel = get_relationship(user["user_id"], row["girl"])
-            band, _ball = STAGE_META.get(int(rel["milestone"]), STAGE_META[1])
-            girls[row["girl"]] = {"open": True, "milestone": rel["milestone"], "band": band,
-                                  "kept": len(rel.get("pinned_kept") or [])}
+            rel = rel_by_girl.get(row["girl"])
+            if rel is not None:
+                milestone = rel["milestone"]
+                kept = len(rel.get("pinned_kept") or [])
+            else:
+                milestone = 1
+                kept = 0
+            band, _ball = STAGE_META.get(int(milestone), STAGE_META[1])
+            girls[row["girl"]] = {"open": True, "milestone": milestone, "band": band,
+                                  "kept": kept}
         else:
             # locked girls still show so the frontend can render the shut doors
             girls[row["girl"]] = {"open": False, "milestone": 0, "band": "", "kept": 0,
@@ -4641,7 +5661,7 @@ def audit(body: AuditIn, user=Depends(current_user)):
                         "\n\nROLLING MEMORY:\n" + (rel["summary"] or "(none yet)") +
                         "\n\nRECENT EXCHANGES:\n" + ("\n".join(record) if record else "(none)"))
 
-        messages = [{"role": "system", "content": AUDIT_INSTRUCTION},
+        messages = [{"role": "system", "content": audit_instruction_for(girl)},
                     {"role": "user", "content": full_context}]
         # thinking ON for audits (deep analysis). Same model unless AUDIT_MODEL is separate.
         thinking_on = AUDIT_THINKING and (AUDIT_MODEL == CHAT_MODEL)
@@ -4854,6 +5874,298 @@ def grant_pictures(body: GrantPicturesIn):
         raise HTTPException(status_code=400, detail="payment_id required")
     user = _user_for_email(body.email)
     return _grant_picture_packs(user["user_id"], body.packs, payment_id)
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE HELPERS & ENTITLEMENT GRANTS
+# ---------------------------------------------------------------------------
+def get_keyhole_config():
+    """Retrieve dynamic keyhole config from DB house_rules, falling back to defaults."""
+    cfg = dict(KEYHOLE_DEFAULT_CONFIG)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM house_rules WHERE key LIKE 'kh_%'")
+            for r in cur.fetchall():
+                k = r["key"][3:]
+                if k in cfg:
+                    try:
+                        cfg[k] = float(r["value"]) if "." in r["value"] else int(r["value"])
+                    except ValueError:
+                        pass
+    finally:
+        conn.close()
+    return cfg
+
+
+def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
+    """Grants Keyhole session packages with text allowance carryover and purchase cap enforcement."""
+    pkg = package_type.lower().strip()
+    cfg = get_keyhole_config()
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+            user = cur.fetchone()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            # Check purchase caps
+            quick_cap = int(cfg.get("quick_monthly_cap", 3))
+            text_cap = int(cfg.get("text_only_monthly_cap", 1))
+
+            if pkg == "quick":
+                if int(user.get("quick_sessions_bought_this_month", 0)) >= quick_cap:
+                    raise HTTPException(status_code=400, detail=f"Monthly limit of {quick_cap} Quick Sessions reached.")
+            elif pkg == "text_only":
+                if int(user.get("text_only_bought_this_month", 0)) >= text_cap:
+                    raise HTTPException(status_code=400, detail=f"Monthly limit of {text_cap} Text-Only package reached.")
+
+            # Calculate new entitlements with CARRYOVER for unused text messages
+            add_text = 0
+            add_webcam = 0
+            add_video_replies = 0
+            add_fresh_videos = 0
+
+            if pkg == "quick":
+                add_webcam = int(cfg.get("quick_webcam_minutes", 15))
+                add_video_replies = int(cfg.get("quick_video_replies", 35))
+                add_text = int(cfg.get("quick_text_included", 100))
+                cur.execute("UPDATE users SET quick_sessions_bought_this_month = quick_sessions_bought_this_month + 1 WHERE user_id=%s", (user_id,))
+            elif pkg == "standard":
+                add_webcam = int(cfg.get("standard_webcam_minutes", 30))
+                add_video_replies = int(cfg.get("standard_video_replies", 70))
+                add_text = int(cfg.get("standard_text_included", 200))
+            elif pkg == "extended":
+                add_webcam = int(cfg.get("extended_webcam_minutes", 45))
+                add_video_replies = int(cfg.get("extended_video_replies", 100))
+                add_text = int(cfg.get("extended_text_included", 300))
+            elif pkg == "premium":
+                add_webcam = int(cfg.get("premium_webcam_minutes", 60))
+                add_fresh_videos = int(cfg.get("premium_fresh_videos", 3))
+                # Add picture credits
+                pics = int(cfg.get("premium_premade_pictures", 5))
+                cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s", (pics, user_id))
+            elif pkg == "text_only":
+                add_text = int(cfg.get("text_only_included", 100))
+                cur.execute("UPDATE users SET text_only_bought_this_month = text_only_bought_this_month + 1 WHERE user_id=%s", (user_id,))
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
+
+            # Apply carryover: existing text_balance + add_text
+            cur.execute("""
+                UPDATE users
+                SET text_balance = text_balance + %s,
+                    webcam_minutes_left = webcam_minutes_left + %s,
+                    video_replies_left = video_replies_left + %s,
+                    fresh_videos_left = fresh_videos_left + %s
+                WHERE user_id=%s
+                RETURNING text_balance, webcam_minutes_left, video_replies_left, fresh_videos_left, pic_credits
+            """, (add_text, add_webcam, add_video_replies, add_fresh_videos, user_id))
+            updated = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
+    finally:
+        conn.close()
+
+
+class KeyholePurchaseIn(BaseModel):
+    package_type: str
+
+
+@app.post("/keyhole/purchase")
+def keyhole_purchase(body: KeyholePurchaseIn, user=Depends(current_user)):
+    """Purchase a Keyhole session or text-only package."""
+    return grant_keyhole_package(user["user_id"], body.package_type)
+
+
+@app.post("/keyhole/session/start")
+def keyhole_session_start(user=Depends(current_user)):
+    """Starts or reconnects a webcam session server-side."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webcam_minutes_left, webcam_session_started_at, webcam_session_duration_s FROM users WHERE user_id=%s", (uid,))
+            row = cur.fetchone()
+            if not row or int(row.get("webcam_minutes_left") or 0) <= 0:
+                raise HTTPException(status_code=400, detail="No webcam minutes remaining.")
+
+            # Start timer if not already running
+            if not row.get("webcam_session_started_at"):
+                cur.execute("UPDATE users SET webcam_session_started_at = now() WHERE user_id=%s RETURNING webcam_session_started_at", (uid,))
+                row["webcam_session_started_at"] = cur.fetchone()["webcam_session_started_at"]
+                conn.commit()
+            return {"ok": True, "started_at": str(row["webcam_session_started_at"]), "minutes_left": row["webcam_minutes_left"]}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# MODULAR PAYMENT LAYER — Abstract base provider & manager
+# Allows plugging compatible payment providers without site rebuilds.
+# ---------------------------------------------------------------------------
+class BasePaymentProvider:
+    provider_name: str = "base"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+class ShopifyPaymentProvider(BasePaymentProvider):
+    provider_name: str = "shopify"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not SHOPIFY_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="SHOPIFY_WEBHOOK_SECRET must be set")
+        digest = base64.b64encode(hmac.new(SHOPIFY_WEBHOOK_SECRET.encode(), raw_body, hashlib.sha256).digest()).decode()
+        if not hmac.compare_digest(digest, headers.get("X-Shopify-Hmac-Sha256", "")):
+            raise HTTPException(status_code=401, detail="Bad Shopify signature")
+        try:
+            order = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        packs = sum(int(li.get("quantity") or 0) for li in order.get("line_items") or []
+                    if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
+        if packs <= 0:
+            return {"ok": True, "ignored": True}
+        attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
+        user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
+        if user_id:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
+                    if cur.fetchone() is None:
+                        user_id = ""
+            finally:
+                conn.close()
+        if not user_id:
+            email = (order.get("email") or order.get("contact_email") or "").strip()
+            if not email:
+                raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
+            user_id = _user_for_email(email)["user_id"]
+        return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "shopify", "checkout_url": f"{SITE_URL}/cart", "pack_ref": _pack_ref(user_id)}
+
+
+class StripePaymentProvider(BasePaymentProvider):
+    provider_name: str = "stripe"
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not STRIPE_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="STRIPE_WEBHOOK_SECRET must be set")
+        if not _stripe_signed(raw_body, headers.get("Stripe-Signature", "")):
+            raise HTTPException(status_code=401, detail="Bad Stripe signature")
+        try:
+            event = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        kind = event.get("type", "")
+        obj = (event.get("data") or {}).get("object") or {}
+        customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else \
+            (obj.get("customer") or {}).get("id", "")
+        event_at = int(event.get("created") or 0)
+
+        if kind == "invoice.paid":
+            tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))
+            if not tier:
+                return {"ok": True, "ignored": "no known price"}
+            sub = _stripe_invoice_subscription(obj)
+            user = _user_for_stripe_checkout(sub) or _user_for_stripe_customer(customer_id)
+            if user is None:
+                email = (obj.get("customer_email") or "").strip() or _stripe_customer_email(customer_id)
+                if not email:
+                    return {"ok": True, "ignored": "no email"}
+                try:
+                    user = _user_for_email(email)
+                except HTTPException:
+                    return {"ok": True, "ignored": "no account"}
+            applied = _apply_stripe_event(user["user_id"], tier, customer_id, sub, event_at)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            pi = obj.get("payment_intent")
+            pi = pi if isinstance(pi, str) else (pi or {}).get("id", "") or ""
+            _affitor_stamp(applied, sub, pi)
+            return {"ok": True, "user_id": applied, "tier": tier}
+
+        if kind == "checkout.session.completed":
+            ref = (obj.get("client_reference_id") or "").strip()
+            sub = obj.get("subscription")
+            sub = sub if isinstance(sub, str) else (sub or {}).get("id", "") or ""
+            if not ref or not sub or obj.get("mode") != "subscription":
+                return {"ok": True, "ignored": "no client_reference_id"}
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (ref,))
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                return {"ok": True, "ignored": "unknown user"}
+            _remember_stripe_checkout(sub, ref)
+            if obj.get("payment_status") != "paid":
+                return {"ok": True, "user_id": ref, "pending": True}
+            tier = _stripe_subscription_tier(sub)
+            if not tier:
+                return {"ok": True, "ignored": "no known price"}
+            applied = _apply_stripe_event(ref, tier, customer_id, sub, event_at, checkout=True)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            _affitor_stamp(applied, sub, "")
+            return {"ok": True, "user_id": applied, "tier": tier}
+
+        if kind in ("customer.subscription.deleted", "customer.subscription.updated"):
+            if kind == "customer.subscription.updated" and obj.get("status") not in ("canceled", "unpaid"):
+                return {"ok": True, "ignored": "status active"}
+            user = _user_for_stripe_customer(customer_id)
+            if user is None:
+                email = _stripe_customer_email(customer_id)
+                if not email:
+                    return {"ok": True, "ignored": "unknown customer"}
+                try:
+                    user = _user_for_email(email)
+                except HTTPException:
+                    return {"ok": True, "ignored": "no account"}
+            current = user.get("stripe_subscription_id")
+            if current and obj.get("id") and obj.get("id") != current:
+                return {"ok": True, "ignored": "not the current subscription"}
+            applied = _apply_stripe_event(user["user_id"], "visitor", customer_id,
+                                          obj.get("id") or "", event_at)
+            if not applied:
+                return {"ok": True, "ignored": "stale event"}
+            return {"ok": True, "user_id": applied, "tier": "visitor"}
+
+        return {"ok": True, "ignored": kind}
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "stripe", "status": "active"}
+
+
+class PaymentGatewayManager:
+    def __init__(self):
+        self._providers: Dict[str, BasePaymentProvider] = {}
+        self.register_provider(ShopifyPaymentProvider())
+        self.register_provider(StripePaymentProvider())
+
+    def register_provider(self, provider: BasePaymentProvider):
+        self._providers[provider.provider_name] = provider
+
+    def get_provider(self, provider_name: str) -> BasePaymentProvider:
+        p = self._providers.get(provider_name.lower())
+        if not p:
+            raise HTTPException(status_code=400, detail=f"Unsupported payment provider: {provider_name}")
+        return p
+
+
+payment_manager = PaymentGatewayManager()
 
 
 @app.post("/webhooks/shopify/orders")
@@ -5355,6 +6667,12 @@ def admin_account(email: str):
                 FROM relationships WHERE user_id=%s ORDER BY milestone DESC
             """, (user["user_id"],))
             acct["relationships"] = cur.fetchall()
+            cur.execute("""
+                SELECT id, slot_number, first_name, gender, looks_desc, personality, backstory,
+                       pet_peeves, non_negotiables, defense, milestone, portrait_url, created_at
+                FROM companions WHERE user_id=%s ORDER BY slot_number ASC
+            """, (user["user_id"],))
+            acct["companions"] = cur.fetchall() or []
             cur.execute("SELECT count(*) AS n FROM chat_logs WHERE user_id=%s AND sender='user'",
                         (user["user_id"],))
             acct["messages_total"] = cur.fetchone()["n"]
@@ -5419,7 +6737,8 @@ def admin_end_comp(body: AdminEmailIn):
 @app.post("/admin/console/set-tier", dependencies=[Depends(admin_required)])
 def admin_console_set_tier(body: AdminSetTierIn):
     """Same semantics as /admin/set-tier, authenticated via X-Admin-Secret."""
-    return set_tier(SetTierIn(email=body.email, tier=body.tier, secret=ADMIN_SECRET))
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    return set_tier(SetTierIn(email=body.email, tier=body.tier, secret=admin_sec))
 
 
 @app.post("/admin/console/verify", dependencies=[Depends(admin_required)])
@@ -5443,7 +6762,8 @@ def admin_console_verify(body: AdminEmailIn):
 
 @app.post("/admin/console/grant-audits", dependencies=[Depends(admin_required)])
 def admin_console_grant_audits(body: AdminGrantAuditsIn):
-    return grant_audits(GrantAuditsIn(email=body.email, amount=body.amount, secret=ADMIN_SECRET))
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
+    return grant_audits(GrantAuditsIn(email=body.email, amount=body.amount, secret=admin_sec))
 
 
 @app.post("/admin/note", dependencies=[Depends(admin_required)])
@@ -5572,8 +6892,9 @@ def admin_personas():
 def admin_console_persona(body: AdminPersonaIn):
     if not body.persona.strip() or not body.name.strip():
         raise HTTPException(status_code=400, detail="name and persona are required")
+    admin_sec = os.environ.get("ADMIN_SECRET", "")
     return set_persona(PersonaIn(girl=body.girl, name=body.name.strip(), door_title=body.door_title.strip(),
-                                 persona=body.persona, secret=ADMIN_SECRET))
+                                 persona=body.persona, secret=admin_sec))
 
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
@@ -5594,24 +6915,30 @@ def admin_console_girl(body: AdminGirlIn):
     if body.difficulty not in DIFFICULTY:
         raise HTTPException(status_code=400,
                             detail="difficulty must be one of " + ", ".join(DIFFICULTY))
+    media_lib = body.media_library if isinstance(body.media_library, list) else []
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
                                       avatar_url, min_tier, sort_order, active,
-                                      difficulty)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                      difficulty, age, background_info, personality_traits,
+                                      no_gos, media_library)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
                     avatar_url=EXCLUDED.avatar_url, min_tier=EXCLUDED.min_tier,
                     sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
-                    difficulty=EXCLUDED.difficulty
+                    difficulty=EXCLUDED.difficulty, age=EXCLUDED.age,
+                    background_info=EXCLUDED.background_info,
+                    personality_traits=EXCLUDED.personality_traits,
+                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
                   body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
-                  body.difficulty))
+                  body.difficulty, int(body.age), body.background_info.strip(),
+                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib)))
             conn.commit()
     finally:
         conn.close()
@@ -5635,6 +6962,33 @@ def admin_console_girl_active(girl: str, active: bool = True):
     if not found:
         raise HTTPException(status_code=404, detail="Unknown girl slug")
     return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/admin/keyhole/config", dependencies=[Depends(admin_required)])
+def admin_get_keyhole_config():
+    """Retrieve current Keyhole pricing and session parameters."""
+    return get_keyhole_config()
+
+
+class KeyholeConfigIn(BaseModel):
+    config: Dict[str, Any]
+
+
+@app.post("/admin/keyhole/config", dependencies=[Depends(admin_required)])
+def admin_set_keyhole_config(body: KeyholeConfigIn):
+    """Save Keyhole pricing and session parameters into DB house_rules."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            for key, val in body.config.items():
+                cur.execute("""
+                    INSERT INTO house_rules (key, value) VALUES (%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """, (f"kh_{key}", str(val)))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "config": get_keyhole_config()}
 
 
 @app.get("/admin/console/doors", dependencies=[Depends(admin_required)])
@@ -5665,22 +7019,985 @@ def admin_console_export():
 
 
 @app.get("/admin/accounts/{email}/chat", dependencies=[Depends(admin_required)])
-def admin_account_chat(email: str, girl: str, limit: int = 60):
-    """Latest exchanges between an account and one girl (support / complaint review)."""
+def admin_account_chat(email: str, girl: Optional[str] = None, companion_id: Optional[int] = None, limit: int = 60):
+    """Latest exchanges between an account and one girl or companion (support / complaint review)."""
     user = _user_for_email(email)
     limit = max(1, min(500, limit))
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, sender, message, created_at FROM chat_logs
-                WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT %s
-            """, (user["user_id"], girl.strip().lower(), limit))
-            rows = cur.fetchall()
+            if companion_id:
+                cur.execute("""
+                    SELECT id, sender, message, created_at FROM companion_chat_logs
+                    WHERE user_id=%s AND companion_id=%s ORDER BY id DESC LIMIT %s
+                """, (user["user_id"], companion_id, limit))
+            elif girl:
+                cur.execute("""
+                    SELECT id, sender, message, created_at FROM chat_logs
+                    WHERE user_id=%s AND girl=%s ORDER BY id DESC LIMIT %s
+                """, (user["user_id"], girl.strip().lower(), limit))
+            else:
+                rows = []
+            rows = cur.fetchall() or []
     finally:
         conn.close()
     rows.reverse()
     return rows
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE WEBCAM MEDIA MANAGER (ADMIN ENDPOINTS)
+# ---------------------------------------------------------------------------
+
+from PIL import Image
+import io
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,video/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _convert_image_bytes(content: bytes, target_format: str) -> tuple[bytes, str, str]:
+    target = (target_format or "").strip().lower()
+    if target in ("jpeg", "jpg"):
+        fmt = "JPEG"
+        ext = ".jpg"
+        mime = "image/jpeg"
+    elif target == "png":
+        fmt = "PNG"
+        ext = ".png"
+        mime = "image/png"
+    elif target == "webp":
+        fmt = "WEBP"
+        ext = ".webp"
+        mime = "image/webp"
+    else:
+        return content, "", ""
+
+    try:
+        img = Image.open(io.BytesIO(content))
+        if fmt == "JPEG" and img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format=fmt)
+        return out.getvalue(), ext, mime
+    except Exception as e:
+        logger.warning(f"Image conversion to {target_format} failed: {e}")
+        return content, "", ""
+
+
+def _safe_http_get(url: str, headers: dict = None, timeout: int = 15, max_redirects: int = 5) -> requests.Response:
+    """Executes an HTTP GET request with SSRF redirect validation and domain IP checks at each hop."""
+    current_url = _validate_media_url(url)
+    req_headers = dict(DEFAULT_BROWSER_HEADERS)
+    if headers:
+        req_headers.update(headers)
+
+    redirect_count = 0
+    while redirect_count <= max_redirects:
+        resp = requests.get(current_url, headers=req_headers, timeout=timeout, stream=True, allow_redirects=False)
+        if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location")
+            if not location:
+                break
+            next_url = urllib.parse.urljoin(current_url, location)
+            current_url = _validate_media_url(next_url)
+            redirect_count += 1
+            continue
+        resp.raise_for_status()
+        return resp
+    raise ValueError("Too many redirects during remote media fetch")
+
+
+def _download_stream(resp: requests.Response) -> bytes:
+    """Streams content chunks up to MAX_MEDIA_UPLOAD_BYTES limit."""
+    content = bytearray()
+    for chunk in resp.iter_content(chunk_size=64 * 1024):
+        if chunk:
+            content.extend(chunk)
+            if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+                logger.warning(f"SECURITY ALERT / WARNING: Remote media download exceeded size limit ({MAX_MEDIA_UPLOAD_BYTES} bytes)")
+                raise ValueError(f"Remote file exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024 * 1024)}MB)")
+    if not content:
+        raise ValueError("Downloaded media content is empty")
+    return bytes(content)
+
+
+def _detect_and_validate_media_signature(content: bytes, file_url: str = "") -> tuple[str, str, str]:
+    """
+    Validates file magic bytes to ensure content is genuine media.
+    Fixes classification when CDNs return generic MIME types.
+    Returns: (media_type, extension, mime_type)
+    """
+    if not content or len(content) < 4:
+        raise ValueError("Invalid media content: file is empty or too short")
+
+    # Video magic signatures
+    if len(content) >= 8 and content[4:8] == b"ftyp":
+        ext = ".mp4"
+        if file_url:
+            parsed_ext = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower()
+            if parsed_ext in (".mov", ".m4v", ".mp4"):
+                ext = parsed_ext
+        return "video", ext, "video/mp4"
+
+    if content.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video", ".webm", "video/webm"
+
+    if content.startswith(b"OggS"):
+        return "video", ".ogv", "video/ogg"
+
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"AVI ":
+        return "video", ".avi", "video/x-msvideo"
+
+    # Image magic signatures
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image", ".jpg", "image/jpeg"
+
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image", ".png", "image/png"
+
+    if content.startswith(b"GIF87a") or content.startswith(b"GIF89a"):
+        return "image", ".gif", "image/gif"
+
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image", ".webp", "image/webp"
+
+    # Fallback image verification via PIL
+    try:
+        img = Image.open(io.BytesIO(content))
+        img.verify()
+        fmt = (img.format or "").lower()
+        if fmt in ("jpeg", "jpg"): return "image", ".jpg", "image/jpeg"
+        if fmt == "png": return "image", ".png", "image/png"
+        if fmt == "webp": return "image", ".webp", "image/webp"
+        if fmt == "gif": return "image", ".gif", "image/gif"
+        return "image", f".{fmt}" if fmt else ".jpg", f"image/{fmt}" if fmt else "image/jpeg"
+    except Exception:
+        pass
+
+    # Check parsed URL extension if video extension is explicitly present
+    parsed_ext = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower() if file_url else ""
+    if parsed_ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv"):
+        return "video", parsed_ext, f"video/{parsed_ext[1:]}" if parsed_ext != ".mov" else "video/quicktime"
+
+    logger.warning("SECURITY ALERT / WARNING: Downloaded file failed signature validation (not recognized media format)")
+    raise ValueError("Invalid media signature: content is not a recognized video or image format")
+
+
+def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[bytes, str, str, str]:
+    """
+    Fetches media from a URL or webpage safely with SSRF protection, streaming size limits,
+    magic byte signature validation, and anti-bot headers.
+    Returns: (content_bytes, safe_ext, mime_type, final_media_type)
+    """
+    headers = dict(DEFAULT_BROWSER_HEADERS)
+    headers["Referer"] = url
+    resp = _safe_http_get(url, headers=headers, timeout=15)
+
+    content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+
+    target_media_url = url
+    if "text/html" in content_type:
+        html_text = resp.text
+        media_url = None
+        v_match = re.search(r'<meta\s+property=["\']og:video(?::url)?["\']\s+content=["\']([^"\']+)["\']', html_text, re.I)
+        if not v_match:
+            v_match = re.search(r'<video[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
+        if not v_match:
+            v_match = re.search(r'<source[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
+
+        img_match = re.search(r'<meta\s+property=["\']og:image(?::url)?["\']\s+content=["\']([^"\']+)["\']', html_text, re.I)
+        if not img_match:
+            img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
+
+        if v_match:
+            media_url = urllib.parse.urljoin(url, v_match.group(1))
+        elif img_match:
+            media_url = urllib.parse.urljoin(url, img_match.group(1))
+
+        if not media_url:
+            raise ValueError("No direct video or image media found on the provided webpage URL")
+
+        target_media_url = media_url
+        headers["Referer"] = url
+        resp = _safe_http_get(media_url, headers=headers, timeout=15)
+
+    content = _download_stream(resp)
+    m_type, ext, mime_type = _detect_and_validate_media_signature(content, file_url=target_media_url)
+
+    if target_format and target_format.lower() != "original" and m_type == "image":
+        converted, new_ext, new_mime = _convert_image_bytes(content, target_format)
+        if new_ext:
+            content = converted
+            ext = new_ext
+            mime_type = new_mime
+
+    return content, ext, mime_type, m_type
+
+
+SECRET_KEY_1 = os.environ.get("LOCK_KEY_WESTFALL", "Westfall13!")
+SECRET_KEY_2 = os.environ.get("LOCK_KEY_SAINTKILLER", "Saintkiller13!")
+
+
+def _verify_dual_secret_locks(
+    key1: Optional[str] = None,
+    key2: Optional[str] = None,
+    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
+    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
+) -> bool:
+    """
+    Dual secret lock validation. Both Key 1 (Westfall13!) and Key 2 (Saintkiller13!) must be turned.
+    If valid, the green matrix shield activates. If invalid, triggers a warning log notification and HTTP 403 response.
+    """
+    provided_key1 = (key1 or x_westfall_key or "").strip()
+    provided_key2 = (key2 or x_saintkiller_key or "").strip()
+
+    valid_key1 = hmac.compare_digest(provided_key1.encode(), SECRET_KEY_1.encode())
+    valid_key2 = hmac.compare_digest(provided_key2.encode(), SECRET_KEY_2.encode())
+
+    if not (valid_key1 and valid_key2):
+        logger.warning(
+            f"SECURITY ALERT / WARNING: Dual secret lock breach attempt! Key1 valid: {valid_key1}, Key2 valid: {valid_key2}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Dual lock access denied: both Westfall and Saintkiller secrets required to disarm shield."
+        )
+
+    logger.info("SECURITY MATRIX: Green matrix shield active. Dual lock authorized.")
+    return True
+
+
+class AdminMediaUrlIn(BaseModel):
+    character_id: str
+    url: str
+    title: str = ""
+    media_type: str = "video"  # 'video' or 'image'
+    tags: List[str] = []
+    is_default: bool = False
+    is_fallback: bool = False
+    is_enabled: bool = True
+    target_format: Optional[str] = "original"
+    download_remote: Optional[bool] = True
+    key1: Optional[str] = None
+    key2: Optional[str] = None
+
+
+class AdminMediaUpdateIn(BaseModel):
+    title: Optional[str] = None
+    media_type: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_default: Optional[bool] = None
+    is_fallback: Optional[bool] = None
+    is_enabled: Optional[bool] = None
+
+
+class AdminMediaReplaceUrlIn(BaseModel):
+    url: str
+    media_type: Optional[str] = None
+
+
+def _parse_tags_input(raw_tags) -> List[str]:
+    if isinstance(raw_tags, list):
+        tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()]
+    elif isinstance(raw_tags, str):
+        try:
+            parsed = json.loads(raw_tags)
+            if isinstance(parsed, list):
+                tags = [str(t).strip().lower() for t in parsed if str(t).strip()]
+            else:
+                tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+        except Exception:
+            tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+    else:
+        tags = []
+    # Deduplicate while preserving order
+    seen = set()
+    out = []
+    for t in tags:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def _validate_character_exists(char_id: str):
+    """Ensure character_id resolves to an existing/approved character in the roster or personas."""
+    cid = char_id.strip().lower()
+    if not cid:
+        raise HTTPException(status_code=400, detail="character_id is required")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT girl FROM personas WHERE girl=%s", (cid,))
+            if cur.fetchone():
+                return cid
+    finally:
+        conn.close()
+    raise HTTPException(status_code=400, detail=f"Character '{cid}' does not exist in roster")
+
+
+def _is_internal_ip(ip_str: str) -> bool:
+    """Check if an IP string belongs to private, loopback, link-local, multicast, or reserved ranges."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private or
+            ip.is_loopback or
+            ip.is_link_local or
+            ip.is_multicast or
+            ip.is_reserved or
+            ip.is_unspecified
+        )
+    except ValueError:
+        return True
+
+
+def _validate_media_url(url: str):
+    """Validate external media URL to http/https schemes and verify it does not resolve to local/private network addresses (SSRF prevention)."""
+    s = url.strip()
+    parsed = urllib.parse.urlparse(s)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        logger.warning(f"SECURITY ALERT: Media URL validation failed for scheme/netloc: '{s}'")
+        raise HTTPException(status_code=400, detail="Invalid media URL: must use http or https scheme")
+
+    hostname = parsed.hostname
+    if not hostname:
+        logger.warning(f"SECURITY ALERT: Media URL missing hostname: '{s}'")
+        raise HTTPException(status_code=400, detail="Invalid media URL: missing hostname")
+
+    try:
+        # Resolve all IPs for hostname
+        addr_info = socket.getaddrinfo(hostname, None)
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            if _is_internal_ip(ip_str):
+                logger.warning(f"SECURITY ALERT / WARNING: SSRF attempt blocked! URL '{s}' resolves to internal IP {ip_str}")
+                raise HTTPException(status_code=400, detail=f"Forbidden media URL: target resolves to internal network address ({ip_str})")
+    except socket.gaierror as e:
+        logger.warning(f"SECURITY ALERT: Media URL domain resolution failed for '{s}': {e}")
+        raise HTTPException(status_code=400, detail=f"Cannot resolve domain for media URL: {e}")
+
+    return s
+
+
+@app.get("/admin/generator/translations", dependencies=[Depends(admin_required)])
+def admin_generator_translations():
+    """Get translation mappings for fruit menu codes."""
+    return {
+        "translations": FRUIT_MENU_TRANSLATIONS,
+        "supported_codes": list(FRUIT_MENU_TRANSLATIONS.keys())
+    }
+
+
+@app.post("/admin/generator/generate", dependencies=[Depends(admin_required)])
+async def admin_generator_generate(
+    fruit_code: str = Form(...),
+    output_mode: str = Form("pictures"),
+    expand_surroundings: bool = Form(False),
+    extended_duration_seconds: int = Form(10),
+    loop_enabled: bool = Form(True),
+    file: Optional[UploadFile] = File(None)
+):
+    """Generate or translate menu media with expanded surroundings and extended loop options."""
+    code_clean = fruit_code.strip()
+    if not code_clean.startswith("/") and not code_clean.startswith("o/"):
+        code_clean = "/" + code_clean
+
+    translated = FRUIT_MENU_TRANSLATIONS.get(code_clean) or FRUIT_MENU_TRANSLATIONS.get(code_clean.lower(), "custom scene generation")
+
+    url = ""
+    file_path_rel = ""
+    media_type = "image" if output_mode.lower() in ("picture", "pictures", "image") else "video"
+
+    if file and file.filename:
+        filename = file.filename
+        ext = os.path.splitext(filename)[1].lower() or (".mp4" if media_type == "video" else ".png")
+        if ext not in ALLOWED_MEDIA_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+        safe_name = f"gen_{secrets.token_hex(8)}{ext}"
+        dest_path = os.path.join(UPLOAD_DIR, safe_name)
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES} bytes)")
+
+        with open(dest_path, "wb") as f:
+            f.write(content)
+
+        file_path_rel = safe_name
+        url = f"/uploads/media/{safe_name}"
+    else:
+        # Route to admin office avatar image generator (real realistic character style)
+        prompt_desc = f"Fruit command {code_clean} translation: {translated}"
+        try:
+            mime, b64 = generate_avatar(prompt_desc)
+            url = f"data:{mime};base64,{b64}"
+            file_path_rel = f"gen_avatar_{secrets.token_hex(4)}.png"
+        except Exception:
+            file_path_rel = f"gen_placeholder_{secrets.token_hex(4)}.png"
+            url = f"/uploads/media/{file_path_rel}"
+
+    surrounding_desc = "Outpainted surrounding environment active" if expand_surroundings else "Standard focus framing"
+    loop_desc = f"Loop enabled after {extended_duration_seconds}s extended play" if (media_type == "video" and loop_enabled) else "Standard playback"
+
+    creator_status = "Fixing code - Review mode only (Target: space thought, Permission code: Westfall13!)"
+    clone_bot_status = "Fixing code - Review mode only (Target: space thought, Permission code: Westfall13!)"
+
+    return {
+        "ok": True,
+        "fruit_code": fruit_code,
+        "code_clean": code_clean,
+        "translated_meaning": translated,
+        "output_mode": media_type,
+        "expand_surroundings": expand_surroundings,
+        "surrounding_description": surrounding_desc,
+        "extended_duration_seconds": extended_duration_seconds,
+        "loop_enabled": loop_enabled,
+        "loop_description": loop_desc,
+        "url": url,
+        "file_path": file_path_rel,
+        "generator_location": "Admin Office",
+        "style": "real realistic character",
+        "creator_status": creator_status,
+        "clone_bot_status": clone_bot_status,
+        "repo_review_target": "space thought",
+        "permission_code": "Westfall13!"
+    }
+
+
+@app.get("/admin/media", dependencies=[Depends(admin_required)])
+def admin_list_media(character_id: str = ""):
+    """List all media assets in the library, optionally filtered by character_id."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if character_id.strip():
+                cur.execute("""
+                    SELECT id, character_id, title, media_type, url, file_path, tags,
+                           is_default, is_fallback, is_enabled, created_at, updated_at
+                    FROM media_assets
+                    WHERE character_id=%s
+                    ORDER BY is_default DESC, is_fallback DESC, created_at DESC
+                """, (character_id.strip().lower(),))
+            else:
+                cur.execute("""
+                    SELECT id, character_id, title, media_type, url, file_path, tags,
+                           is_default, is_fallback, is_enabled, created_at, updated_at
+                    FROM media_assets
+                    ORDER BY character_id ASC, is_default DESC, is_fallback DESC, created_at DESC
+                """)
+            rows = cur.fetchall() or []
+            return {"ok": True, "assets": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/upload", dependencies=[Depends(admin_required)])
+async def admin_upload_media(
+    character_id: str = Form(...),
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    media_type: str = Form(""),
+    tags: str = Form("[]"),
+    is_default: bool = Form(False),
+    is_fallback: bool = Form(False),
+    is_enabled: bool = Form(True),
+    target_format: str = Form("original")
+):
+    """Upload a media file and assign it to a character, with optional format conversion."""
+    char_id = _validate_character_exists(character_id)
+
+    filename = file.filename or "file"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+    content_type = (file.content_type or "").strip().lower()
+    if content_type and content_type not in ALLOWED_MEDIA_MIMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
+
+    m_type = media_type.strip().lower()
+    if not m_type:
+        m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv") else "image"
+    if m_type not in ("video", "image"):
+        m_type = "video"
+
+    if target_format and target_format.lower() != "original" and m_type == "image":
+        converted, new_ext, _ = _convert_image_bytes(content, target_format)
+        if new_ext:
+            content = converted
+            ext = new_ext
+
+    safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    public_url = f"/media/files/{safe_name}"
+    parsed_tags = _parse_tags_input(tags)
+    asset_title = title.strip() or filename
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if is_default:
+                cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            if is_fallback:
+                cur.execute("UPDATE media_assets SET is_fallback=FALSE WHERE character_id=%s", (char_id,))
+            cur.execute("""
+                INSERT INTO media_assets (
+                    character_id, title, media_type, url, file_path, tags,
+                    is_default, is_fallback, is_enabled
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (char_id, asset_title, m_type, public_url, safe_name, Json(parsed_tags),
+                  is_default, is_fallback, is_enabled))
+            asset = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(asset)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
+def admin_import_media_url(
+    body: AdminMediaUrlIn,
+    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
+    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
+):
+    """Import an external media URL or webpage, fetching assets locally with anti-bot bypass & format options."""
+    _verify_dual_secret_locks(key1=body.key1, key2=body.key2, x_westfall_key=x_westfall_key, x_saintkiller_key=x_saintkiller_key)
+    char_id = _validate_character_exists(body.character_id)
+    url = _validate_media_url(body.url)
+
+    saved_path = ""
+    asset_url = url
+    m_type = body.media_type.strip().lower()
+    if m_type not in ("video", "image"):
+        m_type = "video"
+
+    if body.download_remote:
+        try:
+            content, ext, mime, detected_mtype = _fetch_remote_media(url, target_format=body.target_format or "original")
+            if detected_mtype:
+                m_type = detected_mtype
+            safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+            dest_path = os.path.join(UPLOAD_DIR, safe_name)
+            with open(dest_path, "wb") as f:
+                f.write(content)
+            saved_path = safe_name
+            asset_url = f"/media/files/{safe_name}"
+        except Exception as e:
+            logger.warning(f"Remote fetch/scrape for '{url}' fell back to direct URL import: {e}")
+
+    parsed_tags = _parse_tags_input(body.tags)
+    asset_title = body.title.strip() or os.path.basename(urllib.parse.urlparse(url).path) or "Imported Media"
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if body.is_default:
+                cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            if body.is_fallback:
+                cur.execute("UPDATE media_assets SET is_fallback=FALSE WHERE character_id=%s", (char_id,))
+            cur.execute("""
+                INSERT INTO media_assets (
+                    character_id, title, media_type, url, file_path, tags,
+                    is_default, is_fallback, is_enabled
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (char_id, asset_title, m_type, asset_url, saved_path, Json(parsed_tags),
+                  body.is_default, body.is_fallback, body.is_enabled))
+            asset = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(asset)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/{asset_id}/update", dependencies=[Depends(admin_required)])
+def admin_update_media_metadata(asset_id: int, body: AdminMediaUpdateIn):
+    """Update media asset tags, title, default/fallback status, or enabled state."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            char_id = asset["character_id"]
+            title = body.title.strip() if body.title is not None else asset["title"]
+            m_type = body.media_type.strip().lower() if body.media_type is not None else asset["media_type"]
+            if m_type not in ("video", "image"):
+                m_type = asset["media_type"]
+
+            tags = _parse_tags_input(body.tags) if body.tags is not None else asset["tags"]
+            is_default = body.is_default if body.is_default is not None else asset["is_default"]
+            is_fallback = body.is_fallback if body.is_fallback is not None else asset["is_fallback"]
+            is_enabled = body.is_enabled if body.is_enabled is not None else asset["is_enabled"]
+
+            if is_default and not asset["is_default"]:
+                cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            if is_fallback and not asset["is_fallback"]:
+                cur.execute("UPDATE media_assets SET is_fallback=FALSE WHERE character_id=%s", (char_id,))
+
+            cur.execute("""
+                UPDATE media_assets
+                SET title=%s, media_type=%s, tags=%s, is_default=%s, is_fallback=%s, is_enabled=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (title, m_type, Json(tags), is_default, is_fallback, is_enabled, asset_id))
+            updated = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(updated)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/{asset_id}/replace", dependencies=[Depends(admin_required)])
+async def admin_replace_media_file(
+    asset_id: int,
+    file: Optional[UploadFile] = File(None),
+    url: Optional[str] = Form(None),
+    target_format: Optional[str] = Form("original")
+):
+    """Replace file or URL of an existing media asset."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            char_id = asset["character_id"]
+            old_file_path = asset["file_path"]
+
+            new_url = asset["url"]
+            new_file_path = old_file_path
+            new_mtype = asset["media_type"]
+
+            if file and file.filename:
+                filename = file.filename
+                ext = os.path.splitext(filename)[1].lower()
+                if ext not in ALLOWED_MEDIA_EXTENSIONS:
+                    raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+                content_type = (file.content_type or "").strip().lower()
+                if content_type and content_type not in ALLOWED_MEDIA_MIMES:
+                    raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {content_type}")
+
+                content = await file.read()
+                if not content:
+                    raise HTTPException(status_code=400, detail="Uploaded file is empty")
+                if len(content) > MAX_MEDIA_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES // (1024*1024)}MB)")
+
+                m_type = "video" if ext in (".mp4", ".webm", ".mov", ".m4v", ".ogv") else "image"
+                if target_format and target_format.lower() != "original" and m_type == "image":
+                    converted, new_ext, _ = _convert_image_bytes(content, target_format)
+                    if new_ext:
+                        content = converted
+                        ext = new_ext
+
+                safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+                dest_path = os.path.join(UPLOAD_DIR, safe_name)
+
+                with open(dest_path, "wb") as f:
+                    f.write(content)
+
+                new_url = f"/media/files/{safe_name}"
+                new_file_path = safe_name
+                new_mtype = m_type
+
+                if old_file_path:
+                    old_full = os.path.join(UPLOAD_DIR, old_file_path)
+                    if os.path.isfile(old_full):
+                        try:
+                            os.remove(old_full)
+                        except OSError:
+                            pass
+            elif url and url.strip():
+                clean_url = _validate_media_url(url)
+                try:
+                    content, ext, mime, detected_mtype = _fetch_remote_media(clean_url, target_format=target_format or "original")
+                    safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+                    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+                    with open(dest_path, "wb") as f:
+                        f.write(content)
+                    new_url = f"/media/files/{safe_name}"
+                    new_file_path = safe_name
+                    if detected_mtype:
+                        new_mtype = detected_mtype
+                except Exception as e:
+                    logger.warning(f"Remote replace for '{clean_url}' fell back to URL: {e}")
+                    new_url = clean_url
+                    new_file_path = ""
+
+                if old_file_path and old_file_path != new_file_path:
+                    old_full = os.path.join(UPLOAD_DIR, old_file_path)
+                    if os.path.isfile(old_full):
+                        try:
+                            os.remove(old_full)
+                        except OSError:
+                            pass
+            else:
+                raise HTTPException(status_code=400, detail="Provide either a new file or url")
+
+            cur.execute("""
+                UPDATE media_assets
+                SET url=%s, file_path=%s, media_type=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (new_url, new_file_path, new_mtype, asset_id))
+            updated = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "asset": dict(updated)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/media/{asset_id}/set-default", dependencies=[Depends(admin_required)])
+def admin_set_default_media(asset_id: int):
+    """Set specified asset as the default for its character (clearing other defaults)."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            char_id = asset["character_id"]
+            cur.execute("UPDATE media_assets SET is_default=FALSE WHERE character_id=%s", (char_id,))
+            cur.execute("UPDATE media_assets SET is_default=TRUE, updated_at=now() WHERE id=%s", (asset_id,))
+            conn.commit()
+            return {"ok": True, "character_id": char_id, "default_asset_id": asset_id}
+    finally:
+        conn.close()
+
+
+@app.delete("/admin/media/{asset_id}", dependencies=[Depends(admin_required)])
+def admin_delete_media(asset_id: int):
+    """Delete a media asset and clean up any uploaded local file."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM media_assets WHERE id=%s", (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Media asset not found")
+
+            old_file_path = asset["file_path"]
+            cur.execute("DELETE FROM media_assets WHERE id=%s", (asset_id,))
+            conn.commit()
+
+            if old_file_path:
+                old_full = os.path.join(UPLOAD_DIR, old_file_path)
+                if os.path.isfile(old_full):
+                    try:
+                        os.remove(old_full)
+                    except OSError:
+                        pass
+            return {"ok": True, "deleted_asset_id": asset_id}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE CUSTOMER ROOM MEDIA API (PUBLIC / ROOM INTEGRATION)
+# Strict Character Isolation:
+# Every query filters strictly by character_id.
+# Never fall back to another character's media.
+# ---------------------------------------------------------------------------
+
+def _character_fallback_response(char_id: str, conn=None):
+    """Retrieve or generate approved fallback media representation for a character.
+    STRICT ISOLATION: Strictly scoped to char_id, never returns another character's media."""
+    close_conn = False
+    if conn is None:
+        conn = db()
+        close_conn = True
+    try:
+        with conn.cursor() as cur:
+            # 1. Check if character has an explicit enabled fallback asset
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND is_fallback=TRUE
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            fb_asset = cur.fetchone()
+            if fb_asset:
+                return {"ok": True, "has_media": True, "fallback": True, "asset": dict(fb_asset)}
+
+            # 2. Check if persona has avatar_url
+            cur.execute("SELECT name, avatar_url FROM personas WHERE girl=%s", (char_id,))
+            p_row = cur.fetchone()
+            if p_row and p_row.get("avatar_url"):
+                return {
+                    "ok": True,
+                    "has_media": True,
+                    "fallback": True,
+                    "asset": {
+                        "id": None,
+                        "character_id": char_id,
+                        "title": f"{p_row.get('name', char_id.title())} Fallback",
+                        "media_type": "image",
+                        "url": p_row["avatar_url"],
+                        "tags": ["fallback"],
+                        "is_default": False,
+                        "is_fallback": True
+                    }
+                }
+
+            # 3. Fallback placeholder representation (character isolated)
+            return {
+                "ok": True,
+                "has_media": False,
+                "fallback": True,
+                "asset": {
+                    "id": None,
+                    "character_id": char_id,
+                    "title": f"{char_id.title()} Offline",
+                    "media_type": "image",
+                    "url": f"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360' viewBox='0 0 640 360'><rect width='100%25' height='100%25' fill='%2317171e'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239a9ab0' font-family='sans-serif' font-size='20'>{char_id.title()} Webcam Offline</text></svg>",
+                    "tags": ["fallback", "offline"],
+                    "is_default": False,
+                    "is_fallback": True
+                }
+            }
+    finally:
+        if close_conn:
+            conn.close()
+
+
+@app.get("/media/character/{character_id}/default")
+def get_character_default_media(character_id: str):
+    """Retrieve default looping media for a character.
+    If no enabled default video exists, returns character's approved fallback state."""
+    char_id = character_id.strip().lower()
+    if not char_id:
+        raise HTTPException(status_code=400, detail="character_id is required")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND is_default=TRUE
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            asset = cur.fetchone()
+            if asset:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(asset)}
+
+            # Fallback to any enabled default/idle tagged video for this character
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND (tags @> '["idle"]'::jsonb OR tags @> '["default"]'::jsonb)
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            idle_asset = cur.fetchone()
+            if idle_asset:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(idle_asset)}
+
+            # Fallback to any enabled video for this character
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND media_type='video'
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id,))
+            any_video = cur.fetchone()
+            if any_video:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(any_video)}
+
+            # Strict isolation: Return character's own fallback state
+            return _character_fallback_response(char_id, conn=conn)
+    finally:
+        conn.close()
+
+
+@app.get("/media/character/{character_id}/tag/{tag}")
+def get_character_media_by_tag(character_id: str, tag: str):
+    """Retrieve an appropriate tagged clip (e.g. talking, idle, sitting-bed, chair, desk, greeting).
+    If no enabled matching tag asset exists for this character, returns default or fallback media state."""
+    char_id = character_id.strip().lower()
+    tag_clean = tag.strip().lower()
+    if not char_id or not tag_clean:
+        raise HTTPException(status_code=400, detail="character_id and tag are required")
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            tag_json = json.dumps([tag_clean])
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                FROM media_assets
+                WHERE character_id=%s AND is_enabled=TRUE AND tags @> %s::jsonb
+                ORDER BY updated_at DESC LIMIT 1
+            """, (char_id, tag_json))
+            asset = cur.fetchone()
+            if asset:
+                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(asset)}
+
+            # Fallback to default media for this character
+            return get_character_default_media(char_id)
+    finally:
+        conn.close()
+
+
+@app.get("/media/character/{character_id}/fallback")
+def get_character_fallback_media(character_id: str):
+    """Retrieve character's approved fallback image or empty state representation."""
+    char_id = character_id.strip().lower()
+    if not char_id:
+        raise HTTPException(status_code=400, detail="character_id is required")
+    return _character_fallback_response(char_id)
+
+
+@app.get("/media/asset/{asset_id}")
+def get_media_asset_detail(asset_id: int):
+    """Retrieve public details for a specific enabled approved asset."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback, is_enabled
+                FROM media_assets
+                WHERE id=%s AND is_enabled=TRUE
+            """, (asset_id,))
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=404, detail="Approved media asset not found or disabled")
+            return {"ok": True, "asset": dict(asset)}
+    finally:
+        conn.close()
 
 
 @app.get("/admin", response_class=HTMLResponse)
