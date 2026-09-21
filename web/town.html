@@ -120,8 +120,13 @@
 <body>
   <header class="hero">
     <div class="wrap">
-      <p class="eyebrow">The town guide</p>
-      <h1>Four corners of town.</h1>
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+        <div>
+          <p class="eyebrow">The town guide</p>
+          <h1>Four corners of town.</h1>
+        </div>
+        <button id="replay-anim-btn" class="button" style="padding: 10px 18px; font-size: 0.9rem; margin-bottom: 12px; cursor: pointer;">Replay Card Animations ✨</button>
+      </div>
       <p class="tagline">Every one of them has a reason their walls are up. Pick a way in — each corner of God's Greek keeps its own people, its own hangouts, its own rules.</p>
     </div>
   </header>
@@ -169,6 +174,15 @@
       <p style="margin-top: 30px;"><a class="back" href="index.html">&larr; Back to the front page</a></p>
     </div>
   </main>
+  <script>
+    document.getElementById('replay-anim-btn').addEventListener('click', () => {
+      document.querySelectorAll('.area-card').forEach((card, index) => {
+        card.style.animation = 'none';
+        card.offsetHeight; // trigger reflow
+        card.style.animation = `areaCardIn .5s cubic-bezier(0.16, 1, 0.3, 1) ${index * 0.07 + 0.05}s both`;
+      });
+    });
+  </script>
 </body>
 </html>
 

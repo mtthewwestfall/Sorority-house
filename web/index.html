@@ -642,6 +642,7 @@
         <a href="https://web-production-ae547.up.railway.app" target="_blank" rel="noopener" class="rl-nav-godtown">God's Town</a>
       </nav>
       <div class="rl-topbar-actions">
+        <button id="nav-demo-btn" class="rl-btn rl-btn-ghost rl-btn-sm" style="margin-right: 8px;">Try Demo ✨</button>
         <img id="nav-avatar" class="rl-nav-avatar" alt="Your avatar" hidden />
         <a href="#" id="nav-profile" class="rl-nav-link" hidden>Profile</a>
         <a href="#" id="nav-auth" class="rl-btn rl-btn-ghost rl-btn-sm">Sign in</a>
@@ -657,6 +658,7 @@
         <p class="rl-hero-sub">Persistent AI residents. Talk to all of them free — trust takes real days, and there's no pay-to-skip.</p>
         <div class="rl-hero-ctas">
           <a class="rl-btn rl-btn-primary" href="#town">Start free trial</a>
+          <button id="hero-demo-btn" class="rl-btn rl-btn-ghost">Try Demo ✨</button>
           <a class="rl-btn rl-btn-ghost" href="town.html">Come into town ↓</a>
         </div>
       </div>
@@ -2728,6 +2730,69 @@ const PRESET_FACES = {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       });
     }
+
+    // ---------- Interactive Animation Demo ----------
+    function startAnimationDemo() {
+      // Re-trigger deal-in animation on all cards
+      document.querySelectorAll('.door-card').forEach((card, index) => {
+        card.style.animation = 'none';
+        card.offsetHeight; // trigger reflow
+        card.style.animation = `cardDealIn .6s cubic-bezier(0.16, 1, 0.3, 1) ${index * 0.06}s both`;
+      });
+
+      // Scroll smoothly to residents section
+      const townSection = document.getElementById('town');
+      if (townSection) townSection.scrollIntoView({ behavior: 'smooth' });
+
+      // Open interactive simulated chat modal demo after a brief delay
+      setTimeout(() => {
+        const dummyCard = document.querySelector('.door-card[data-girl="dakota"]') || document.querySelector('.door-card');
+        if (!dummyCard) return;
+
+        currentGirl = dummyCard.dataset.girl || 'dakota';
+        document.getElementById('chat-name').textContent = (dummyCard.dataset.name || 'Dakota') + ' (Animation Demo)';
+        document.getElementById('chat-title').textContent = 'Live Interactive Preview';
+        const avatar = document.getElementById('chat-avatar');
+        avatar.classList.remove('is-broken');
+        avatar.src = dummyCard.dataset.avatar || 'assets/dakota.jpg?v=4';
+
+        chatLog.innerHTML = '';
+        receipt = null;
+        lastStampAt = 0;
+
+        addMessage('note', '✨ Animation Demo Active: Experience smooth pop-ins and transitions');
+        addStamp('Demo Session');
+
+        // Paced message pop-ins
+        setTimeout(() => {
+          addMessage('her', 'Welcome to God\'s Greek! Notice how these chat bubbles pop in smoothly with cubic-bezier easing?');
+          markRead();
+        }, 400);
+
+        setTimeout(() => {
+          addMessage('me', 'Looks amazing! The 3D card deal effect and shimmer on hover are super crisp.');
+        }, 1200);
+
+        setTimeout(() => {
+          const typing = addMessage('typing', 'Dakota is typing…');
+          setTimeout(() => {
+            typing.remove();
+            markRead();
+            addMessage('her', 'Try typing a message below or hover over any card to feel the smooth elevation and ambient glow! 🌟');
+          }, 1000);
+        }, 1800);
+
+        chat.classList.add('is-open');
+        lockedScrollY = window.scrollY;
+        document.body.classList.add('chat-locked');
+        applyChatViewport();
+      }, 700);
+    }
+
+    const heroDemoBtn = document.getElementById('hero-demo-btn');
+    const navDemoBtn = document.getElementById('nav-demo-btn');
+    if (heroDemoBtn) heroDemoBtn.addEventListener('click', startAnimationDemo);
+    if (navDemoBtn) navDemoBtn.addEventListener('click', startAnimationDemo);
 
   </script>
 <script>
