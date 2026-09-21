@@ -5,8 +5,8 @@ from fastapi.exceptions import HTTPException
 import main
 
 EXACT_PROMPT = (
-    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
-    "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
+    "Ancient Greek real realistic character portrait — a detailed photorealistic digital illustration "
+    "blending lifelike facial features with authentic real realistic character detail, the God's Greek house style. "
     "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
     "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
     "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks."
@@ -88,30 +88,17 @@ class TestCompanionAndStyles(unittest.TestCase):
         prompt_text = next(p["text"] for p in parts if "text" in p)
         self.assertIn(EXACT_PROMPT, prompt_text)
 
-    @patch("main.requests.post")
-    @patch("main.moderate_companion_photo")
-    def test_6_set_avatar_from_preset(self, mock_mod, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "b64data"}}]}}]
-        }
-        mock_post.return_value = mock_resp
+    def test_6_set_avatar_from_preset(self):
+        with self.assertRaises(HTTPException) as cm:
+            main.set_avatar_from_preset(main.AvatarPresetIn(image_b64="ZmFrZWJ5dGVz"), MagicMock(user_id="u1"))
+        self.assertEqual(cm.exception.status_code, 403)
+        self.assertIn("restricted to the admin office", cm.exception.detail)
 
-        with patch("main.db") as mock_db:
-            mock_conn = MagicMock()
-            mock_cur = MagicMock()
-            mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-            mock_db.return_value = mock_conn
-
-            res = main.set_avatar_from_preset(main.AvatarPresetIn(image_b64="ZmFrZWJ5dGVz"), MagicMock(user_id="u1"))
-            self.assertTrue(res["ok"])
-
-            payload = mock_post.call_args[1]["json"]
-            parts = payload["contents"][0]["parts"]
-            prompt_text = next(p["text"] for p in parts if "text" in p)
-            self.assertIn(EXACT_PROMPT, prompt_text)
-            self.assertIn("Redraw it fully in the God's Greek portrait style", prompt_text)
+    def test_6b_create_avatar_restricted(self):
+        with self.assertRaises(HTTPException) as cm:
+            main.create_avatar(main.AvatarIn(description="warrior"), MagicMock(user_id="u1"))
+        self.assertEqual(cm.exception.status_code, 403)
+        self.assertIn("restricted to the admin office", cm.exception.detail)
 
     @patch("main.requests.post")
     def test_7_generate_picture(self, mock_post):
@@ -143,6 +130,47 @@ class TestCompanionAndStyles(unittest.TestCase):
         self.assertEqual(res_lower, 4)
         res_advance = main.companion_gate_milestone(comp, 5, "warm")
         self.assertEqual(res_advance, 5)
+
+    @patch("main._user_for_email")
+    @patch("main.db")
+    def test_10_admin_account_chat_custom_companion(self, mock_db, mock_user_for_email):
+        mock_user_for_email.return_value = {"user_id": "u123", "tier": "resident"}
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {"id": 2, "sender": "companion", "message": "Hi there!", "created_at": "2025-01-01"},
+            {"id": 1, "sender": "user", "message": "Hello companion", "created_at": "2025-01-01"}
+        ]
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_db.return_value = mock_conn
+
+        res = main.admin_account_chat("test@example.com", companion_id=42)
+        self.assertEqual(len(res), 2)
+        self.assertEqual(res[0]["message"], "Hello companion")
+
+        query = mock_cur.execute.call_args[0][0]
+        self.assertIn("FROM companion_chat_logs", query)
+        self.assertIn("WHERE user_id=%s AND companion_id=%s", query)
+
+    @patch("main.generate_avatar")
+    def test_11_admin_generator_generate(self, mock_gen_avatar):
+        import asyncio
+        mock_gen_avatar.return_value = ("image/png", "fake_b64")
+        res = asyncio.run(main.admin_generator_generate(
+            fruit_code="/cherries",
+            output_mode="pictures",
+            expand_surroundings=False,
+            extended_duration_seconds=10,
+            loop_enabled=True,
+            file=None
+        ))
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["fruit_code"], "/cherries")
+        self.assertEqual(res["generator_location"], "Admin Office")
+        self.assertEqual(res["style"], "real realistic character")
+        self.assertIn("Westfall13!", res["creator_status"])
+        self.assertIn("Westfall13!", res["clone_bot_status"])
+        self.assertIn("data:image/png;base64,fake_b64", res["url"])
 
 if __name__ == "__main__":
     unittest.main()

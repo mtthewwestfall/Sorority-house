@@ -1,1 +1,16 @@
-{"background_color":"#151715","description":"God's Greek — AI townspeople. Trust takes real days.","display":"standalone","icons":[{"purpose":"any","sizes":"192x192","src":"assets/icon-192.png","type":"image/png"},{"purpose":"any","sizes":"512x512","src":"assets/icon-512.png","type":"image/png"},{"purpose":"maskable","sizes":"512x512","src":"assets/icon-maskable-512.png","type":"image/png"}],"name":"LockedDoor.ai — God's Greek","short_name":"God's Greek","start_url":"/","theme_color":"#151715"}
+{
+  "name": "God's Companions",
+  "short_name": "Companions",
+  "description": "Your own private companion. One per player, earned trust, a living conversation.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#151715",
+  "theme_color": "#151715",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

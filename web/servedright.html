@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServedRight — Eviction notices, done right.</title>
+  <meta name="description" content="ServedRight prepares professional legal documents from your answers. Eviction notices, leases, wills, and relationship audits — done right.">
+  <style>
+    :root {
+      --navy: #0e1e3d;
+      --navy-deep: #091429;
+      --gold: #c9a227;
+      --gold-light: #e3c565;
+      --paper: #ffffff;
+      --wash: #f6f4ec;
+      --ink: #1c2333;
+      --muted: #5d6578;
+      --line: #e7dfc9;
+      --serif: Georgia, "Times New Roman", Times, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem; }
+    .kicker {
+      text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.78rem;
+      font-weight: 700; color: var(--gold); margin-bottom: 1rem;
+    }
+
+    /* Nav */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.8rem 1.5rem;
+      background: rgba(255, 255, 255, 0.97);
+      border-bottom: 2px solid var(--gold);
+    }
+    .nav-brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+    .nav-brand svg { width: 34px; height: 38px; }
+    .nav-brand b { font-family: var(--serif); font-size: 1.3rem; color: var(--navy); letter-spacing: 0.01em; }
+    .nav-link { color: var(--muted); text-decoration: none; font-size: 0.92rem; font-weight: 600; }
+    .nav-link:hover { color: var(--navy); }
+
+    /* Buttons */
+    .btn {
+      display: inline-block; padding: 0.85rem 2rem; border-radius: 999px;
+      font-weight: 700; font-size: 1rem; text-decoration: none; letter-spacing: 0.02em;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      border: none; cursor: pointer; font-family: var(--sans);
+    }
+    .btn-navy { background: var(--navy); color: #fff; box-shadow: 0 4px 14px rgba(14, 30, 61, 0.25); }
+    .btn-navy:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(14, 30, 61, 0.35); }
+    .btn-gold { background: linear-gradient(180deg, var(--gold-light), var(--gold)); color: var(--navy-deep); }
+
+    /* Hero */
+    .hero { background: var(--wash); text-align: center; padding: 3.5rem 1.5rem 4rem; border-bottom: 1px solid var(--line); }
+    .hero-logo { display: flex; flex-direction: column; align-items: center; margin-bottom: 1.5rem; }
+    .hero-logo svg { width: 74px; height: 84px; margin-bottom: 0.8rem; }
+    .hero-white-logo { max-width: 280px; width: 100%; height: auto; margin: 0 auto 1.2rem; display: block; filter: drop-shadow(0 4px 12px rgba(14,30,61,0.15)); }
+    .wordmark-container {
+      position: relative;
+      display: inline-block;
+    }
+    .hero-logo .wordmark { font-family: var(--serif); font-size: clamp(2rem, 6vw, 2.8rem); color: var(--navy); font-weight: 700; position: relative; display: inline-block; z-index: 1; }
+    .hero-logo .wordmark em { font-style: normal; color: var(--gold); }
+    .char-peek {
+      position: absolute;
+      top: -24px;
+      right: -45px;
+      width: 70px;
+      height: 70px;
+      object-fit: cover;
+      object-position: center;
+      border-radius: 50%;
+      border: 3px solid var(--gold);
+      box-shadow: 0 6px 16px rgba(14, 30, 61, 0.2);
+      z-index: 2;
+      transition: transform 0.25s ease;
+    }
+    .char-peek:hover {
+      transform: scale(1.15) rotate(6deg);
+    }
+
+    .mission-statement {
+      max-width: 680px; margin: 0 auto 2rem; padding: 1.5rem 1.8rem;
+      background: #ffffff; border: 1px solid var(--line); border-left: 4px solid var(--gold);
+      border-radius: 12px; box-shadow: 0 4px 16px rgba(14, 30, 61, 0.06); text-align: center;
+    }
+    .mission-statement h2 { font-family: var(--serif); font-size: 1.35rem; color: var(--navy); margin-bottom: 0.5rem; }
+    .mission-statement p { color: var(--muted); font-size: 1rem; margin-bottom: 0.8rem; }
+    .contact-email-badge {
+      display: inline-block; padding: 0.4rem 1rem; background: var(--wash);
+      border: 1px solid var(--line); border-radius: 20px; font-weight: 600;
+      color: var(--navy); font-size: 0.9rem; text-decoration: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .contact-email-badge:hover { background: #e7dfc9; border-color: var(--gold); }
+
+    .side-by-side-logos {
+      display: flex; justify-content: center; align-items: center; gap: 1.5rem;
+      max-width: 840px; margin: 1.5rem auto 2.5rem; flex-wrap: wrap;
+    }
+    .brand-logo-card {
+      flex: 1 1 340px; max-width: 400px; width: 100%; height: auto;
+      border-radius: 12px; border: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(14, 30, 61, 0.08); transition: transform 0.2s ease;
+    }
+    .brand-logo-card:hover { transform: translateY(-3px); }
+    .hero h1 {
+      font-family: var(--serif); font-size: clamp(1.6rem, 4.5vw, 2.3rem);
+      color: var(--navy); line-height: 1.2; margin-bottom: 1rem; font-weight: 400; font-style: italic;
+    }
+    .hero-sub { font-size: 1.08rem; color: var(--muted); max-width: 600px; margin: 0 auto 2.5rem; }
+
+    .hero-visual { display: grid; gap: 1.25rem; max-width: 960px; margin: 0 auto 3rem; align-items: start; }
+    .hero-visual figure {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+      box-shadow: 0 12px 34px rgba(14, 30, 61, 0.10);
+    }
+    .hero-visual img { width: 100%; height: auto; display: block; }
+    .hero-visual figcaption { padding: 0.9rem 1.2rem; font-size: 0.9rem; color: var(--muted); text-align: left; }
+    .hero-visual figcaption b { color: var(--navy); display: block; font-size: 0.98rem; }
+    .papers-soon {
+      border: 2px dashed var(--gold); border-radius: 14px; min-height: 300px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-weight: 600; padding: 2rem; text-align: center;
+      background: rgba(201, 162, 39, 0.05);
+    }
+
+    /* Intake form */
+    .intake {
+      max-width: 720px; margin: 0 auto; background: #fff;
+      border: 1px solid var(--line); border-top: 5px solid var(--gold); border-radius: 16px;
+      padding: 2.5rem 2rem; box-shadow: 0 16px 44px rgba(14, 30, 61, 0.10); text-align: left;
+    }
+    .intake h2 { font-family: var(--serif); font-size: 1.8rem; color: var(--navy); margin-bottom: 0.4rem; text-align: center; }
+    .intake .form-sub { text-align: center; color: var(--muted); margin-bottom: 2rem; }
+    .field { margin-bottom: 1.3rem; }
+    .field label { display: block; font-weight: 700; color: var(--navy); margin-bottom: 0.45rem; font-size: 0.95rem; }
+    .field input[type="text"], .field input[type="tel"], .field input[type="email"],
+    .field select, .field textarea {
+      width: 100%; padding: 0.85rem 1rem; font-size: 1rem; font-family: var(--sans);
+      border: 2px solid var(--line); border-radius: 10px; background: var(--wash); color: var(--ink);
+    }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      outline: none; border-color: var(--gold); background: #fff;
+    }
+    .field textarea { min-height: 110px; resize: vertical; }
+    .field .hint { font-size: 0.85rem; color: var(--muted); margin-top: 0.35rem; font-weight: 400; }
+    .radio-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .radio-pill {
+      flex: 1 1 200px; border: 2px solid var(--line); border-radius: 10px;
+      padding: 0.85rem 1rem; cursor: pointer; font-weight: 600; color: var(--muted);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .radio-pill input { margin-right: 0.5rem; accent-color: var(--navy); }
+    .radio-pill:has(input:checked) { border-color: var(--navy); background: #fff; color: var(--navy); }
+    #evictionSide { display: none; }
+    #evictionSide.show { display: block; }
+    .form-foot { text-align: center; margin-top: 1.8rem; }
+    .form-done { display: none; text-align: center; padding: 2rem 1rem; }
+    .form-done.show { display: block; }
+    .form-done h3 { font-family: var(--serif); color: var(--navy); font-size: 1.5rem; margin-bottom: 0.6rem; }
+    .form-done p { color: var(--muted); }
+
+    /* Steps */
+    .steps { padding: 5rem 0; text-align: center; }
+    .steps h2, .points h2, .samples h2, .pricing h2 {
+      font-family: var(--serif); font-size: clamp(1.9rem, 5vw, 2.7rem);
+      color: var(--navy); margin-bottom: 1rem; line-height: 1.15;
+    }
+    .section-lead { color: var(--muted); max-width: 620px; margin: 0 auto 3rem; font-size: 1.08rem; }
+    .step-grid { display: grid; gap: 1.5rem; text-align: left; }
+    .step { background: var(--wash); border: 1px solid var(--line); border-radius: 14px; padding: 2rem 1.8rem; }
+    .step-num {
+      font-family: var(--serif); font-size: 1.4rem; color: #fff; background: var(--navy);
+      border-radius: 50%; width: 48px; height: 48px;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 1.1rem;
+    }
+    .step h3 { font-size: 1.2rem; color: var(--navy); margin-bottom: 0.5rem; }
+    .step p { color: var(--muted); }
+
+    /* Samples */
+    .samples { padding: 5rem 0; text-align: center; background: var(--wash); border-top: 1px solid var(--line); }
+    .sample-grid { display: grid; gap: 1.5rem; margin-top: 2.5rem; text-align: left; }
+    .sample-card {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px;
+      overflow: hidden; box-shadow: 0 12px 34px rgba(14, 30, 61, 0.08);
+    }
+    .sample-card img { width: 100%; height: auto; display: block; }
+    .sample-cap { padding: 1.2rem 1.5rem; }
+    .sample-cap h3 { font-size: 1.1rem; color: var(--navy); margin-bottom: 0.3rem; }
+    .sample-cap p { color: var(--muted); font-size: 0.95rem; }
+
+    /* Points */
+    .points { padding: 5rem 0; background: var(--navy-deep); color: #fff; text-align: center; }
+    .points h2 { color: #fff; }
+    .points .section-lead { color: rgba(255, 255, 255, 0.7); }
+    .point-grid { display: grid; gap: 1.5rem; text-align: left; }
+    .point {
+      border: 1px solid rgba(227, 197, 101, 0.35); border-radius: 14px;
+      padding: 2rem 1.8rem; background: rgba(255, 255, 255, 0.03);
+    }
+    .point h3 { font-family: var(--serif); color: var(--gold-light); font-size: 1.25rem; margin-bottom: 0.5rem; }
+    .point p { color: rgba(255, 255, 255, 0.75); }
+
+    /* Pricing */
+    .pricing { padding: 5rem 0; text-align: center; }
+    .price-grid { display: grid; gap: 1.25rem; text-align: left; max-width: 900px; margin: 0 auto; }
+    .price-card {
+      background: #fff; border: 1px solid var(--line); border-top: 5px solid var(--gold);
+      border-radius: 14px; padding: 1.8rem; box-shadow: 0 8px 24px rgba(14, 30, 61, 0.06);
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    .price-card h3 { font-size: 1.15rem; color: var(--navy); margin-bottom: 0.25rem; }
+    .price-card p { color: var(--muted); font-size: 0.93rem; }
+    .price-amt { font-family: var(--serif); font-size: 1.9rem; color: var(--navy); font-weight: 700; white-space: nowrap; }
+    .price-amt small { display: block; font-family: var(--sans); font-size: 0.8rem; color: var(--muted); font-weight: 400; text-align: right; }
+
+    /* What's Next */
+    .whats-next { padding: 5rem 0; text-align: center; background: var(--wash); border-top: 1px solid var(--line); }
+    .next-grid { display: grid; gap: 1.5rem; text-align: left; max-width: 960px; margin: 2.5rem auto 0; }
+    .next-card {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px;
+      padding: 1.8rem; box-shadow: 0 8px 20px rgba(14, 30, 61, 0.05);
+      position: relative; overflow: hidden;
+    }
+    .next-card::before {
+      content: "Upcoming"; position: absolute; top: 12px; right: 16px;
+      font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--gold); background: rgba(201, 162, 39, 0.12); padding: 0.25rem 0.65rem; border-radius: 20px;
+    }
+    .next-card h3 { font-size: 1.2rem; color: var(--navy); margin-bottom: 0.5rem; }
+    .next-card p { color: var(--muted); font-size: 0.96rem; }
+
+    /* Footer */
+    .footer {
+      background: var(--wash); border-top: 1px solid var(--line);
+      text-align: center; padding: 2.5rem 1.5rem; color: var(--muted); font-size: 0.88rem;
+    }
+    .footer p { max-width: 720px; margin: 0 auto 0.6rem; }
+    .footer .copyright { color: #9aa0b0; font-size: 0.82rem; }
+
+    @media (min-width: 860px) {
+      .step-grid, .point-grid { grid-template-columns: repeat(3, 1fr); }
+      .sample-grid { grid-template-columns: 1fr 1fr; }
+      .hero-visual { grid-template-columns: 1fr 1fr 1fr; }
+      .hero-visual .offset-down { margin-top: 3.5rem; }
+      .price-grid { grid-template-columns: 1fr 1fr; }
+      .next-grid { grid-template-columns: repeat(3, 1fr); }
+      .hero { padding: 4.5rem 1.5rem 5rem; }
+      .intake { padding: 3rem 3rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="nav">
+    <a class="nav-brand" href="/" aria-label="ServedRight home">
+      <svg viewBox="0 0 60 68" aria-hidden="true">
+        <path d="M30 2 L56 12 V34 C56 50 44 60 30 66 C16 60 4 50 4 34 V12 Z" fill="#0e1e3d" stroke="#c9a227" stroke-width="3"/>
+        <path d="M30 8 L50 16 V34 C50 46 41 54 30 59 C19 54 10 46 10 34 V16 Z" fill="none" stroke="#c9a227" stroke-width="1.5" opacity="0.6"/>
+        <text x="30" y="42" text-anchor="middle" font-family="Georgia, serif" font-size="24" font-weight="700" fill="#e3c565">SR</text>
+      </svg>
+      <b>ServedRight</b>
+    </a>
+    <a class="nav-link" href="/">lockeddoor.ai</a>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-logo">
+      <img src="assets/servedright/IMG_3178.png" alt="ServedRight White Logo Header" class="hero-white-logo">
+      <div class="wordmark-container">
+        <div class="wordmark">Served<em>Right</em></div>
+        <img src="assets/servedright/IMG_3022.jpeg" alt="Character pointing and waving behind T" class="char-peek" title="Hello from ServedRight!">
+      </div>
+    </div>
+
+    <!-- Mission Statement Section -->
+    <div class="mission-statement">
+      <h2>Our Mission</h2>
+      <p>ServedRight empowers property owners, managers, and individuals with fast, precise, and professional legal document preparation. We eliminate expensive legal hourly fees while ensuring accuracy and peace of mind.</p>
+      <a class="contact-email-badge" href="mailto:support@servedright.com">📩 Contact Us: support@servedright.com</a>
+    </div>
+
+    <!-- Side-by-side logos -->
+    <div class="side-by-side-logos">
+      <img src="assets/servedright/IMG_2893.jpeg" alt="ServedRight Purple Emblem" class="brand-logo-card">
+      <img src="assets/servedright/IMG_2992.jpeg" alt="ServedRight Wooden Seal" class="brand-logo-card">
+    </div>
+
+    <h1>Eviction notices, done right.</h1>
+    <p class="hero-sub">Professional legal documents from your answers — no law office, no hourly billing. Just the document you need.</p>
+
+    <div class="hero-visual">
+      <figure>
+        <img src="assets/servedright/notice-sample.jpg" alt="Sample eviction notice in a legal folder">
+        <figcaption><b>Eviction notices</b>Non-payment, lease violations, holdover.</figcaption>
+      </figure>
+      <div class="papers-soon">Stack of sample documents<br>on its way.</div>
+      <figure class="offset-down">
+        <img src="assets/servedright/audit-sample.jpg" alt="Sample therapy relationship audit">
+        <figcaption><b>Relationship audits</b>The most truthful, blunt audit of your relationship.</figcaption>
+      </figure>
+    </div>
+
+    <!-- Intake form -->
+    <div class="intake" id="start">
+      <div id="formWrap">
+        <h2>Start your request</h2>
+        <p class="form-sub">Fill this out and we'll prepare your document.</p>
+        <form id="intakeForm" novalidate>
+          <div class="field">
+            <label for="fName">Your name</label>
+            <input type="text" id="fName" name="name" autocomplete="name" required>
+          </div>
+          <div class="field">
+            <label for="fContact">Phone number or email</label>
+            <input type="text" id="fContact" name="contact" autocomplete="email" required>
+            <p class="hint">Whichever is easiest for us to reach you.</p>
+          </div>
+          <div class="field">
+            <label for="fService">Which document do you need?</label>
+            <select id="fService" name="service" required>
+              <option value="" disabled selected>Choose a document…</option>
+              <option value="Eviction notice — $50">Eviction notice — $50</option>
+              <option value="Lease template — $50 one-time">Lease template — $50 (one-time)</option>
+              <option value="Personalized lease — $75">Personalized lease — $75</option>
+              <option value="Will, small estate — $125">Will, small estate — $125</option>
+              <option value="Will, multiple properties/assets — $250">Will, multiple properties/assets — $250</option>
+              <option value="Therapy relationship audit — $79.99">Therapy relationship audit — $79.99</option>
+            </select>
+          </div>
+          <div class="field" id="evictionSide">
+            <label>For this eviction, are you…</label>
+            <div class="radio-row">
+              <label class="radio-pill"><input type="radio" name="side" value="Filing (landlord)"> Filing it <span style="font-weight:400">(landlord)</span></label>
+              <label class="radio-pill"><input type="radio" name="side" value="Received (tenant)"> Against it <span style="font-weight:400">(received a notice)</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="fReason">What's the reason?</label>
+            <textarea id="fReason" name="reason" placeholder="Tell us the situation in your own words…" required></textarea>
+          </div>
+          <div class="form-foot">
+            <button type="submit" class="btn btn-navy">Submit request</button>
+          </div>
+        </form>
+      </div>
+      <div class="form-done" id="formDone">
+        <h3>Request received.</h3>
+        <p id="doneText">Thanks — we'll be in touch shortly about your document.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="steps">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2>Three steps. One document.</h2>
+      <p class="section-lead">Built for landlords and property managers who need it handled correctly, without the runaround.</p>
+      <div class="step-grid">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Answer a few questions</h3>
+          <p>Property, tenant, lease terms, what's owed. Plain language — no legal background needed.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Review your document</h3>
+          <p>Your answers become a clean, professional document. Read it over and make sure every detail is right.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Download and serve</h3>
+          <p>Get a print-ready document you can serve with confidence and keep on file.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Samples -->
+  <section class="samples">
+    <div class="wrap">
+      <p class="kicker">Sample documents</p>
+      <h2>See what you get.</h2>
+      <p class="section-lead">Real documents, professionally formatted — generated from a few answers.</p>
+      <div class="sample-grid">
+        <div class="sample-card">
+          <img src="assets/servedright/notice-sample.jpg" alt="Sample eviction notice — Notice of Lease Termination for Non-Payment of Rent">
+          <div class="sample-cap">
+            <h3>Notice of Lease Termination</h3>
+            <p>Non-payment of rent — professional formatting, every detail in place.</p>
+          </div>
+        </div>
+        <div class="sample-card">
+          <img src="assets/servedright/audit-sample.jpg" alt="Sample therapy relationship audit — ServedRight">
+          <div class="sample-cap">
+            <h3>Therapy Relationship Audit</h3>
+            <p>The most truthful and blunt audit report based on communications between partners and spouses. Industry leading.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Why -->
+  <section class="points">
+    <div class="wrap">
+      <p class="kicker">Why ServedRight</p>
+      <h2>Done right means done completely.</h2>
+      <p class="section-lead">A notice with a missing detail is a notice that doesn't hold. We make sure nothing's missing.</p>
+      <div class="point-grid">
+        <div class="point">
+          <h3>Complete every time</h3>
+          <p>Every field your document needs — parties, property, amounts, dates, deadlines — checked before you download.</p>
+        </div>
+        <div class="point">
+          <h3>Plain language in, professional out</h3>
+          <p>You describe the situation like you'd tell a friend. The document comes out like a professional prepared it.</p>
+        </div>
+        <div class="point">
+          <h3>Private by default</h3>
+          <p>Your information stays yours. Nothing shared, nothing sold.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing">
+    <div class="wrap">
+      <p class="kicker">Pricing</p>
+      <h2>One document. One price.</h2>
+      <p class="section-lead">No subscriptions, no hourly billing. Pay once per document.</p>
+      <div class="price-grid">
+        <div class="price-card">
+          <div><h3>Eviction notice</h3><p>Non-payment, lease violation, or holdover — complete and ready to serve.</p></div>
+          <div class="price-amt">$50</div>
+        </div>
+        <div class="price-card">
+          <div><h3>Lease template</h3><p>A solid, reusable lease template for your properties.</p></div>
+          <div class="price-amt">$50<small>one-time</small></div>
+        </div>
+        <div class="price-card">
+          <div><h3>Personalized lease</h3><p>A lease written for your specific property and terms.</p></div>
+          <div class="price-amt">$75</div>
+        </div>
+        <div class="price-card">
+          <div><h3>Will — small estate</h3><p>A clear, complete will for a straightforward estate.</p></div>
+          <div class="price-amt">$125</div>
+        </div>
+        <div class="price-card">
+          <div><h3>Will — multiple properties / assets</h3><p>A will covering multiple properties and assets.</p></div>
+          <div class="price-amt">$250</div>
+        </div>
+        <div class="price-card">
+          <div><h3>Therapy relationship audit</h3><p>The most truthful and blunt audit based on communications between partners and spouses.</p></div>
+          <div class="price-amt">$79.99</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What's Next -->
+  <section class="whats-next">
+    <div class="wrap">
+      <p class="kicker">Roadmap</p>
+      <h2>What's Next for ServedRight</h2>
+      <p class="section-lead">We are constantly expanding our automated document ecosystem to better serve landlords, tenants, and property managers.</p>
+      <div class="next-grid">
+        <div class="next-card">
+          <h3>Direct E-Filing Integration</h3>
+          <p>Seamlessly submit notice filings directly to local court systems and process servers in participating jurisdictions.</p>
+        </div>
+        <div class="next-card">
+          <h3>Multi-State Compliance Engine</h3>
+          <p>Dynamic clause adjustments tailored to specific county and municipal tenant law variations across all 50 states.</p>
+        </div>
+        <div class="next-card">
+          <h3>AI Document Verification</h3>
+          <p>Automated pre-flight audits to check every lease and eviction notice against jurisdictional statutory deadlines.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p>ServedRight is a document preparation service, not a law firm, and does not provide legal advice. For advice about your specific situation, consult a licensed attorney.</p>
+    <p><a href="privacy.html" style="color: var(--muted); margin: 0 0.6rem;">Privacy Policy</a> &middot; <a href="terms.html" style="color: var(--muted); margin: 0 0.6rem;">Terms of Service</a></p>
+    <p class="copyright">&copy; 2026 LockedDoor.ai</p>
+  </footer>
+
+  <script>
+    // Set this to the email that should receive form submissions, e.g. "orders@example.com".
+    // Until it's set, the form shows a confirmation without sending anywhere.
+    var ORDERS_EMAIL = "";
+
+    var serviceSel = document.getElementById('fService');
+    var evictionSide = document.getElementById('evictionSide');
+    serviceSel.addEventListener('change', function () {
+      evictionSide.classList.toggle('show', serviceSel.value.indexOf('Eviction notice') === 0);
+    });
+
+    document.getElementById('intakeForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = document.getElementById('fName').value.trim();
+      var contact = document.getElementById('fContact').value.trim();
+      var service = serviceSel.value;
+      var reason = document.getElementById('fReason').value.trim();
+      if (!name || !contact || !service || !reason) {
+        alert('Please fill in every field so we can prepare your document.');
+        return;
+      }
+      var sideEl = document.querySelector('input[name="side"]:checked');
+      var side = sideEl ? sideEl.value : '';
+      if (ORDERS_EMAIL) {
+        var subject = encodeURIComponent('ServedRight request: ' + service);
+        var body = encodeURIComponent(
+          'Name: ' + name + '\nContact: ' + contact + '\nDocument: ' + service +
+          (side ? '\nSide: ' + side : '') + '\nReason:\n' + reason
+        );
+        window.location.href = 'mailto:' + ORDERS_EMAIL + '?subject=' + subject + '&body=' + body;
+      }
+      document.getElementById('formWrap').style.display = 'none';
+      var done = document.getElementById('formDone');
+      done.classList.add('show');
+      document.getElementById('doneText').textContent =
+        'Thanks ' + name.split(' ')[0] + ' — your request for a ' +
+        service.split(' — ')[0].toLowerCase() + ' is in. We\'ll reach out to ' + contact + ' shortly.';
+    });
+  </script>
+
+</body>
+</html>
