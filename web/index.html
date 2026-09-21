@@ -579,7 +579,7 @@
 
 /* ---------- plans ---------- */
 .rl-plans-grid { display: grid; grid-template-columns: 1fr 250px; gap: 40px; align-items: start; }
-.rl-plan-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.rl-plan-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .rl-plan { background: #1E211E; border: 1px solid rgba(233,226,215,.09); border-radius: 18px; padding: 36px 30px 32px; position: relative; display: flex; flex-direction: column; }
 .rl-plan-featured { border-color: rgba(138,125,107,.75); }
 .rl-plan-badge { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: #8A7D6B; color: #151715; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; padding: 6px 15px; border-radius: 999px; white-space: nowrap; }
@@ -608,7 +608,7 @@
 @media (max-width: 1020px) {
   .rl-feature-grid { grid-template-columns: repeat(3, 1fr); }
   .rl-plans-grid { grid-template-columns: 1fr; }
-  .rl-plan-cards { grid-template-columns: repeat(3, 1fr); }
+  .rl-plan-cards { grid-template-columns: repeat(2, 1fr); }
   .rl-checklist ul { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
 }
 @media (max-width: 860px) {
@@ -870,8 +870,7 @@
               </ul>
               <a class="rl-btn rl-btn-ghost" href="https://buy.stripe.com/6oUfZh1jradL0he4098AE00" target="_blank" rel="noopener">Get Starter</a>
             </article>
-            <article class="rl-plan rl-plan-featured">
-              <span class="rl-plan-badge">Most popular</span>
+            <article class="rl-plan">
               <h3>Resident</h3>
               <div class="rl-price">$14.99 <small>/mo</small></div>
               <p class="rl-plan-tag">The full challenge, at your own pace.</p>
@@ -879,7 +878,19 @@
                 <li>8 free psychological audits</li>
                 <li>They remember everything you tell them</li>
               </ul>
-              <a class="rl-btn rl-btn-primary" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">Take the challenge</a>
+              <a class="rl-btn rl-btn-ghost" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">Take the challenge</a>
+            </article>
+            <article class="rl-plan rl-plan-featured" style="border-color: #D8B894; background: linear-gradient(180deg, #1E211E 0%, #2A362D 100%);">
+              <span class="rl-plan-badge" style="background: #D8B894; color: #151715;">Best Value</span>
+              <h3>Town & Companions Bundle</h3>
+              <div class="rl-price">$19.99 <small>/mo</small></div>
+              <p class="rl-plan-tag">God's Town + God's Companions complete suite.</p>
+              <ul>
+                <li>Full town resident access + custom companion creation</li>
+                <li>Unlimited psychological audits</li>
+                <li>KEYHOLE webcam media suite included</li>
+              </ul>
+              <a class="rl-btn rl-btn-primary" style="background: #D8B894; color: #151715;" href="https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01" target="_blank" rel="noopener">Get Full Bundle</a>
             </article>
           </div>
           <aside class="rl-checklist">
