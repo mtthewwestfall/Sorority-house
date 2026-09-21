@@ -1,44 +1,37 @@
 """
-SORORITY HOUSE — Telegram bot
-================================
+KEYHOLE — Live WebCam Show Telegram Bot
+=======================================
 
-The Telegram "version" of Sorority House. Telegram is just another front-end onto
-the *same* backend (`main.py`): accounts, the trust engine, the per-girl memory
-stack, the message allowance and the model roles (MOUTH/BRAIN/AUDIT) all live
-there. This bot is a thin chat client over the backend's public API, so whatever
-a player did on the web or on Telegram is one shared account and one shared
-conversation history.
+The Telegram front-end for the KEYHOLE Live WebCam Show backend (`main.py`).
+Allows users to watch live previews, interact, and chat 1-on-1 with featured WebCam
+models (Chloe and Bailey).
 
 Your Telegram id is your account: the first message opens a fresh one on the
-backend (`/auth/telegram`, unlocked by the TELEGRAM_BOT_SECRET the bot shares with
-`main.py`) — nobody types an email into a bot. `/login <email> <password>` is
-optional and points this Telegram at an existing website account instead. Nothing
-here weakens the backend — there are no admin back-doors, no client-side claims of
-purchases; upgrades bought from the bot carry the user id to Stripe as
-`client_reference_id` and land through the backend's Stripe webhook.
+backend (`/auth/telegram`, unlocked by the TELEGRAM_BOT_SECRET shared with `main.py`).
+`/login <email> <password>` points this Telegram at an existing website account.
 
 Commands
 --------
-/start   — welcome (opens the account on first use)
-/login   — /login <email> <password>, joins this Telegram to your website account
-/signup  — /signup <email> <password> <display_name>, creates an email account
-           (email verification still happens, exactly like the web; then /login)
-/girls   — the doors: which sisters are open to you right now; tap one to talk
-/girl    — /girl <slug> (e.g. /girl dakota) to switch who you are talking to
-/house   — leave her room and go back to the doors (also the keyboard button)
-/audit   — run a psychological audit for the sister you are currently talking to
-/state   — your tier, messages left, and every girl's trust stage
-/history — the last messages with the girl you are talking to
-/logout  — forget this chat's session (the next message reopens the same account)
-/help    — this text
+/start   — Welcome & WebCam lounge introduction
+/login   — /login <email> <password>, join this Telegram to your website account
+/signup  — /signup <email> <password> <display_name>, create an account
+/models  — Show available WebCam show models (Chloe & Bailey)
+/model   — /model <chloe|bailey>, switch who you are chatting with
+/preview — View a live video/photo preview of your active model
+/show    — Leave model chat room & return to the main lounge
+/audit   — View model profile & status audit
+/state   — Your account tier, webcam minutes & message balance
+/history — Last messages with the current model
+/menu    — Upgrade packages, WebCam show link & app
+/logout  — Forget session (next message reopens same Telegram account)
+/help    — Command reference
 
 Env vars
 --------
 TELEGRAM_BOT_TOKEN   from @BotFather. Never put the value in any file.
-PUBLIC_URL           the Sorority House backend base URL, e.g. the Railway app.
-                     Required (no default), same across web and this bot.
-TELEGRAM_BOT_SECRET  the same random string as on the backend; it unlocks
-                     /auth/telegram. Required.
+PUBLIC_URL           the KEYHOLE backend base URL, e.g. Railway app URL.
+                     Required (no default).
+TELEGRAM_BOT_SECRET  shared secret with the backend; unlocks /auth/telegram.
 """
 
 import asyncio
@@ -52,7 +45,7 @@ import urllib.parse
 try:
     import requests
     NetError = requests.exceptions.RequestException
-except Exception:  # pragma: no cover - requirement listed in this folder
+except Exception:  # pragma: no cover
     requests = None
     NetError = Exception
 
@@ -69,23 +62,25 @@ from telegram.ext import (
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                     level=logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)  # its request lines include the token
-logger = logging.getLogger("sorority_tg")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = logging.getLogger("keyhole_tg")
 
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
-SECRET_ENV = "TELEGRAM_BOT_SECRET"   # shared with the backend; unlocks /auth/telegram
+SECRET_ENV = "TELEGRAM_BOT_SECRET"
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
-# Stripe Payment Links, one per paid tier (public URLs; checkout happens on Stripe).
+
+# Restrict available models strictly to Chloe and Bailey
+ALLOWED_MODELS = {"chloe", "bailey"}
+
+# Stripe Payment Links for WebCam show packages & tiers
 PLAN_LINKS = [
-    ("Starter · $7.99/mo", os.environ.get("PAY_LINK_SOPHOMORE", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")),
-    ("Storyline challenge · $14.99/mo", os.environ.get("PAY_LINK_JUNIOR", "https://buy.stripe.com/5kQcN5aU13Pn4xu54d8AE01")),
-    ("All site access · $19.99/mo", os.environ.get("PAY_LINK_SENIOR", "https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02")),
+    ("Keyhole Private Pass · $19.99", os.environ.get("PAY_LINK_PRIVATE", "https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02")),
+    ("Keyhole Lounge Pass · $4.99", os.environ.get("PAY_LINK_PUBLIC", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")),
 ]
 
-
 # ---------------------------------------------------------------------------
-# Tiny per-chat store (a local JSON file; tokens live here, never in git).
+# Session store
 # ---------------------------------------------------------------------------
 def _state_file() -> str:
     return os.environ.get("SORORITY_STATE_FILE",
@@ -129,12 +124,12 @@ class Store:
 store = Store()
 
 # ---------------------------------------------------------------------------
-# Backend client (plain requests over the shared HTTP API).
+# Backend client
 # ---------------------------------------------------------------------------
 def _base() -> str:
     base = os.environ.get(URL_ENV, "").strip().rstrip("/")
     if not base:
-        raise RuntimeError(f"{URL_ENV} is not set (the Sorority House backend).")
+        raise RuntimeError(f"{URL_ENV} is not set (the KEYHOLE backend).")
     if not base.startswith("https://") and not base.startswith("http://localhost") \
             and not base.startswith("http://127.0.0.1"):
         raise RuntimeError(f"{URL_ENV} must be https:// — passwords and tokens travel over it.")
@@ -176,10 +171,10 @@ def _get(path, token=None, timeout=40):
 def _auth_payload(r):
     if r.status_code == 403:
         raise BackendError(
-            "That email is not verified yet. Open the verification link the site sent "
-            "you, then try again.", code="email_unverified")
+            "That email is not verified yet. Open the verification link sent to your email, "
+            "then try again.", code="email_unverified")
     if r.status_code == 503:
-        raise BackendError("The bot is not connected to the house yet "
+        raise BackendError("The bot is not connected to the lounge yet "
                            f"({SECRET_ENV} is not set on the backend).")
     if r.status_code != 200:
         try:
@@ -200,13 +195,11 @@ def _bot_secret() -> str:
 
 
 def _telegram_auth(telegram_id, display_name):
-    """The Telegram id is the account: first call creates it, later ones re-open it."""
     return _auth_payload(_post("/auth/telegram", {
         "telegram_id": telegram_id, "display_name": display_name, "secret": _bot_secret()}))
 
 
 def _login(telegram_id, email, password):
-    """Point this Telegram id at an existing website account instead."""
     return _auth_payload(_post("/auth/telegram/link", {
         "telegram_id": telegram_id, "email": email, "password": password,
         "secret": _bot_secret()}))
@@ -232,8 +225,12 @@ def _signup(email, password, display_name):
 def _fetch_roster(token):
     r = _get("/roster", token=token)
     if r.status_code != 200:
-        raise BackendError(f"Could not load the roster (HTTP {r.status_code})")
-    return r.json()
+        raise BackendError(f"Could not load the models (HTTP {r.status_code})")
+    data = r.json()
+    girls = data.get("girls", [])
+    # Strictly filter roster to Chloe and Bailey for WebCam show
+    filtered = [g for g in girls if g.get("girl") in ALLOWED_MODELS]
+    return {"girls": filtered}
 
 
 def _fetch_state(token):
@@ -244,6 +241,8 @@ def _fetch_state(token):
 
 
 def _fetch_history(token, girl):
+    if girl not in ALLOWED_MODELS:
+        return []
     r = _get(f"/history?girl={girl}", token=token)
     if r.status_code != 200:
         raise BackendError(f"Could not load history (HTTP {r.status_code})")
@@ -251,6 +250,8 @@ def _fetch_history(token, girl):
 
 
 def _send_chat(token, girl, message):
+    if girl not in ALLOWED_MODELS:
+        raise BackendError("Only Chloe and Bailey are available on the WebCam show.")
     r = _post("/chat", {"girl": girl, "message": message}, token=token, timeout=150)
     if r.status_code != 200:
         try:
@@ -263,6 +264,8 @@ def _send_chat(token, girl, message):
 
 
 def _send_audit(token, girl):
+    if girl not in ALLOWED_MODELS:
+        raise BackendError("Audit is only available for Chloe and Bailey.")
     r = _post("/audit", {"girl": girl}, token=token, timeout=150)
     if r.status_code != 200:
         try:
@@ -273,7 +276,7 @@ def _send_audit(token, girl):
         raise BackendError(str(detail_msg) or f"audit failed (HTTP {r.status_code})")
     data = r.json()
     if not data or not data.get("ok") or not data.get("audit"):
-        raise BackendError("No audit right now. Try again in a moment.")
+        raise BackendError("No audit available right now. Try again in a moment.")
     return data
 
 
@@ -302,7 +305,7 @@ async def send_audit(*args):
     return await asyncio.to_thread(_send_audit, *args)
 
 
-# Roster presentation helpers --------------------------------------------------
+# Roster & presentation helpers ------------------------------------------------
 def _girl_name(girls, slug):
     for g in girls:
         if g["girl"] == slug:
@@ -316,47 +319,47 @@ def _cmd_args(update) -> list:
     return parts[1:] if len(parts) > 1 else []
 
 
-# ---------------------------------------------------------------------------
-# Handlers
-# ---------------------------------------------------------------------------
-def _rec(update) -> dict:
-    return store.get(update.effective_chat.id)
+def _active_model(rec) -> str | None:
+    slug = (rec or {}).get("active_girl")
+    if slug and slug.lower() in ALLOWED_MODELS:
+        return slug.lower()
+    return None
+
+
+# WebCam room keyboard controls
+BACK_TO_LOUNGE = "🎥 Main Lounge"
+PREVIEW_BTN = "📷 Live Preview"
+ROOM_KEYBOARD = ReplyKeyboardMarkup(
+    [[KeyboardButton(PREVIEW_BTN), KeyboardButton(BACK_TO_LOUNGE)]],
+    resize_keyboard=True, is_persistent=True
+)
 
 
 async def _txt(update, text) -> None:
     await update.effective_message.reply_text(text)
 
 
-# While the user is in a girl's room a one-key reply keyboard stays under the
-# composer, so leaving is a tap instead of remembering a command.
-BACK_TO_HOUSE = "\U0001F3E0 Back to the house"
-ROOM_KEYBOARD = ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_HOUSE)]],
-                                    resize_keyboard=True, is_persistent=True)
-
-
 async def _ensure_session(update, force: bool = False):
-    """The session for this chat, opening one from the Telegram id when there is none
-    (first time: a fresh account, no email asked). Returns the record or None after
-    telling the user why."""
-    rec = _rec(update)
+    rec = store.get(update.effective_chat.id)
     if rec and rec.get("token") and not force:
         return rec
     user = update.effective_user
     try:
-        sess = await telegram_auth(user.id, (user.first_name or "Player")[:40])
+        sess = await telegram_auth(user.id, (user.first_name or "Viewer")[:40])
     except (BackendError, RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house right now: {exc}")
+        await _txt(update, f"Could not reach the WebCam show server: {exc}")
         return None
     created = sess.pop("created", False)
-    store.set(update.effective_chat.id, **sess,
-              active_girl=(rec or {}).get("active_girl"))
+    active = (rec or {}).get("active_girl")
+    if active not in ALLOWED_MODELS:
+        active = None
+    store.set(update.effective_chat.id, **sess, active_girl=active)
     if created:
         await _txt(update,
-             "🏛️ Welcome to Sorority House — your account is open, no sign-up needed. "
-             "Your Telegram is your key here.\n\n"
-             "Already have an account on the website? /login <email> <password> once "
-             "and this chat joins it (same history, same allowance).")
-    return _rec(update)
+             "📹 Welcome to KEYHOLE Live WebCam Show — your account is open!\n"
+             "Your Telegram id is your instant pass.\n\n"
+             "Already have a web account? Use /login <email> <password> to link it.")
+    return store.get(update.effective_chat.id)
 
 
 async def _require_login(update) -> bool:
@@ -364,11 +367,9 @@ async def _require_login(update) -> bool:
 
 
 async def _call(update, fn, *args):
-    """Backend call with the chat's token; a dead session (the bot was redeployed, or
-    the site logged everyone out) is reopened from the Telegram id and retried once."""
     rec = await _ensure_session(update)
     if rec is None:
-        raise BackendError("could not reopen your session — try again in a moment")
+        raise BackendError("Could not reopen session — please try again.")
     try:
         return await fn(rec["token"], *args)
     except BackendError as exc:
@@ -376,36 +377,146 @@ async def _call(update, fn, *args):
             raise
     rec = await _ensure_session(update, force=True)
     if rec is None:
-        raise BackendError("could not reopen your session — try again in a moment")
+        raise BackendError("Could not reopen session — please try again.")
     return await fn(rec["token"], *args)
 
 
+# Portrait & Media Fetching ----------------------------------------------------
+PORTRAIT_MAX_BYTES = 10 * 1024 * 1024
+PORTRAIT_DEADLINE_S = 8.0
+_portrait_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="portrait")
+
+
+def _portrait_url(g) -> str:
+    url = (g.get("avatar_url") or "").strip()
+    if not url:
+        return ""
+    if url.startswith("http://") or url.startswith("https://"):
+        return url if url.startswith(SITE_URL + "/") or url.startswith(_base() + "/") else ""
+    if url.startswith("//") or ".." in url:
+        return ""
+    return SITE_URL + "/" + url.lstrip("/")
+
+
+def _fetch_bytes(url: str):
+    deadline = time.monotonic() + PORTRAIT_DEADLINE_S
+    with requests.get(url, timeout=(4, 4), stream=True, allow_redirects=False) as r:
+        r.raise_for_status()
+        if int(r.headers.get("Content-Length") or 0) > PORTRAIT_MAX_BYTES:
+            raise ValueError("media file too large")
+        if time.monotonic() > deadline:
+            raise TimeoutError("media download timed out")
+        buf = bytearray()
+        for chunk in r.iter_content(65536):
+            buf.extend(chunk)
+            if len(buf) > PORTRAIT_MAX_BYTES:
+                raise ValueError("media file too large")
+            if time.monotonic() > deadline:
+                raise TimeoutError("media download timed out")
+    return bytes(buf)
+
+
+def _fetch_portrait(url: str):
+    return asyncio.get_running_loop().run_in_executor(_portrait_pool, _fetch_bytes, url)
+
+
+async def _send_portrait(update, g, caption: str) -> bool:
+    url = _portrait_url(g)
+    if not url or requests is None:
+        return False
+    try:
+        data = await _fetch_portrait(url)
+        await update.effective_message.reply_photo(data, caption=caption[:1024])
+        return True
+    except Exception as exc:
+        logger.info("Portrait send for %s skipped: %s", g.get("girl"), exc)
+        return False
+
+
+async def _send_preview(update, slug: str, token: str | None = None) -> None:
+    sl = slug.strip().lower()
+    if sl not in ALLOWED_MODELS:
+        await _txt(update, "Live preview is available for Chloe and Bailey.")
+        return
+
+    await _txt(update, f"📹 Fetching live preview for {sl.capitalize()}...")
+
+    asset_url = ""
+    media_type = "photo"
+
+    try:
+        if token:
+            r = await asyncio.to_thread(_get, f"/media/character/{sl}/default", token)
+            if r.status_code == 200 and r.json().get("ok") and r.json().get("asset"):
+                ast = r.json()["asset"]
+                asset_url = ast.get("url", "")
+                if ast.get("media_type") == "video":
+                    media_type = "video"
+    except Exception as exc:
+        logger.info("Media endpoint fetch error for preview: %s", exc)
+
+    if not asset_url:
+        try:
+            roster = (await _call(update, fetch_roster))["girls"]
+            for g in roster:
+                if g.get("girl") == sl:
+                    asset_url = _portrait_url(g)
+                    break
+        except Exception:
+            pass
+
+    if not asset_url:
+        await _txt(update, f"Preview for {sl.capitalize()} is currently offline. Try again in a moment!")
+        return
+
+    parsed = urllib.parse.urlparse(asset_url)
+    if parsed.scheme not in ("http", "https"):
+        await _txt(update, "Invalid preview media URL.")
+        return
+
+    caption = f"🎥 Live WebCam Preview — {sl.capitalize()}"
+
+    try:
+        if media_type == "video" and asset_url.endswith((".mp4", ".webm")):
+            await update.effective_message.reply_video(asset_url, caption=caption)
+            return
+        elif asset_url.startswith("http://") or asset_url.startswith("https://"):
+            data = await _fetch_portrait(asset_url)
+            await update.effective_message.reply_photo(data, caption=caption)
+            return
+    except Exception as exc:
+        logger.info("Direct media delivery skipped for preview (%s): %s", asset_url, exc)
+
+    await _txt(update, f"{caption}\n🔗 Stream: {asset_url}")
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    had = bool(_rec(update) and _rec(update).get("token"))
+    had = bool(store.get(update.effective_chat.id) and store.get(update.effective_chat.id).get("token"))
     rec = await _ensure_session(update)
     if rec is None:
         return
     await _txt(update,
-         ("Welcome back to the house. 💛\n\n" if had else
-          "This is the Telegram way to talk to the same sisters as the website — one "
-          "account, one history, one shared allowance. Doors open by trust, not by "
-          "asking.\n\n")
-         + "• /girls — knock on the doors that are open to you\n"
-         "• just type a message to talk to whoever you're with\n"
-         "• /audit — run a psychological audit for who you're talking to\n"
-         "• /state — your allowance + where you stand with each sister\n"
-         "• /menu — upgrade, the website, get the app\n"
-         "• /help — everything")
+         ("Welcome back to KEYHOLE Live WebCam Show. 📹\n\n" if had else
+          "Welcome to KEYHOLE Live WebCam Show! Chat live 1-on-1 and watch interactive shows with our featured models.\n\n")
+         + "• /models — view models live right now (Chloe & Bailey)\n"
+         "• /model <chloe|bailey> — connect with a model\n"
+         "• /preview — view live webcam preview\n"
+         "• /show — return to main lounge\n"
+         "• /state — check your webcam minutes & messages left\n"
+         "• /menu — view packages and web app link\n"
+         "• /help — list all commands")
 
 
 async def cmd_signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat.type != "private":
-        await _txt(update, "Do this in private, please — I'd rather not take your password in a group.")
+        await _txt(update, "Please sign up in a private chat.")
         return
     args = _cmd_args(update)
     if len(args) < 3:
-        await _txt(update, "Usage:  /signup <email> <password> <your name>\n"
-                     "e.g. /signup friend@x.com hunter2 Jessica")
+        await _txt(update, "Usage:  /signup <email> <password> <your name>")
         return
     email, password = args[0], args[1]
     name = " ".join(args[2:])
@@ -416,22 +527,14 @@ async def cmd_signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     if out.get("needs_verification"):
         await _txt(update,
-             "Account created. 🎉 Sorority House verifies by email (same as the web) so "
-             "I can't hand out a token until the link is clicked.\n\n"
-             + ("Check your inbox for the verification link — then come back and "
-                "/login <email> <password>."
-                if out.get("email_sent")
-                else "No verification email was sent by this instance (there is no mail "
-                     "provider configured). Ask an admin to verify your account, then "
-                     "/login <email> <password>."))
+             "Account created. 🎉 Check your email for verification, then /login <email> <password>.")
     else:
-        await _txt(update, "Account created — and already verified. Your next step is "
-                     "/girls to knock on a door.")
+        await _txt(update, "Account created & verified! Use /models to connect with Chloe or Bailey.")
 
 
 async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat.type != "private":
-        await _txt(update, "Do this in private, please — I don't want your password in a group.")
+        await _txt(update, "Please login in a private chat.")
         return
     args = _cmd_args(update)
     if len(args) < 2:
@@ -446,200 +549,66 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sess.pop("created", None)
     store.set(update.effective_chat.id, **sess, active_girl=None)
     await update.effective_message.reply_text(
-         f"This Telegram is now {sess['email']}'s account — same history, same allowance "
-         "here and on the site.\n\n/girls to knock on a door, /state for your allowance.",
+         f"Logged in as {sess['email']}. Use /models to start watching!",
          reply_markup=ReplyKeyboardRemove())
 
 
 async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     store.forget(update.effective_chat.id)
     await update.effective_message.reply_text(
-        "Forgot this chat's session. Your account stays where it is — the "
-        "next message reopens it from your Telegram.", reply_markup=ReplyKeyboardRemove())
+        "Logged out. Your session is cleared.", reply_markup=ReplyKeyboardRemove())
 
 
-PORTRAIT_MAX_BYTES = 5 * 1024 * 1024  # Telegram's own sendPhoto ceiling is 10 MB
-PORTRAIT_DEADLINE_S = 8.0  # end-to-end per download, not per socket read
-# Portrait downloads get their own small pool so a slow image host can never occupy the
-# default executor that login / roster / chat calls run on.
-_portrait_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="portrait")
-
-
-def _portrait_url(g) -> str:
-    """Roster avatar_url is site-relative (assets/zoe.jpg) or absolute; only the site
-    itself is fetched, so a roster edit cannot point the bot at internal hosts."""
-    url = (g.get("avatar_url") or "").strip()
-    if not url:
-        return ""
-    if url.startswith("http://") or url.startswith("https://"):
-        return url if url.startswith(SITE_URL + "/") else ""
-    if url.startswith("//") or ".." in url:
-        return ""
-    return SITE_URL + "/" + url.lstrip("/")
-
-
-def _fetch_bytes(url: str):
-    deadline = time.monotonic() + PORTRAIT_DEADLINE_S
-    with requests.get(url, timeout=(4, 4), stream=True, allow_redirects=False) as r:
-        r.raise_for_status()
-        if int(r.headers.get("Content-Length") or 0) > PORTRAIT_MAX_BYTES:
-            raise ValueError("portrait too large")
-        if time.monotonic() > deadline:
-            raise TimeoutError("portrait download too slow")
-        buf = bytearray()
-        for chunk in r.iter_content(65536):
-            buf.extend(chunk)
-            if len(buf) > PORTRAIT_MAX_BYTES:
-                raise ValueError("portrait too large")
-            if time.monotonic() > deadline:
-                raise TimeoutError("portrait download too slow")
-    return bytes(buf)
-
-
-def _fetch_portrait(url: str):
-    return asyncio.get_running_loop().run_in_executor(_portrait_pool, _fetch_bytes, url)
-
-
-async def _send_portrait(update, g, caption: str) -> bool:
-    """Best effort: the portrait is decoration, never a reason to fail the command."""
-    url = _portrait_url(g)
-    if not url or requests is None:
-        return False
-    try:
-        data = await _fetch_portrait(url)
-        await update.effective_message.reply_photo(data, caption=caption[:1024])
-        return True
-    except Exception as exc:  # network, bad image, telegram refusing the format
-        logger.info("portrait for %s skipped: %s", g.get("girl"), exc)
-        return False
-
-
-async def _send_album(update, girls) -> None:
-    girls = [g for g in girls[:10] if _portrait_url(g) and requests is not None]
-    if not girls:
-        return
-    try:
-        results = await asyncio.wait_for(
-            asyncio.gather(*(_fetch_portrait(_portrait_url(g)) for g in girls),
-                           return_exceptions=True),
-            timeout=PORTRAIT_DEADLINE_S * 4)
-    except asyncio.TimeoutError:
-        logger.info("album skipped: portraits took too long")
-        return
-    media = []
-    for g, data in zip(girls, results):
-        if isinstance(data, BaseException):
-            logger.info("portrait for %s skipped: %s", g.get("girl"), data)
-            continue
-        media.append(InputMediaPhoto(data, caption=g.get("name", g.get("girl", ""))))
-    if not media:
-        return
-    try:
-        if len(media) == 1:
-            await update.effective_message.reply_photo(media[0].media, caption=media[0].caption)
-        else:
-            await update.effective_message.reply_media_group(media)
-    except Exception as exc:
-        logger.info("album skipped: %s", exc)
-
-
-def _milestone_label(milestone):
-    stages = {1: "Stranger", 2: "Noticing", 3: "Opening", 4: "Opening",
-              5: "Trusted", 6: "Confided", 7: "Confided", 8: "Different"}
-    return stages.get(int(milestone or 1), "Stranger")
-
-
-async def cmd_girls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_login(update):
         return
-    rec = _rec(update)
     try:
         roster = (await _call(update, fetch_roster))["girls"]
         state = (await _call(update, fetch_state))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house: {exc}")
+        await _txt(update, f"Could not fetch models: {exc}")
         return
-    open_btns, closed = [], []
-    for g in sorted(roster, key=lambda x: x.get("girl", "")):
+
+    open_btns = []
+    for g in roster:
         slug = g["girl"]
-        st = state.get(slug, {})
-        if st.get("open"):
-            stage = st.get("band") or _milestone_label(st.get("milestone"))
-            label = f"{g.get('name', slug)} · {stage} · open"
+        if slug in ALLOWED_MODELS:
+            st = state.get(slug, {})
+            label = f"📹 {g.get('name', slug.title())} · Live WebCam"
             open_btns.append([InlineKeyboardButton(label, callback_data=f"girl:{slug}")])
-        else:
-            reason = st.get("locked_reason", "door still shut")
-            closed.append((g.get("name", slug), reason))
 
-    intro = "The doors of the house:\n" if (open_btns or closed) else "The house is empty right now."
-    await update.effective_message.reply_text(intro)
-
-    if open_btns:
-        await update.effective_message.reply_text(
-            "✅ Open — tap one to talk:",
-            reply_markup=InlineKeyboardMarkup(open_btns))
-        await _send_album(update, [g for g in sorted(roster, key=lambda x: x.get("girl", ""))
-                                   if state.get(g["girl"], {}).get("open")])
-    else:
-        await update.effective_message.reply_text(
-            "No doors are open to you yet — trust opens them, and it builds on real "
-            "days of talking on the site. Keep showing up.")
-
-    if closed:
-        shown = closed[:6]
-        await update.effective_message.reply_text(
-            "🔒 Still shut for you:\n• "
-            + "\n• ".join(f"{name} — {reason}" for name, reason in shown)
-            + (f"\n\n…plus {len(closed) - len(shown)} more." if len(closed) > len(shown) else ""))
+    await update.effective_message.reply_text(
+        "📹 Featured WebCam Models — Live Now:",
+        reply_markup=InlineKeyboardMarkup(open_btns) if open_btns else None)
 
 
 async def _open_girl(update, slug) -> None:
-    """Rec is data held per chat. Passed 'update' may be a command or a callback
-    query — both expose .effective_chat / .effective_message."""
     sl = slug.strip().lower()
-    rec = _rec(update)
+    if sl not in ALLOWED_MODELS:
+        await _txt(update, "Only Chloe and Bailey are available on the WebCam show right now. Use /models to connect!")
+        return
+
     try:
         rosters = (await _call(update, fetch_roster))["girls"]
-    except (BackendError, RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house: {exc}")
-        return
-    if sl not in [g["girl"] for g in rosters]:
-        await _txt(update, "I don't recognise that sister. Try one of: "
-                     + ", ".join(g["girl"] for g in rosters))
-        return
-    try:
-        state = (await _call(update, fetch_state))["girls"].get(sl, {})
-        if not state.get("open"):
-            await _txt(update, f"That door is currently shut — {state.get('locked_reason', 'keep talking on the web and it may open.')}")
-            return
         history = await _call(update, fetch_history, sl)
     except (BackendError, RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house: {exc}")
+        await _txt(update, f"Could not connect to model: {exc}")
         return
+
     store.set(update.effective_chat.id, active_girl=sl)
-    girl = next(g for g in rosters if g["girl"] == sl)
-    await _send_portrait(update, girl, girl.get("door_title") or girl.get("name", sl))
+    girl = next((g for g in rosters if g["girl"] == sl), {"girl": sl, "name": sl.capitalize()})
+    await _send_portrait(update, girl, f"📹 Connected live with {girl.get('name', sl.capitalize())}")
+
     if history:
-        parts = [_girl_name(rosters, sl) + " — here's where you two left off:"]
+        parts = [f"💬 Live chat thread with {girl.get('name', sl.capitalize())}:"]
         for m in history[-6:]:
-            who = "You" if m["sender"] == "user" else "Her"
-            tail = " …" if len(m["message"]) > 240 else ""
-            parts.append(f"{who}: {m['message'][:240]}{tail}")
+            who = "You" if m["sender"] == "user" else girl.get('name', sl.capitalize())
+            parts.append(f"{who}: {m['message'][:240]}")
         msg = "\n\n".join(parts)
     else:
-        msg = _girl_name(rosters, sl) + " — nothing between you yet."
-    msg += "\n\nSay something. She'll answer 💬"
+        msg = f"You are now live with {girl.get('name', sl.capitalize())}! Say hi or tap 📷 Live Preview."
+
     await update.effective_message.reply_text(msg[:4000], reply_markup=ROOM_KEYBOARD)
-
-
-async def cmd_house(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Leave her room: forget the active girl, drop the room keyboard, show the doors."""
-    if not await _require_login(update):
-        return
-    store.set(update.effective_chat.id, active_girl=None)
-    await update.effective_message.reply_text("Back in the hallway.",
-                                              reply_markup=ReplyKeyboardRemove())
-    await cmd_girls(update, context)
 
 
 async def cmd_girl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -647,92 +616,90 @@ async def cmd_girl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     args = _cmd_args(update)
     if not args:
-        await _txt(update, "Usage:  /girl <slug>  — e.g.  /girl dakota")
+        await _txt(update, "Usage: /model <chloe|bailey>")
         return
     await _open_girl(update, args[0])
+
+
+async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_login(update):
+        return
+    rec = store.get(update.effective_chat.id)
+    slug = _active_model(rec)
+    args = _cmd_args(update)
+    if args and args[0].lower() in ALLOWED_MODELS:
+        slug = args[0].lower()
+    if not slug:
+        await _txt(update, "Select a model first: /models or /model <chloe|bailey>")
+        return
+    await _send_preview(update, slug, token=(rec or {}).get("token"))
+
+
+async def cmd_house(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_login(update):
+        return
+    store.set(update.effective_chat.id, active_girl=None)
+    await update.effective_message.reply_text("Returned to the Main WebCam Lounge.",
+                                              reply_markup=ReplyKeyboardRemove())
+    await cmd_models(update, context)
 
 
 async def cmd_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_login(update):
         return
-    rec = _rec(update)
     try:
         st = await _call(update, fetch_state)
-        roster = (await _call(update, fetch_roster))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house: {exc}")
+        await _txt(update, f"Could not load state: {exc}")
         return
-    names = {g["girl"]: g["name"] for g in roster}
-    lines = [f"🏷️ Tier: {st.get('tier', '?')}"]
+    lines = [f"🏷️ Account Tier: {st.get('tier', 'Visitor')}"]
     rem = st.get("remaining")
-    lines.append(f"💬 Messages left: {rem}" if isinstance(rem, int) else "💬 —")
-    if isinstance(rem, int) and rem <= 0:
-        lines.append("You're out of free messages this cycle — renew on the web to keep talking.")
-    lines.append("")
-    girls = st.get("girls") or {}
-    open_list = []
-    for slug, d in girls.items():
-        if d.get("open"):
-            stage = d.get("band") or _milestone_label(d.get("milestone"))
-            open_list.append(f"✅ {names.get(slug, slug)} — {stage}")
-    if open_list:
-        lines.append("Open to you:\n" + "\n".join(open_list))
-    else:
-        lines.append("No doors open yet — trust unlocks them over real days.")
+    lines.append(f"💬 Message balance: {rem}" if isinstance(rem, int) else "💬 Balance: Active")
+    webcam_mins = st.get("webcam_minutes_left", 0)
+    lines.append(f"📹 WebCam show minutes left: {webcam_mins}")
+    lines.append("\nFeatured Live Models:\n• Chloe\n• Bailey")
     await _txt(update, "\n".join(lines))
 
 
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_login(update):
         return
-    rec = _rec(update)
-    slug = rec.get("active_girl")
+    rec = store.get(update.effective_chat.id)
+    slug = _active_model(rec)
     if not slug:
-        await _txt(update, "Pick someone first:  /girls  or  /girl <slug>")
+        await _txt(update, "Select a model first: /models or /model <chloe|bailey>")
         return
     try:
         history = await _call(update, fetch_history, slug)
-        rosters = (await _call(update, fetch_roster))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house: {exc}")
+        await _txt(update, f"Could not load history: {exc}")
         return
     if not history:
-        await _txt(update, f"No history with {_girl_name(rosters, slug)} yet.")
+        await _txt(update, f"No previous messages with {slug.capitalize()}.")
         return
-    parts = [_girl_name(rosters, slug) + " — recent messages:"]
+    parts = [f"Recent chat with {slug.capitalize()}:"]
     for m in history[-8:]:
-        who = "You" if m["sender"] == "user" else "Her"
-        body = m["message"]
-        if len(body) > 450:
-            body = body[:450] + " …"
-        parts.append(f"{who}: {body}")
+        who = "You" if m["sender"] == "user" else slug.capitalize()
+        parts.append(f"{who}: {m['message'][:450]}")
     await _txt(update, "\n\n".join(parts)[:4000])
 
 
 async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_login(update):
         return
-    rec = _rec(update)
-    slug = rec.get("active_girl")
+    rec = store.get(update.effective_chat.id)
+    slug = _active_model(rec)
     if not slug:
-        await _txt(update, "Pick someone first: /girls or /girl <slug>")
+        await _txt(update, "Select a model first: /models or /model <chloe|bailey>")
         return
-    try:
-        rosters = (await _call(update, fetch_roster))["girls"]
-    except Exception:
-        rosters = []
-    girl_name = _girl_name(rosters, slug) if rosters else slug.replace("-", " ").title()
-    await _txt(update, f"Compiling psychological audit for {girl_name}…")
+    await _txt(update, f"Compiling profile audit for {slug.capitalize()}…")
     try:
         out = await _call(update, send_audit, slug)
-    except BackendError as exc:
-        await _txt(update, str(exc))
-        return
-    except (RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not compile audit right now: {exc}")
+    except (BackendError, RuntimeError, NetError) as exc:
+        await _txt(update, f"Could not load audit: {exc}")
         return
     report = out.get("audit") or ""
-    await _txt(update, f"📋 Psychological Audit — {girl_name}\n\n{report}"[:4000])
+    await _txt(update, f"📋 Profile Audit — {slug.capitalize()}\n\n{report}"[:4000])
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -748,8 +715,8 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if not await _require_login(update):
         return
-    if data == "menu:girls":
-        await cmd_girls(update, context)
+    if data == "menu:models":
+        await cmd_models(update, context)
     elif data.startswith("girl:"):
         await _open_girl(update, data.split(":", 1)[1])
 
@@ -757,33 +724,41 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_login(update):
         return
-    rec = _rec(update)
-    text = update.message.text or ""
-    if text.strip() == BACK_TO_HOUSE:
+    rec = store.get(update.effective_chat.id)
+    text = (update.message.text or "").strip()
+
+    if text == BACK_TO_LOUNGE or text == "\U0001F3E0 Back to the house":
         await cmd_house(update, context)
         return
-    slug = rec.get("active_girl")
+
+    slug = _active_model(rec)
+
+    if text == PREVIEW_BTN:
+        if not slug:
+            await _txt(update, "Select a model first: /models")
+            return
+        await _send_preview(update, slug, token=(rec or {}).get("token"))
+        return
+
     if not slug:
-        await _txt(update, "Who do you want to talk to?  Tap one on /girls, or  /girl <slug>.")
+        await _txt(update, "Who would you like to chat with? Tap /models or /model <chloe|bailey>.")
         return
-    if not text.strip():
-        return
+
     try:
         out = await _call(update, send_chat, slug, text)
     except BackendError as exc:
         msg = str(exc)
-        if exc.code == "out_of_messages" or msg == "out_of_messages" or \
-                "trial" in msg.lower() or "remaining" in msg.lower() or "allowance" in msg.lower():
+        if exc.code == "out_of_messages" or "remaining" in msg.lower() or "allowance" in msg.lower():
             await update.effective_message.reply_text(
-                "Your message allowance is spent. Upgrade or renew and you can keep "
-                "talking here right away.",
-                reply_markup=_plans_markup(_rec(update)))
+                "You need additional WebCam show minutes or message balance to continue.",
+                reply_markup=_plans_markup(store.get(update.effective_chat.id)))
             return
         await _txt(update, msg)
         return
     except (RuntimeError, NetError) as exc:
-        await _txt(update, f"Could not reach the house right now: {exc}")
+        await _txt(update, f"Could not reach the WebCam show server: {exc}")
         return
+
     rem = out.get("remaining")
     reply = out.get("reply") or "…"
     tail = f"\n\n(Messages left: {rem})" if isinstance(rem, int) else ""
@@ -791,17 +766,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """A session is bound to a chat, so the house only talks one-to-one: in a group every
-    member would share (and could log out) whoever signed in."""
-    if update.effective_message and update.effective_message.text and \
-            update.effective_message.text.startswith("/"):
-        await _txt(update, "I only talk in private — message me directly.")
+    if update.effective_message and update.effective_message.text and update.effective_message.text.startswith("/"):
+        await _txt(update, "KEYHOLE WebCam Show bot operates in private chats only.")
 
 
 def _pay_url(url: str, rec) -> str:
-    """Payment Link for this account: client_reference_id tells the backend's Stripe
-    webhook which user paid (Telegram accounts have no email to match on), and a known
-    email is prefilled so checkout is one screen."""
     if not rec or not rec.get("user_id"):
         return url
     q = {"client_reference_id": rec["user_id"]}
@@ -817,21 +786,19 @@ def _plans_markup(rec=None) -> InlineKeyboardMarkup:
 
 def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("💳 Upgrade / renew", callback_data="menu:upgrade")],
-        [InlineKeyboardButton("🌐 Open the website", url=SITE_URL),
-         InlineKeyboardButton("📱 Get the app", url=SITE_URL + "/#hero-install")],
+        [InlineKeyboardButton("💳 WebCam Show Packages", callback_data="menu:upgrade")],
+        [InlineKeyboardButton("🌐 KEYHOLE Web Lounge", url=SITE_URL + "/community-cam.html")],
     ]
     if signed_in:
-        rows.append([InlineKeyboardButton("💬 Pick a girl", callback_data="menu:girls")])
+        rows.append([InlineKeyboardButton("📹 Select Model (Chloe / Bailey)", callback_data="menu:models")])
     return InlineKeyboardMarkup(rows)
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     rec = await _ensure_session(update)
     await update.effective_message.reply_text(
-        "Sorority House — where to?\n\n"
-        "Payments go through Stripe and your tier shows up in this chat and on the site. "
-        "The app installs from the site — no app store.",
+        "KEYHOLE Live WebCam Show Menu:\n\n"
+        "Unlock 1-on-1 private webcam shows and lounge access instantly.",
         reply_markup=_menu_markup(rec is not None))
 
 
@@ -840,28 +807,26 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if rec is None:
         return
     await update.effective_message.reply_text(
-        "Pick a plan — checkout opens on Stripe (any email works there; the payment is "
-        "tied to this Telegram). The house unlocks here, on the site and in the app.",
+        "Select a WebCam show package:",
         reply_markup=_plans_markup(rec))
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _txt(update,
-         "Sorority House on Telegram — commands:\n"
-         "/login <email> <password> — join this Telegram to your website account\n"
-         "/signup <email> <password> <name> — make an email account (to use the site too)\n"
-         "/girls — knock on the doors that are open\n"
-         "/girl <slug> — switch who you're talking to\n"
-         "/house — leave her room and go back to the doors\n"
-         "/audit — run a psychological audit for her\n"
-         "/state — tier, messages left, where you stand\n"
-         "/history — the recent thread with her\n"
-         "/menu — upgrade, open the website, get the app\n"
-         "/upgrade — plans and the link to pay\n"
-         "/logout — stop this chat session\n"
-         "/help — this\n\n"
-         "Just type normally to talk. Doors open by trust — showing up across real days "
-         "counts, and the website and this bot share that clock.")
+         "KEYHOLE WebCam Show — Command Reference:\n"
+         "/models — view featured live models (Chloe & Bailey)\n"
+         "/model <chloe|bailey> — connect with a model\n"
+         "/preview — view live webcam media preview\n"
+         "/show — return to the main lounge\n"
+         "/audit — view model profile & state\n"
+         "/state — check account balance & webcam minutes\n"
+         "/history — view recent chat thread\n"
+         "/login <email> <password> — link your website account\n"
+         "/signup <email> <password> <name> — create an account\n"
+         "/menu — view WebCam show packages & link\n"
+         "/upgrade — purchase webcam show passes\n"
+         "/logout — end session\n"
+         "/help — list commands")
 
 
 def main():
@@ -881,17 +846,18 @@ def main():
     app.add_handler(CommandHandler("signup", cmd_signup))
     app.add_handler(CommandHandler("login", cmd_login))
     app.add_handler(CommandHandler("logout", cmd_logout))
-    app.add_handler(CommandHandler("girls", cmd_girls))
-    app.add_handler(CommandHandler("girl", cmd_girl))
-    app.add_handler(CommandHandler("house", cmd_house))
+    app.add_handler(CommandHandler(["models", "girls"], cmd_models))
+    app.add_handler(CommandHandler(["model", "girl"], cmd_girl))
+    app.add_handler(CommandHandler("preview", cmd_preview))
+    app.add_handler(CommandHandler(["show", "house"], cmd_house))
     app.add_handler(CommandHandler("audit", cmd_audit))
     app.add_handler(CommandHandler("state", cmd_state))
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("upgrade", cmd_upgrade))
-    app.add_handler(CallbackQueryHandler(on_button))  # buttons only exist in private chats
+    app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
-    logger.info("Sorority House Telegram bot starting (backend: %s)", _base())
+    logger.info("KEYHOLE WebCam Show Telegram Bot starting (backend: %s)", _base())
     app.run_polling()
 
 
