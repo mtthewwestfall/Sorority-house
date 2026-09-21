@@ -3463,7 +3463,7 @@ def moderate_companion_photo(image_bytes, mime, user_id):
         raise
     except Exception as e:
         print(f"[photo-moderation] Exception during photo moderation: {e}", flush=True)
-        return "allow"
+        raise HTTPException(status_code=502, detail="Photo moderation unavailable. Please try again.")
 
 
 def generate_avatar_from_photo(image_bytes, mime, first_name, gender):
@@ -3560,9 +3560,6 @@ async def create_companion(request: Request, user=Depends(current_user)):
                     _, portrait_b64 = generate_avatar(f"Portrait of {first_name} ({'man' if gender == 'male' else 'woman'}): {fields['looks']}")
                 except Exception as e:
                     print(f"[generate_avatar] Exception: {e}", flush=True)
-
-            if not portrait_b64:
-                portrait_b64 = f"data:{photo_mime};base64,{base64.b64encode(photo_bytes).decode('utf-8')}"
 
             photo_bytes = None
         elif GEMINI_API_KEY:

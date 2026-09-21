@@ -1691,6 +1691,10 @@ const PRESET_FACES = {
     async function loadCompanions() {
       const container = document.getElementById('companion-card-container');
       if (!container) return;
+      if (!isLoggedIn()) {
+        container.innerHTML = '';
+        return;
+      }
       const headers = authHeaders();
       try {
         const res = await fetch(API_BASE_URL + '/companions', { headers });
@@ -1701,6 +1705,7 @@ const PRESET_FACES = {
         const data = await res.json();
         const comps = data.companions || [];
         const maxSlots = data.max_slots || 1;
+        const deletesRem = data.deletes_remaining !== undefined ? data.deletes_remaining : 0;
 
         let html = '';
 
@@ -1709,7 +1714,6 @@ const PRESET_FACES = {
             const name = escapeHtml(c.first_name);
             const title = (c.is_married ? 'Married / Spouse' : 'Your Custom Companion') + (c.gender === 'male' ? ' \u00B7 Him' : ' \u00B7 Her');
             const avatar = c.portrait_url ? (c.portrait_url.startsWith('data:') ? c.portrait_url : 'data:image/png;base64,' + c.portrait_url) : '';
-            const deletesRem = c.deletes_remaining !== undefined ? c.deletes_remaining : 1;
 
             html += '<article class="door-card open companion-card" style="border: 2px solid var(--gold); background: rgba(30, 33, 30, .96); margin-bottom: 20px;">' +
               '<div class="door-art" data-initial="' + escapeHtml(name.charAt(0).toUpperCase()) + '">' +
@@ -1821,7 +1825,7 @@ const PRESET_FACES = {
       if (gender === 'female') return PRESET_FACES.female;
       return PRESET_FACES.female.concat(PRESET_FACES.male);
     }
-    function renderFacePicker(pickerId, hiddenId, gender) {
+    function renderFacePicker(pickerId, hiddenId, gender, autoSelect = false) {
       const picker = document.getElementById(pickerId);
       const hidden = document.getElementById(hiddenId);
       if (!picker || !hidden) return;
@@ -1831,7 +1835,7 @@ const PRESET_FACES = {
       list.forEach((src, idx) => {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'face-pick' + (idx === 0 ? ' selected' : '');
+        b.className = 'face-pick' + (autoSelect && idx === 0 ? ' selected' : '');
         const img = document.createElement('img');
         img.src = src; img.alt = 'Preset face'; img.loading = 'lazy';
         b.appendChild(img);
@@ -1842,7 +1846,7 @@ const PRESET_FACES = {
         });
         picker.appendChild(b);
       });
-      if (list.length > 0) hidden.value = list[0];
+      if (autoSelect && list.length > 0) hidden.value = list[0];
     }
     function authHeadersNoCT() {
       const t = getToken();
@@ -2006,8 +2010,12 @@ const PRESET_FACES = {
       const seq = ++stateSeq;
       turnSeq++;
       setDoors(); chatRemaining.textContent = '';
+      if (!isLoggedIn()) {
+        const container = document.getElementById('companion-card-container');
+        if (container) container.innerHTML = '';
+        return;
+      }
       loadCompanions();
-      if (!isLoggedIn()) return;
       try {
         const response = await fetch(API_BASE_URL + '/state', { headers: authHeaders() });
         if (seq !== stateSeq) return;   // a newer sign-in/out happened; drop this response
