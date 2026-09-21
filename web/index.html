@@ -474,7 +474,7 @@
 /* ---------- top bar ---------- */
 .rl-topbar { position: sticky; top: 0; z-index: 60; background: rgba(21,23,21,.94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(233,226,215,.09); }
 .rl-topbar-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 13px; padding-bottom: 13px; }
-.rl-brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: #E9E2D7; font-weight: 700; letter-spacing: .22em; font-size: .92rem; white-space: nowrap; }
+.rl-brand { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; color: #FFFFFF; background: #000000; padding: 6px 12px; border-radius: 6px; font-weight: 700; letter-spacing: .22em; font-size: .92rem; white-space: nowrap; }
 .rl-brand img { border-radius: 8px; display: block; }
 .rl-nav { display: flex; gap: 28px; }
 .rl-nav a { color: #c9c2b4; text-decoration: none; font-size: .95rem; }
@@ -1125,8 +1125,6 @@
       <div class="chat-log" id="chat-log" aria-live="polite"></div>
       <div class="chat-foot">
         <div class="chat-form" id="chat-form">
-          <button id="chat-photo-btn" type="button" aria-label="Request a picture" hidden>+</button>
-          <button id="chat-audit-btn" type="button" aria-label="Run a psychological audit" title="Psychological audit" hidden>&#9998;</button>
           <div class="field">
             <textarea id="chat-input" rows="1" autocomplete="off" autocorrect="on" enterkeyhint="send" maxlength="2000" placeholder="AI Message" aria-label="Message"></textarea>
             <button class="button" id="chat-send" type="button" aria-label="Send">&uarr;</button>
@@ -1154,6 +1152,8 @@
       const h = { 'Content-Type': 'application/json' };
       const t = getToken();
       if (t) h['Authorization'] = 'Bearer ' + t;
+      const sitePwd = localStorage.getItem('gods_town_site_password') || '';
+      if (sitePwd) h['X-Site-Password'] = sitePwd;
       return h;
     }
 

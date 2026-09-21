@@ -1,8 +1,20 @@
-// God's Companions service worker: network-first for the same-origin app
-// shell, so pages never go stale; the cache is only a fallback for offline
-// startup. API traffic lives on another origin and is never intercepted.
-const CACHE = 'gods-companions-v1';
-const SHELL = ['/', '/manifest.webmanifest'];
+// Service worker for the installed house: it only ever caches the shell that is
+// shipped with the site. Conversations, the roster and everything else the API
+// answers are left alone, so an installed copy can never show a stale girl or a
+// stale message. Bump SHELL on every shell change to retire the old copy.
+const SHELL = 'house-shell-v21';
+const SHELL_FILES = [
+  './',
+  './index.html',
+  './town.html',
+  './manifest.webmanifest',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
+  './assets/icon-maskable-512.png',
+  './assets/apple-touch-icon.png',
+  './assets/favicon-32.png'
+];
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
