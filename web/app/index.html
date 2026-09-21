@@ -1603,8 +1603,11 @@ const PRESET_FACES = {
     }
 
     let lockedScrollY = 0;
-    function openChat(card) {
-      if (!isLoggedIn()) { openAuth('signup', 'Create a free account to open her.'); return; }
+    async function openChat(card) {
+      if (!isLoggedIn() && !(await ensureDemoSession())) {
+        addMessage('error', 'Could not start the demo. Try again in a moment.');
+        return;
+      }
       abortStreamAndResync();
       abortCompanion();
       currentCompanionId = null;
