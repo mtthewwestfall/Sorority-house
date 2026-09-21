@@ -3542,6 +3542,31 @@ def health():
             "free_audits": FREE_AUDITS}
 
 
+@app.post("/auth/demo", dependencies=[Depends(auth_rate_limit)])
+def demo_session():
+    """Open a visitor demo without Google/email sign-in.
+
+    The browser keeps the returned bearer token in localStorage, so the same device
+    keeps its demo progress instead of creating a fresh visitor on every page load.
+    Paid/account features can still require a real account separately.
+    """
+    user_id = "demo_" + secrets.token_hex(12)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO users (user_id, display_name, tier, plan_reset_at)
+                VALUES (%s,%s,'visitor', now() + interval '1 month')
+            """, (user_id, "Visitor"))
+            token = _new_session(cur, user_id)
+            conn.commit()
+    finally:
+        conn.close()
+    user = _ensure_user(user_id)
+    return {"ok": True, "token": token, "user_id": user["user_id"],
+            "tier": user["tier"], "demo": True}
+
+
 @app.post("/auth/signup", dependencies=[Depends(auth_rate_limit)])
 def signup(body: SignupIn):
     email = _norm_email(body.email)
