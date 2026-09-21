@@ -2262,6 +2262,30 @@ async def _type_out(request, user_id, girl, rel, msgs, user_message, remaining, 
             _BRAIN_POOL.submit(refund_message, user_id)
 
 
+def _get_companion_milestone(companion_id: int, user_id: str, default: int = 1) -> int:
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT milestone FROM companions WHERE id=%s AND user_id=%s", (companion_id, user_id))
+                m_row = cur.fetchone()
+                if m_row:
+                    return int(m_row["milestone"])
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return default
+
+
+def _persist_and_refresh_companion(user_id: str, companion_id: int, user_message: str, reply: str):
+    try:
+        _persist_companion_turn(user_id, companion_id, user_message, reply)
+        _refresh_companion_brain(user_id, companion_id)
+    except Exception:
+        pass
+
+
 async def _type_out_companion(request, user_id, companion_id, comp, msgs, user_message, remaining, picture_due=False):
     """Paced real-time mouth streaming for custom companions, identical to standard character streaming."""
     box = queue.Queue(maxsize=2)
@@ -2311,20 +2335,11 @@ async def _type_out_companion(request, user_id, companion_id, comp, msgs, user_m
             return
         await asyncio.to_thread(_persist_companion_turn, user_id, companion_id, user_message, reply)
         logged = True
-        # Run companion brain refresh synchronously to reflect any milestone advance immediately
-        await asyncio.to_thread(_refresh_companion_brain, user_id, companion_id)
-        # Fetch updated milestone if advanced
+
         current_milestone = int(comp.get("milestone", 1))
         try:
-            conn = db()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT milestone FROM companions WHERE id=%s AND user_id=%s", (companion_id, user_id))
-                    m_row = cur.fetchone()
-                    if m_row:
-                        current_milestone = int(m_row["milestone"])
-            finally:
-                conn.close()
+            await asyncio.to_thread(_refresh_companion_brain, user_id, companion_id)
+            current_milestone = await asyncio.to_thread(_get_companion_milestone, companion_id, user_id, current_milestone)
         except Exception:
             pass
 
@@ -2336,9 +2351,8 @@ async def _type_out_companion(request, user_id, companion_id, comp, msgs, user_m
         stop.set()
         reply = "".join(typed).strip()
         if reply and not logged:
-            _BRAIN_POOL.submit(_persist_companion_turn, user_id, companion_id, user_message, reply)
-            _BRAIN_POOL.submit(_refresh_companion_brain, user_id, companion_id)
-        elif not reply:
+            _BRAIN_POOL.submit(_persist_and_refresh_companion, user_id, companion_id, user_message, reply)
+        elif not logged and not reply:
             _BRAIN_POOL.submit(refund_message, user_id)
 
 
