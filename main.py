@@ -5510,12 +5510,20 @@ def history(girl: str, user=Depends(current_user)):
 def public_roster():
     """The doors to render, newest roster edits included. Public: door text and
     art only - never the persona doc, which is the model's system prompt."""
-    return {"tiers": TIER_ORDER,
-            "girls": [{"girl": r["girl"], "name": r["name"],
-                       "door_title": r["door_title"], "blurb": r["blurb"],
-                       "avatar_url": r["avatar_url"], "min_tier": r["min_tier"],
-                       "tier_label": TIERS.get(r["min_tier"], {}).get("label", "")}
-                      for r in roster()]}
+    res_girls = []
+    for r in roster():
+        diff_label = difficulty_for(r["girl"])
+        res_girls.append({
+            "girl": r["girl"], "name": r["name"],
+            "door_title": r["door_title"], "blurb": r["blurb"],
+            "avatar_url": r["avatar_url"], "min_tier": r["min_tier"],
+            "tier_label": TIERS.get(r["min_tier"], {}).get("label", ""),
+            "sims_status": {
+                "mood": "Guarded" if "Hard" in diff_label else "Warm",
+                "autonomy": "High"
+            }
+        })
+    return {"tiers": TIER_ORDER, "girls": res_girls}
 
 
 @app.get("/state")
@@ -5547,8 +5555,23 @@ def state(user=Depends(current_user)):
                 milestone = 1
                 kept = 0
             band, _ball = STAGE_META.get(int(milestone), STAGE_META[1])
-            girls[row["girl"]] = {"open": True, "milestone": milestone, "band": band,
-                                  "kept": kept}
+            # Calculate Sims-style dynamic AI status meters (Mood, Energy, Resistance) based on difficulty and milestone
+            diff_label = difficulty_for(row["girl"])
+            mood = "Warm" if milestone >= 5 else ("Guarded" if "Hard" in diff_label else "Curious")
+            energy = "High" if milestone % 2 == 1 else "Relaxed"
+            receptivity = min(100, int(milestone) * 12 + 10)
+            resistance = max(0, 100 - receptivity)
+
+            girls[row["girl"]] = {
+                "open": True, "milestone": milestone, "band": band, "kept": kept,
+                "sims_status": {
+                    "mood": mood,
+                    "energy": energy,
+                    "receptivity": receptivity,
+                    "resistance": resistance,
+                    "autonomy": "High (Will set boundaries)"
+                }
+            }
         else:
             # locked girls still show so the frontend can render the shut doors
             girls[row["girl"]] = {"open": False, "milestone": 0, "band": "", "kept": 0,
