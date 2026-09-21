@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 KEYHOLE — Live WebCam Show Telegram Bot
 =======================================
@@ -416,8 +418,9 @@ def _fetch_bytes(url: str):
     return bytes(buf)
 
 
-def _fetch_portrait(url: str):
-    return asyncio.get_running_loop().run_in_executor(_portrait_pool, _fetch_bytes, url)
+async def _fetch_portrait(url: str) -> bytes:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_portrait_pool, _fetch_bytes, url)
 
 
 async def _send_portrait(update, g, caption: str) -> bool:
@@ -467,6 +470,14 @@ async def _send_preview(update, slug: str, token: str | None = None) -> None:
 
     if not asset_url:
         await _txt(update, f"Preview for {sl.capitalize()} is currently offline. Try again in a moment!")
+        return
+
+    if asset_url.startswith("/"):
+        asset_url = SITE_URL + asset_url
+
+    base_domain = _base().rstrip("/")
+    if not (asset_url.startswith(SITE_URL + "/") or asset_url.startswith(base_domain + "/")):
+        await _txt(update, "Unauthorized preview media source.")
         return
 
     parsed = urllib.parse.urlparse(asset_url)
