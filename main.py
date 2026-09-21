@@ -824,23 +824,40 @@ DIFFICULTY = {
     "ice":    {"label": "Ice queen - barely thaws",    "days": 3.0},
 }
 DIFFICULTY_DEFAULT = "normal"
+_DIFFICULTY_CACHE = {}  # OPTIMIZATION (Bolt ⚡): {girl: (difficulty_str, timestamp)}
+_DIFFICULTY_CACHE_TTL = 60  # seconds
 
 
-def difficulty_for(girl):
+def difficulty_for(girl, conn=None):
     """Her console-set difficulty, or the default if she has none or the roster is
     unreachable: pacing must never be the thing that breaks a reply."""
+    now = time.time()
+    if girl in _DIFFICULTY_CACHE:
+        val, ts = _DIFFICULTY_CACHE[girl]
+        if now - ts < _DIFFICULTY_CACHE_TTL:
+            return val
+
+    d = DIFFICULTY_DEFAULT
     try:
-        conn = db()
+        close_conn = False
+        if conn is None:
+            conn = db()
+            close_conn = True
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT difficulty FROM personas WHERE girl=%s", (girl,))
                 row = cur.fetchone()
+                if row and row.get("difficulty"):
+                    d = row["difficulty"]
         finally:
-            conn.close()
+            if close_conn:
+                conn.close()
     except Exception:
-        return DIFFICULTY_DEFAULT
-    d = (row or {}).get("difficulty") or DIFFICULTY_DEFAULT
-    return d if d in DIFFICULTY else DIFFICULTY_DEFAULT
+        pass
+
+    res = d if d in DIFFICULTY else DIFFICULTY_DEFAULT
+    _DIFFICULTY_CACHE[girl] = (res, now)
+    return res
 
 
 # Content moderation for custom companions (sexual violence hard ban)
@@ -5496,6 +5513,7 @@ def avatar_contest_promote(body: AvatarPromoteIn, _=Depends(admin_required)):
             conn.commit()
     finally:
         conn.close()
+    _DIFFICULTY_CACHE.pop(girl, None)
     return {"ok": True, "girl": girl}
 
 
@@ -5512,7 +5530,12 @@ def public_roster():
     art only - never the persona doc, which is the model's system prompt."""
     res_girls = []
     for r in roster():
-        diff_label = difficulty_for(r["girl"])
+        # OPTIMIZATION (Bolt ⚡): Use difficulty already fetched by roster() to eliminate N+1 DB connections
+        d = r.get("difficulty")
+        if d and d in DIFFICULTY:
+            diff_label = d
+        else:
+            diff_label = difficulty_for(r["girl"])
         res_girls.append({
             "girl": r["girl"], "name": r["name"],
             "door_title": r["door_title"], "blurb": r["blurb"],
@@ -5556,7 +5579,12 @@ def state(user=Depends(current_user)):
                 kept = 0
             band, _ball = STAGE_META.get(int(milestone), STAGE_META[1])
             # Calculate Sims-style dynamic AI status meters (Mood, Energy, Resistance) based on difficulty and milestone
-            diff_label = difficulty_for(row["girl"])
+            # OPTIMIZATION (Bolt ⚡): Use difficulty already fetched in house = roster() to avoid N+1 queries
+            d = row.get("difficulty")
+            if d and d in DIFFICULTY:
+                diff_label = d
+            else:
+                diff_label = difficulty_for(row["girl"])
             mood = "Warm" if milestone >= 5 else ("Guarded" if "Hard" in diff_label else "Curious")
             energy = "High" if milestone % 2 == 1 else "Relaxed"
             receptivity = min(100, int(milestone) * 12 + 10)
