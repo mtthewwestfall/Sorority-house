@@ -2705,7 +2705,8 @@ pre{white-space:pre-wrap;margin:0}
 </style></head><body>
 <header><h1>God's Greek · Admin</h1>
 <nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
-<button id="tabAcc" onclick="show('acc')">Accounts</button>
+<button id="tabAcc" onclick="showAccounts()">Website Accounts</button>
+<button id="tabWebcamAcc" onclick="showWebcamAccounts()">🎥 WebCam Show Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
 <button id="tabMed" onclick="show('med')">Webcam Media</button>
@@ -2727,9 +2728,15 @@ pre{white-space:pre-wrap;margin:0}
 </section>
 
 <section id="acc" class="hid">
-<div class="card"><div class="row2"><input id="q" placeholder="Search email, name or user id" style="min-width:300px" onkeydown="if(event.key==='Enter')loadAccounts()">
+<div class="card"><div class="row2">
+<input id="q" placeholder="Search email, name or user id" style="min-width:260px" onkeydown="if(event.key==='Enter')loadAccounts()">
+<select id="accType" onchange="loadAccounts()" style="width:200px">
+  <option value="all">All Accounts</option>
+  <option value="website">Website Accounts</option>
+  <option value="webcam">🎥 WebCam Show Accounts</option>
+</select>
 <button class="p" onclick="loadAccounts()">Search</button><span id="accN" class="mut"></span></div>
-<table><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Left</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th><th>Verified</th></tr></thead>
+<table><thead><tr><th>Account / Email</th><th>Type</th><th>Name</th><th>Tier</th><th>Messages Left</th><th>WebCam Mins</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th></tr></thead>
 <tbody id="accRows"></tbody></table></div>
 <div id="detail" class="card hid"></div>
 </section>
@@ -2952,7 +2959,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={ovw:'tabOvw',acc:'tabAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
+const TABS={ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -3226,15 +3233,23 @@ async function exportRoster(){try{const data=await api('/admin/console/export');
 async function loadChat(girl, companionId){const email=CUR;try{const url=companionId?'/admin/accounts/'+encodeURIComponent(email)+'/chat?companion_id='+companionId:'/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl);const rows=await api(url);document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',(companionId?+b.dataset.companionId===+companionId:b.dataset.girl===girl)));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
-async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
- ROWS=rows;$('#accRows').innerHTML=rows.map((a,i)=>`<tr class="row" data-i="${i}"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
- <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
- <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td><td>${a.verified_at?'<span class="mut">yes</span>':'<span class="pill open">no</span>'}</td></tr>`).join('')||'<tr><td colspan=9 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
+function showAccounts(){show('acc');if($('#accType'))$('#accType').value='website';loadAccounts();}
+function showWebcamAccounts(){show('acc');if($('#tabWebcamAcc'))$('#tabWebcamAcc').classList.add('on');if($('#tabAcc'))$('#tabAcc').classList.remove('on');if($('#accType'))$('#accType').value='webcam';loadAccounts();}
+async function loadAccounts(forcedType){
+  if(forcedType&&$('#accType'))$('#accType').value=forcedType;
+  const type=($('#accType')?$('#accType').value:'all')||'all';
+  try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value)+'&account_type='+encodeURIComponent(type));$('#accN').textContent=rows.length+' account(s)';
+ ROWS=rows;$('#accRows').innerHTML=rows.map((a,i)=>`<tr class="row" data-i="${i}"><td><b>${esc(a.email)}</b></td>
+ <td><span class="pill ${a.account_type==='webcam'?'neighbor':''}">${a.account_type==='webcam'?'🎥 WebCam':'🌐 Website'}</span></td><td>${esc(a.display_name)}</td>
+ <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td><b>${a.webcam_minutes_left||0}m</b></td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
+ <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td></tr>`).join('')||'<tr><td colspan=10 class="mut">No accounts found</td></tr>'}catch(e){toast(e.message,true)}}
 $('#accRows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr)openAccount(ROWS[+tr.dataset.i].email)});
 async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));CUR=a.email;const li=ROWS.find(r=>r.email===a.email);if(li&&(li.tier!==a.tier||li.remaining!==a.remaining||li.comp_until!==a.comp_until))loadAccounts();const el=$('#detail');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(a.email)}</h3><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span><span class="mut">${esc(a.user_id)}</span><button class="s" style="margin-left:auto" onclick="$('#detail').classList.add('hid')">Close</button></div>
  <div class="grid"><div>
-  <div class="kv"><div>Name</div><div>${esc(a.display_name)}</div><div>Messages left</div><div>${a.remaining} <span class="mut">(used ${a.msg_used})</span></div>
+  <div class="kv"><div>Account Type</div><div>${a.account_type==='webcam'?'🎥 WebCam Show (Telegram)':'🌐 Website Account'}</div>
+  <div>Name</div><div>${esc(a.display_name)}</div><div>Messages left</div><div>${a.remaining} <span class="mut">(used ${a.msg_used})</span></div>
+  <div>WebCam Mins</div><div><b>${a.webcam_minutes_left||0} min</b></div><div>Text Balance</div><div>${a.text_balance||0} msgs</div>
   <div>Resets</div><div>${dt(a.plan_reset_at)}</div><div>Audit credits</div><div>${a.audit_credits} <span class="mut">(${a.total_audits_used} used total)</span></div>
   <div>Free time</div><div>${a.comp_until?`until ${dt(a.comp_until)} → back to <b>${esc(a.comp_prev_tier)}</b> <button class="s" onclick="endComp()">End now</button>`:'none'}</div>
   <div>Messages sent</div><div>${a.messages_total}</div><div>Joined</div><div>${dt(a.created_at)}</div>
@@ -6655,6 +6670,8 @@ _ACCOUNT_COLS = """
     t.telegram_id, u.user_id, u.display_name, u.tier, u.msg_used,
     u.audit_credits, u.total_audits_used, u.plan_reset_at, u.comp_until,
     u.comp_prev_tier, u.admin_note,
+    u.webcam_minutes_left, u.text_balance,
+    CASE WHEN t.telegram_id IS NOT NULL THEN 'webcam' ELSE 'website' END AS account_type,
     (SELECT count(*) FROM complaints c WHERE c.user_id=u.user_id AND c.status='open') AS open_complaints
 """
 # Several Telegram ids may point at one linked email account, so the Telegram side
@@ -6672,27 +6689,43 @@ _ACCOUNT_ANY = "(a.user_id IS NOT NULL OR t.user_id IS NOT NULL)"
 def _account_view(row):
     row = dict(row)
     row["remaining"] = max(0, TIERS.get(row["tier"], TIERS["visitor"])["limit"] - int(row["msg_used"]))
+    row["webcam_minutes_left"] = int(row.get("webcam_minutes_left") or 0)
+    row["text_balance"] = int(row.get("text_balance") or 0)
+    row["account_type"] = row.get("account_type") or ("webcam" if row.get("telegram_id") else "website")
     return row
 
 
 @app.get("/admin/accounts", dependencies=[Depends(admin_required)])
-def admin_accounts(q: str = "", limit: int = 100):
-    """Search accounts by email / display name / user_id (blank = newest first)."""
+def admin_accounts(q: str = "", account_type: str = "all", limit: int = 100):
+    """Search accounts by email / display name / user_id / type (blank = newest first)."""
     limit = max(1, min(500, limit))
     q = q.strip().lower()
+    type_filter = account_type.strip().lower()
     like = f"%{q}%"
+
+    where_clauses = [_ACCOUNT_ANY]
+    params = []
+
+    if type_filter in ("telegram", "webcam"):
+        where_clauses.append("t.telegram_id IS NOT NULL")
+    elif type_filter == "website":
+        where_clauses.append("a.email IS NOT NULL AND t.telegram_id IS NULL")
+
+    if q:
+        where_clauses.append("(a.email LIKE %s OR lower(u.display_name) LIKE %s OR lower(u.user_id) LIKE %s OR EXISTS (SELECT 1 FROM telegram_accounts ta WHERE ta.user_id=u.user_id AND 'tg:' || ta.telegram_id LIKE %s))")
+        params.extend([like, like, like, like])
+
+    params.append(limit)
+    where_sql = " AND ".join(where_clauses)
+
     conn = db()
     try:
         with conn.cursor() as cur:
             cur.execute(f"""
                 SELECT {_ACCOUNT_COLS} {_ACCOUNT_FROM}
-                WHERE {_ACCOUNT_ANY}
-                  AND (%s = '' OR a.email LIKE %s OR lower(u.display_name) LIKE %s
-                       OR lower(u.user_id) LIKE %s
-                       OR EXISTS (SELECT 1 FROM telegram_accounts ta
-                                  WHERE ta.user_id=u.user_id AND 'tg:' || ta.telegram_id LIKE %s))
+                WHERE {where_sql}
                 ORDER BY coalesce(a.created_at, t.created_at) DESC LIMIT %s
-            """, (q, like, like, like, like, limit))
+            """, params)
             return [_account_view(r) for r in cur.fetchall()]
     finally:
         conn.close()
