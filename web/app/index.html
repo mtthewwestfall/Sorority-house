@@ -1000,6 +1000,26 @@
     </div>
   </div>
 
+  <!-- Customer Webcam Show Modal with Bottom Username Overlay -->
+  <div class="chat-backdrop" id="webcamModal" role="dialog" aria-modal="true" aria-labelledby="webcam-modal-heading" style="display:none;">
+    <div class="chat-panel" style="max-width: 680px; width: 100%; padding: 20px; background: #151715; border: 1px solid rgba(233,226,215,0.2); position: relative; border-radius: 16px;">
+      <button class="chat-close auth-close" id="webcam-modal-close" type="button" aria-label="Close" onclick="document.getElementById('webcamModal').style.display='none'">&times;</button>
+      <h3 id="webcam-modal-heading" style="margin-top:0; color: #E9E2D7;">Live Webcam Show</h3>
+      <div id="webcam-player-container" style="position: relative; width: 100%; height: 380px; background: #000; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+        <video id="webcam-video" src="" autoplay loop muted playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+        <!-- Bottom Customer Username Overlay -->
+        <div id="webcam-username-overlay" style="position: absolute; bottom: 12px; left: 16px; background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2); color: #E9E2D7; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.03em; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 8px;">
+          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e;"></span>
+          <span id="webcam-overlay-name">Viewer</span>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 0.9rem; color: #8A7D6B;">
+        <span id="webcam-timer">Session Active</span>
+        <button class="button dark" style="padding: 6px 16px; font-size: 0.85rem;" onclick="document.getElementById('webcamModal').style.display='none'">Close Feed</button>
+      </div>
+    </div>
+  </div>
+
   <div class="chat-backdrop" id="profile" role="dialog" aria-modal="true" aria-labelledby="profile-heading">
     <div class="chat-panel auth-panel">
       <button class="chat-close auth-close" id="profile-close" type="button" aria-label="Close">&times;</button>
@@ -1063,6 +1083,9 @@
     // Website backend URL hosted on Railway.
     const API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
     window.SORORITY_HOUSE_API_URL = API_BASE_URL;
+  </script>
+  <script src="../gate.js"></script>
+  <script>
 
     // Account auth: the backend issues a bearer token on login; chat/audit/image
     // are keyed to that token (no more anonymous user_id trials).

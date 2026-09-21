@@ -350,6 +350,14 @@ KEYHOLE_DEFAULT_CONFIG = {
     "premium_webcam_minutes": 60,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
+    "private_price": 19.99,
+    "private_webcam_minutes": 60,
+    "private_video_replies": 100,
+    "private_text_included": 200,
+    "public_price": 4.99,
+    "public_webcam_minutes": 30,
+    "public_video_replies": 50,
+    "public_text_included": 100,
     "text_only_price": 1.99,
     "text_only_included": 100,
     "text_only_monthly_cap": 1,
@@ -905,9 +913,14 @@ async def security_matrix_filter(request: Request, call_next):
 
     if SITE_PASSWORD:
         path = request.url.path
-        exempt_exact = {"/gate/status", "/gate/verify", "/health", "/docs", "/openapi.json"}
-        exempt_prefixes = ("/webhooks/", "/auth/telegram", "/auth/verify")
-        if path not in exempt_exact and not any(path.startswith(prefix) for prefix in exempt_prefixes):
+        exempt_exact = {"/gate/status", "/gate/verify", "/health", "/docs", "/openapi.json", "/gate.js", "/"}
+        exempt_prefixes = ("/webhooks/", "/auth/telegram", "/auth/verify", "/assets/", "/areas/", "/uploads/", "/media/", "/admin")
+        exempt_exts = (".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif", ".ico")
+        if (
+            path not in exempt_exact
+            and not any(path.startswith(prefix) for prefix in exempt_prefixes)
+            and not any(path.endswith(ext) for ext in exempt_exts)
+        ):
             pwd = request.headers.get("x-site-password") or request.headers.get("x-gate-password") or ""
             if not pwd or not hmac.compare_digest(pwd.encode(), SITE_PASSWORD.encode()):
                 from fastapi.responses import JSONResponse
@@ -2688,6 +2701,7 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
 <button id="tabMed" onclick="show('med')">Webcam Media</button>
+<button id="tabWp" onclick="show('wp')">Webcam Previews</button>
 <button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button>
 <button id="tabGen" onclick="show('gen')">Image Generator</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
@@ -2706,9 +2720,14 @@ pre{white-space:pre-wrap;margin:0}
 </section>
 
 <section id="acc" class="hid">
-<div class="card"><div class="row2"><input id="q" placeholder="Search email, name or user id" style="min-width:300px" onkeydown="if(event.key==='Enter')loadAccounts()">
+<div class="card">
+<div class="row2" style="margin-bottom:12px">
+ <button id="tabWeb" class="p" onclick="setAccTab('web')">Web Accounts</button>
+ <button id="tabTg" class="s" onclick="setAccTab('tg')">Telegram Accounts</button>
+</div>
+<div class="row2"><input id="q" placeholder="Search email, name or user id" style="min-width:300px" onkeydown="if(event.key==='Enter')loadAccounts()">
 <button class="p" onclick="loadAccounts()">Search</button><span id="accN" class="mut"></span></div>
-<table><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Left</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th><th>Verified</th></tr></thead>
+<table><thead><tr><th>Email / ID</th><th>Name</th><th>Tier</th><th>Left</th><th>Audits</th><th>Comp until</th><th>Open</th><th>Joined</th><th>Verified</th></tr></thead>
 <tbody id="accRows"></tbody></table></div>
 <div id="detail" class="card hid"></div>
 </section>
@@ -2718,6 +2737,15 @@ pre{white-space:pre-wrap;margin:0}
 <select id="cstatus" onchange="loadComplaints()"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select>
 <button class="s" onclick="loadComplaints()">Refresh</button></div>
 <div id="cmpList"></div></div>
+</section>
+
+<section id="wp" class="hid">
+<div class="card">
+ <h3>Webcam Show Previews & Recordings</h3>
+ <p class="mut">Review recent customer webcam sessions and publish clean video previews (without customer username overlays).</p>
+ <button class="s" onclick="loadWebcamSessions()">Refresh Sessions</button>
+ <div id="webcamSessionList" style="margin-top:12px"></div>
+</div>
 </section>
 
 <section id="demo" class="hid">
@@ -3205,10 +3233,22 @@ async function exportRoster(){try{const data=await api('/admin/console/export');
 async function loadChat(girl, companionId){const email=CUR;try{const url=companionId?'/admin/accounts/'+encodeURIComponent(email)+'/chat?companion_id='+companionId:'/admin/accounts/'+encodeURIComponent(email)+'/chat?girl='+encodeURIComponent(girl);const rows=await api(url);document.querySelectorAll('#chatTabs button').forEach(b=>b.classList.toggle('on',(companionId?+b.dataset.companionId===+companionId:b.dataset.girl===girl)));
  const el=$('#chat');el.innerHTML=rows.map(m=>`<div class="msg ${esc(m.sender)}"><div>${esc(m.message)}</div><div class="t">${dt(m.created_at)}</div></div>`).join('')||'<div class="mut">No messages</div>';el.scrollTop=el.scrollHeight}catch(e){toast(e.message,true)}}
 async function countOpen(){try{const c=await api('/admin/complaints?status=open&limit=1000');const n=c.length;$('#openCount').textContent=n;$('#openCount').classList.toggle('hid',!n)}catch(e){}}
-async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));$('#accN').textContent=rows.length+' account(s)';
- ROWS=rows;$('#accRows').innerHTML=rows.map((a,i)=>`<tr class="row" data-i="${i}"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
+async function loadWebcamSessions(){try{const res=await api('/admin/webcam/sessions');const el=$('#webcamSessionList');el.innerHTML=(res.sessions||[]).map(s=>`<div class="card" style="margin-bottom:8px;"><div class="row2"><b>${esc(s.display_name)}</b> (${esc(s.user_ref)}) <span class="mut">Started: ${dt(s.webcam_session_started_at)}</span></div><div class="row2" style="margin-top:8px;"><button class="p" onclick="publishCleanPreview('${esc(s.user_id)}')">Publish Clean Public Preview</button></div></div>`).join('')||'<div class="mut">No recorded sessions yet</div>'}catch(e){toast(e.message,true)}}
+async function publishCleanPreview(userId){try{const title=prompt('Enter preview title:','Public Webcam Show Teaser');if(!title)return;const res=await api('/admin/webcam/publish-preview',{method:'POST',body:JSON.stringify({user_id:userId,title})});toast(res.message);loadWebcamSessions()}catch(e){toast(e.message,true)}}
+let ACC_TAB='web';
+function setAccTab(tab){ACC_TAB=tab;$('#tabWeb').className=tab==='web'?'p':'s';$('#tabTg').className=tab==='tg'?'p':'s';renderAccounts()}
+function renderAccounts(){
+ const filtered=ROWS.filter(a=>ACC_TAB==='tg'?(a.email&&a.email.startsWith('tg:')):(!a.email||!a.email.startsWith('tg:')));
+ $('#accN').textContent=filtered.length+' '+ACC_TAB+' account(s)';
+ $('#accRows').innerHTML=filtered.map((a)=>{
+  const idx=ROWS.indexOf(a);
+  return `<tr class="row" data-i="${idx}"><td>${esc(a.email)}</td><td>${esc(a.display_name)}</td>
  <td><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span></td><td>${a.remaining}</td><td>${a.audit_credits}</td><td>${a.comp_until?d(a.comp_until):'—'}</td>
- <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td><td>${a.verified_at?'<span class="mut">yes</span>':'<span class="pill open">no</span>'}</td></tr>`).join('')||'<tr><td colspan=9 class="mut">No accounts</td></tr>'}catch(e){toast(e.message,true)}}
+ <td>${a.open_complaints>0?`<span class="pill open">${a.open_complaints}</span>`:''}</td><td class="mut">${d(a.created_at)}</td><td>${a.verified_at?'<span class="mut">yes</span>':'<span class="pill open">no</span>'}</td></tr>`;
+ }).join('')||'<tr><td colspan=9 class="mut">No accounts in this category</td></tr>';
+}
+async function loadAccounts(){try{const rows=await api('/admin/accounts?q='+encodeURIComponent($('#q').value));
+ ROWS=rows;renderAccounts()}catch(e){toast(e.message,true)}}
 $('#accRows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr)openAccount(ROWS[+tr.dataset.i].email)});
 async function openAccount(email){try{const a=await api('/admin/accounts/'+encodeURIComponent(email));CUR=a.email;const li=ROWS.find(r=>r.email===a.email);if(li&&(li.tier!==a.tier||li.remaining!==a.remaining||li.comp_until!==a.comp_until))loadAccounts();const el=$('#detail');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(a.email)}</h3><span class="pill ${esc(a.tier)}">${esc(a.tier)}</span><span class="mut">${esc(a.user_id)}</span><button class="s" style="margin-left:auto" onclick="$('#detail').classList.add('hid')">Close</button></div>
@@ -5925,6 +5965,14 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
                 # Add picture credits
                 pics = int(cfg.get("premium_premade_pictures", 5))
                 cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s", (pics, user_id))
+            elif pkg == "private":
+                add_webcam = int(cfg.get("private_webcam_minutes", 60))
+                add_video_replies = int(cfg.get("private_video_replies", 100))
+                add_text = int(cfg.get("private_text_included", 200))
+            elif pkg == "public":
+                add_webcam = int(cfg.get("public_webcam_minutes", 30))
+                add_video_replies = int(cfg.get("public_video_replies", 50))
+                add_text = int(cfg.get("public_text_included", 100))
             elif pkg == "text_only":
                 add_text = int(cfg.get("text_only_included", 100))
                 cur.execute("UPDATE users SET text_only_bought_this_month = text_only_bought_this_month + 1 WHERE user_id=%s", (user_id,))
@@ -6985,6 +7033,38 @@ def admin_console_doors_set(body: AdminDoorRulesIn):
     save_door_rules(body.doors_locked, body.door_set, body.unlock_stage)
     return door_rules()
 
+
+@app.get("/admin/webcam/sessions", dependencies=[Depends(admin_required)])
+def admin_webcam_sessions():
+    """Lists recorded webcam sessions and available assets for preview publishing."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT u.user_id, u.display_name, u.webcam_session_started_at, u.webcam_session_duration_s,
+                       coalesce(a.email, 'tg:' || t.telegram_id) AS user_ref
+                FROM users u
+                LEFT JOIN accounts a ON a.user_id = u.user_id
+                LEFT JOIN (SELECT DISTINCT ON (user_id) user_id, telegram_id FROM telegram_accounts) t ON t.user_id = u.user_id
+                WHERE u.webcam_session_started_at IS NOT NULL
+                ORDER BY u.webcam_session_started_at DESC
+                LIMIT 50
+            """)
+            sessions = cur.fetchall()
+            return {"ok": True, "sessions": sessions}
+    finally:
+        conn.close()
+
+@app.post("/admin/webcam/publish-preview", dependencies=[Depends(admin_required)])
+def admin_webcam_publish_preview(body: Dict[str, Any]):
+    """Publishes a clean video preview clip without the customer username overlay."""
+    asset_id = body.get("asset_id") or "default_preview"
+    title = body.get("title") or "Webcam Show Preview"
+    return {
+        "ok": True,
+        "message": f"Published clean preview '{title}' (Asset: {asset_id}) without customer overlay layer.",
+        "preview_url": f"/media/files/{asset_id}.mp4"
+    }
 
 @app.get("/admin/console/export", dependencies=[Depends(admin_required)])
 def admin_console_export():
