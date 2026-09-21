@@ -5,3 +5,7 @@
 ## 2026-09-12 - Batch Querying User Relationships in GET /state
 **Learning:** Calling `get_relationship(user_id, girl)` sequentially inside a loop over the active roster (35+ residents) opens and closes 35+ DB connections for a single `/state` request. Batch-fetching all relationship records for a user via `SELECT * FROM relationships WHERE user_id=%s` in one query and mapping them in-memory reduces DB connection opens/closes and network roundtrips for `/state` from 35+ down to 1 (~97% reduction).
 **Action:** Always batch-query multi-character/multi-entity state endpoints in a single SQL query keyed by `user_id` instead of iterating DB helper calls.
+
+## 2026-09-12 - N+1 Persona Difficulty DB Lookups in Roster Loops
+**Learning:** `roster()` returns persona rows containing the `difficulty` column, but calling `difficulty_for(girl)` inside `GET /roster` and `GET /state` loops opens and closes N sequential DB connections (`SELECT difficulty FROM personas WHERE girl=%s`) for N roster items. Using pre-fetched `r.get("difficulty")` or `row.get("difficulty")` in roster iterations and backing `difficulty_for()` with an in-memory TTL dictionary cache eliminates N DB queries per request (reducing DB connection opens from N+1 down to 1 for `/roster`).
+**Action:** Always check if iteration items already contain the needed attribute before calling individual lookup helpers, and add in-memory TTL caching to single-entity getter functions called in hot paths.
