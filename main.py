@@ -1227,6 +1227,7 @@ def init_db():
                     details            TEXT DEFAULT '',
                     viewer_count       INT DEFAULT 0,
                     preview_url        TEXT DEFAULT '',
+                    preview_approved   BOOLEAN DEFAULT FALSE,
                     published_telegram BOOLEAN DEFAULT FALSE,
                     published_website  BOOLEAN DEFAULT FALSE,
                     is_demo            BOOLEAN DEFAULT FALSE,
@@ -3154,19 +3155,23 @@ function renderKeyholeCards(shows) {
       } else if (isPrevReady) {
         html += `
           <div class="kh-header-row">
-            <span class="kh-title">${esc(s.character.toUpperCase())} · PREVIEW READY</span>
-            <span class="kh-badge ready">PREVIEW READY</span>
+            <span class="kh-title">${esc(s.character.toUpperCase())} · ${s.preview_approved ? 'APPROVED' : 'PREVIEW READY'}</span>
+            <span class="kh-badge ${s.preview_approved ? 'paid' : 'ready'}">${s.preview_approved ? 'APPROVED ✓' : 'PREVIEW READY'}</span>
           </div>
           ${s.preview_url ? `
           <div class="kh-preview-box">
             <video controls poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
-          </div>` : ''}
+          </div>` : ''}`;
+        if (!s.preview_approved) {
+          html += `
           <div style="font-size:16px; font-weight:700; margin:12px 0 6px 0; text-align:center;">USE AS PREVIEW?</div>
           <div style="display:flex; gap:12px;">
             <button class="kh-btn kh-btn-start" style="flex:1;" onclick="choosePreviewChoice('${s.id}', true, this)">[ YES ]</button>
             <button class="kh-btn kh-btn-sec" style="flex:1;" onclick="choosePreviewChoice('${s.id}', false, this)">[ NO ]</button>
-          </div>
-          <div id="pub-box-${s.id}" style="margin-top:16px; padding-top:12px; border-top:1px dashed var(--line);">
+          </div>`;
+        } else {
+          html += `
+          <div id="pub-box-${s.id}" style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);">
             <div style="font-size:16px; font-weight:700; margin-bottom:8px; color:var(--acc);">PUBLISH PREVIEW</div>
             <div class="kh-toggle-group">
               <label class="kh-toggle-label">
@@ -3180,6 +3185,7 @@ function renderKeyholeCards(shows) {
               PUBLISH
             </button>
           </div>`;
+        }
       } else if (isPub) {
         html += `
           <div class="kh-header-row">
@@ -3245,19 +3251,23 @@ function renderKeyholeCards(shows) {
       } else if (isPrevReady) {
         html += `
           <div class="kh-header-row">
-            <span class="kh-title">${esc(s.character.toUpperCase())} · PREVIEW READY</span>
-            <span class="kh-badge ready">PREVIEW READY</span>
+            <span class="kh-title">${esc(s.character.toUpperCase())} · ${s.preview_approved ? 'APPROVED' : 'PREVIEW READY'}</span>
+            <span class="kh-badge ${s.preview_approved ? 'paid' : 'ready'}">${s.preview_approved ? 'APPROVED ✓' : 'PREVIEW READY'}</span>
           </div>
           ${s.preview_url ? `
           <div class="kh-preview-box">
             <video controls poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
-          </div>` : ''}
+          </div>` : ''}`;
+        if (!s.preview_approved) {
+          html += `
           <div style="font-size:16px; font-weight:700; margin:12px 0 6px 0; text-align:center;">USE AS PREVIEW?</div>
           <div style="display:flex; gap:12px;">
             <button class="kh-btn kh-btn-start" style="flex:1;" onclick="choosePreviewChoice('${s.id}', true, this)">[ YES ]</button>
             <button class="kh-btn kh-btn-sec" style="flex:1;" onclick="choosePreviewChoice('${s.id}', false, this)">[ NO ]</button>
-          </div>
-          <div id="pub-box-${s.id}" style="margin-top:16px; padding-top:12px; border-top:1px dashed var(--line);">
+          </div>`;
+        } else {
+          html += `
+          <div id="pub-box-${s.id}" style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);">
             <div style="font-size:16px; font-weight:700; margin-bottom:8px; color:var(--acc);">PUBLISH PREVIEW</div>
             <div class="kh-toggle-group">
               <label class="kh-toggle-label">
@@ -3271,6 +3281,7 @@ function renderKeyholeCards(shows) {
               PUBLISH
             </button>
           </div>`;
+        }
       } else if (isPub) {
         html += `
           <div class="kh-header-row">
@@ -7551,6 +7562,7 @@ _KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {
         "details": "",
         "viewer_count": 1,
         "preview_url": "",
+        "preview_approved": False,
         "published_telegram": False,
         "published_website": False,
         "is_demo": True,
@@ -7563,84 +7575,82 @@ _KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {
 def _get_all_shows_db() -> List[Dict[str, Any]]:
     if not DATABASE_URL:
         return list(_KEYHOLE_SHOWS_CACHE.values())
+    conn = db()
     try:
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute('SELECT * FROM keyhole_shows ORDER BY created_at DESC')
-                rows = cur.fetchall()
-                res = []
-                for r in rows:
-                    res.append({
-                        "id": str(r["id"]),
-                        "show_type": str(r["show_type"]),
-                        "customer": str(r.get("customer") or ""),
-                        "character": str(r.get("character") or "Chloe"),
-                        "status": str(r.get("status") or "READY"),
-                        "scheduled_at": str(r.get("scheduled_at") or ""),
-                        "price": str(r.get("price") or "$19.99"),
-                        "details": str(r.get("details") or ""),
-                        "viewer_count": int(r.get("viewer_count") or 0),
-                        "preview_url": str(r.get("preview_url") or ""),
-                        "published_telegram": bool(r.get("published_telegram")),
-                        "published_website": bool(r.get("published_website")),
-                        "is_demo": bool(r.get("is_demo")),
-                        "created_at": str(r.get("created_at") or ""),
-                        "updated_at": str(r.get("updated_at") or "")
-                    })
-                return res
-        finally:
-            conn.close()
-    except Exception:
-        return list(_KEYHOLE_SHOWS_CACHE.values())
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM keyhole_shows ORDER BY created_at DESC')
+            rows = cur.fetchall()
+            res = []
+            for row in rows:
+                r = dict(row)
+                res.append({
+                    "id": str(r.get("id") or ""),
+                    "show_type": str(r.get("show_type") or "private"),
+                    "customer": str(r.get("customer") or ""),
+                    "character": str(r.get("character") or "Chloe"),
+                    "status": str(r.get("status") or "READY"),
+                    "scheduled_at": str(r.get("scheduled_at") or ""),
+                    "price": str(r.get("price") or "$19.99"),
+                    "details": str(r.get("details") or ""),
+                    "viewer_count": int(r.get("viewer_count") or 0),
+                    "preview_url": str(r.get("preview_url") or ""),
+                    "preview_approved": bool(r.get("preview_approved")),
+                    "published_telegram": bool(r.get("published_telegram")),
+                    "published_website": bool(r.get("published_website")),
+                    "is_demo": bool(r.get("is_demo")),
+                    "created_at": str(r.get("created_at") or ""),
+                    "updated_at": str(r.get("updated_at") or "")
+                })
+            return res
+    finally:
+        conn.close()
 
 
 def _save_show_db(show: Dict[str, Any]) -> None:
     _KEYHOLE_SHOWS_CACHE[show["id"]] = dict(show)
     if not DATABASE_URL:
         return
+    conn = db()
     try:
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO keyhole_shows (
-                        id, show_type, customer, "character", status, scheduled_at, price, details, viewer_count, preview_url, published_telegram, published_website, is_demo, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-                    ON CONFLICT (id) DO UPDATE SET
-                        show_type = EXCLUDED.show_type,
-                        customer = EXCLUDED.customer,
-                        "character" = EXCLUDED."character",
-                        status = EXCLUDED.status,
-                        scheduled_at = EXCLUDED.scheduled_at,
-                        price = EXCLUDED.price,
-                        details = EXCLUDED.details,
-                        viewer_count = EXCLUDED.viewer_count,
-                        preview_url = EXCLUDED.preview_url,
-                        published_telegram = EXCLUDED.published_telegram,
-                        published_website = EXCLUDED.published_website,
-                        is_demo = EXCLUDED.is_demo,
-                        updated_at = now()
-                """, (
-                    show["id"],
-                    show["show_type"],
-                    show.get("customer", ""),
-                    show["character"],
-                    show["status"],
-                    show.get("scheduled_at", ""),
-                    show.get("price", ""),
-                    show.get("details", ""),
-                    show.get("viewer_count", 0),
-                    show.get("preview_url", ""),
-                    show.get("published_telegram", False),
-                    show.get("published_website", False),
-                    show.get("is_demo", False)
-                ))
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception:
-        pass
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO keyhole_shows (
+                    id, show_type, customer, "character", status, scheduled_at, price, details, viewer_count, preview_url, preview_approved, published_telegram, published_website, is_demo, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    show_type = EXCLUDED.show_type,
+                    customer = EXCLUDED.customer,
+                    "character" = EXCLUDED."character",
+                    status = EXCLUDED.status,
+                    scheduled_at = EXCLUDED.scheduled_at,
+                    price = EXCLUDED.price,
+                    details = EXCLUDED.details,
+                    viewer_count = EXCLUDED.viewer_count,
+                    preview_url = EXCLUDED.preview_url,
+                    preview_approved = EXCLUDED.preview_approved,
+                    published_telegram = EXCLUDED.published_telegram,
+                    published_website = EXCLUDED.published_website,
+                    is_demo = EXCLUDED.is_demo,
+                    updated_at = now()
+            """, (
+                show["id"],
+                show["show_type"],
+                show.get("customer", ""),
+                show["character"],
+                show["status"],
+                show.get("scheduled_at", ""),
+                show.get("price", ""),
+                show.get("details", ""),
+                show.get("viewer_count", 0),
+                show.get("preview_url", ""),
+                show.get("preview_approved", False),
+                show.get("published_telegram", False),
+                show.get("published_website", False),
+                show.get("is_demo", False)
+            ))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @app.get("/admin/keyhole/shows", dependencies=[Depends(admin_required)])
@@ -7659,7 +7669,7 @@ class CreatePublicShowIn(BaseModel):
 
 @app.post("/admin/keyhole/shows/create-public", dependencies=[Depends(admin_required)])
 def admin_create_public_show(body: CreatePublicShowIn):
-    show_id = f"pub_{int(time.time()*1000)}"
+    show_id = f"pub_{int(time.time()*1000)}_{secrets.token_hex(4)}"
     char = (body.character or "Chloe").strip()
     show = {
         "id": show_id,
@@ -7672,6 +7682,7 @@ def admin_create_public_show(body: CreatePublicShowIn):
         "details": body.details or "",
         "viewer_count": 0,
         "preview_url": "",
+        "preview_approved": False,
         "published_telegram": False,
         "published_website": False,
         "is_demo": False,
@@ -7706,6 +7717,7 @@ def admin_end_keyhole_show(show_id: str):
         raise HTTPException(status_code=400, detail=f"Cannot end show in state {show['status']}")
 
     show["status"] = "PREVIEW_READY"
+    show["preview_approved"] = False
     show["preview_url"] = f"/assets/webcam/{show['character'].lower()}_preview.mp4"
     show["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_show_db(show)
@@ -7726,8 +7738,10 @@ def admin_preview_choice(show_id: str, body: PreviewChoiceIn):
         raise HTTPException(status_code=400, detail=f"Cannot process preview choice in state {show['status']}")
 
     if not body.use_as_preview:
+        show["preview_approved"] = False
         show["status"] = "ENDED"
     else:
+        show["preview_approved"] = True
         show["status"] = "PREVIEW_READY"
     show["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_show_db(show)
@@ -7745,8 +7759,8 @@ def admin_publish_preview(show_id: str, body: PublishPreviewIn):
     show = shows.get(show_id)
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
-    if show["status"] != "PREVIEW_READY":
-        raise HTTPException(status_code=400, detail=f"Cannot publish preview in state {show['status']}")
+    if show["status"] != "PREVIEW_READY" or not show.get("preview_approved"):
+        raise HTTPException(status_code=400, detail="Preview must be approved before publishing")
 
     show["published_telegram"] = bool(body.publish_telegram)
     show["published_website"] = bool(body.publish_website)
@@ -7764,7 +7778,7 @@ class DemoSimulateIn(BaseModel):
 def admin_demo_simulate(body: DemoSimulateIn):
     act = body.action.lower()
     if act == "private_request":
-        show_id = f"priv_{int(time.time()*1000)}"
+        show_id = f"priv_{int(time.time()*1000)}_{secrets.token_hex(4)}"
         show = {
             "id": show_id,
             "show_type": "private",
@@ -7776,6 +7790,7 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "details": "",
             "viewer_count": 1,
             "preview_url": "",
+            "preview_approved": False,
             "published_telegram": False,
             "published_website": False,
             "is_demo": True,
@@ -7800,6 +7815,7 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "details": "",
             "viewer_count": 1,
             "preview_url": "",
+            "preview_approved": False,
             "published_telegram": False,
             "published_website": False,
             "is_demo": True,
@@ -7807,16 +7823,13 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         if DATABASE_URL:
+            conn = db()
             try:
-                conn = db()
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("DELETE FROM keyhole_shows WHERE is_demo = TRUE")
-                    conn.commit()
-                finally:
-                    conn.close()
-            except Exception:
-                pass
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM keyhole_shows WHERE is_demo = TRUE")
+                conn.commit()
+            finally:
+                conn.close()
     return {"ok": True, "shows": _get_all_shows_db()}
 
 

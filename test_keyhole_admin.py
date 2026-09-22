@@ -34,7 +34,7 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         end_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/end", headers=self.headers)
         self.assertEqual(end_fail.status_code, 400)
 
-        # Attempting to PUBLISH a show that is READY (not PREVIEW_READY) should fail with 400
+        # Attempting to PUBLISH a show that is READY (not PREVIEW_READY / approved) should fail with 400
         pub_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/publish-preview", json={"publish_telegram": True}, headers=self.headers)
         self.assertEqual(pub_fail.status_code, 400)
 
@@ -60,10 +60,20 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertEqual(end_resp.status_code, 200)
         end_data = end_resp.json()
         self.assertEqual(end_data["show"]["status"], "PREVIEW_READY")
+        self.assertFalse(end_data["show"]["preview_approved"])
+
+        # Attempting to publish without approving preview first should fail with 400
+        unapproved_pub = self.client.post(
+            f"/admin/keyhole/shows/{show_id}/publish-preview",
+            json={"publish_telegram": True, "publish_website": True},
+            headers=self.headers
+        )
+        self.assertEqual(unapproved_pub.status_code, 400)
 
         # 4. PREVIEW CHOICE - YES
         choice_resp = self.client.post(f"/admin/keyhole/shows/{show_id}/preview-choice", json={"use_as_preview": True}, headers=self.headers)
         self.assertEqual(choice_resp.status_code, 200)
+        self.assertTrue(choice_resp.json()["show"]["preview_approved"])
 
         # 5. PUBLISH PREVIEW
         pub_resp = self.client.post(
@@ -110,6 +120,7 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         choice_resp = self.client.post(f"/admin/keyhole/shows/{show_id}/preview-choice", json={"use_as_preview": False}, headers=self.headers)
         self.assertEqual(choice_resp.status_code, 200)
         self.assertEqual(choice_resp.json()["show"]["status"], "ENDED")
+        self.assertFalse(choice_resp.json()["show"]["preview_approved"])
 
 
 if __name__ == "__main__":
