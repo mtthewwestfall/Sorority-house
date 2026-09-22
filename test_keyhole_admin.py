@@ -122,6 +122,56 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertEqual(choice_resp.json()["show"]["status"], "ENDED")
         self.assertFalse(choice_resp.json()["show"]["preview_approved"])
 
+    def test_show_preview_does_not_go_live(self):
+        create_resp = self.client.post(
+            "/admin/keyhole/shows/create-public",
+            json={"character": "Chloe", "scheduled_at": "Tonight — 9:00 PM", "price": "$4.99", "details": "Preview me"},
+            headers=self.headers,
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        show_id = create_resp.json()["show"]["id"]
+        prev = self.client.get(f"/admin/keyhole/shows/{show_id}/preview", headers=self.headers)
+        self.assertEqual(prev.status_code, 200)
+        body = prev.json()
+        self.assertFalse(body["live"])
+        self.assertEqual(body["show"]["status"], "SCHEDULED")
+        self.assertEqual(body["character_id"], "chloe")
+        self.assertIn("current_appearance", body["skin"])
+        listed = self.client.get("/admin/keyhole/shows", headers=self.headers).json()["shows"]
+        saved = [s for s in listed if s["id"] == show_id][0]
+        self.assertEqual(saved["status"], "SCHEDULED")
+
+    def test_customer_skin_and_extend_are_forbidden(self):
+        for path in ("/keyhole/skin-on", "/keyhole/extend-video"):
+            for method in ("get", "post", "put", "patch"):
+                res = getattr(self.client, method)(path, headers={"Authorization": "Bearer customer"})
+                self.assertEqual(res.status_code, 403, path)
+                self.assertIn("admin only", res.json()["detail"].lower())
+
+    def test_content_maker_sites_and_schedule(self):
+        sites = self.client.get("/admin/keyhole/content/sites", headers=self.headers)
+        self.assertEqual(sites.status_code, 200)
+        ids = [s["id"] for s in sites.json()["sites"]]
+        self.assertIn("library", ids)
+        self.assertIn("plates", ids)
+        self.assertIn("downloads", ids)
+
+        search = self.client.post("/admin/keyhole/content/search", headers=self.headers,
+                                  json={"tag": "idle", "site_id": "library", "character_id": "chloe"})
+        self.assertEqual(search.status_code, 200)
+        self.assertEqual(search.json()["tag"], "idle")
+
+        mismatch = self.client.post("/admin/keyhole/content/9/schedule", headers=self.headers,
+                                    json={"character": "Chloe", "asset_id": 3})
+        self.assertEqual(mismatch.status_code, 400)
+
+        scheduled = self.client.post("/admin/keyhole/content/9/schedule", headers=self.headers, json={
+            "character": "Bailey", "scheduled_at": "Tonight — 9:00 PM", "price": "$4.99", "details": "loop 9"
+        })
+        self.assertEqual(scheduled.status_code, 200)
+        self.assertEqual(scheduled.json()["show"]["status"], "SCHEDULED")
+        self.assertNotEqual(scheduled.json()["show"]["status"], "LIVE")
+
 
 if __name__ == "__main__":
     unittest.main()

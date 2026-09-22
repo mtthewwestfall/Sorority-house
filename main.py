@@ -73,15 +73,37 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "reference_asset_id","duration_seconds"}
                                                             -> {"job_id"} Veo motion clip
   GET  /admin/generator/webcam/{job_id}                  -> {"job":{status,asset,error}}
+  GET  /admin/keyhole/shows/{show_id}/preview            -> pre-live stage preview (plates,
+                                                            skin, schedule). Does not go live
+  GET  /admin/keyhole/content/sites                      -> preset content-maker site list
+  POST /admin/keyhole/content/search    {"tag","site_id","character_id"}
+                                                         -> tag search (local library + presets)
+  POST /admin/keyhole/content/record    {"character_id","url","loop_seconds","tag"}
+                                                         -> download an image or video, apply
+                                                            her skin, save a long loop
+  POST /admin/keyhole/content/{asset_id}/edit
+  POST /admin/keyhole/content/{asset_id}/schedule
   GET  /keyhole/packages                                 -> {"packages":[{"package","price",
                                                             "webcam_minutes","text_included"}]}
                                                             (the prices NOWPayments invoices charge)
   GET  /keyhole/me                      (bearer)        -> {"user_id","email","webcam_minutes_left",
-                                                            "text_balance","video_replies_left",
-                                                            "fresh_videos_left","session_active",
-                                                            "free_preview_available","intro_available"}
-  POST /keyhole/preview/claim           (bearer)        -> grants the one-time free preview
-                                                            (free_preview_minutes); 400 once used
+                                                            "text_balance","message_credits",
+                                                            "preview_message_credits","messages_left",
+                                                            "video_replies_left","fresh_videos_left",
+                                                            "session_active","free_preview_available",
+                                                            "intro_available","vip_room"}
+  POST /keyhole/preview/claim           (bearer)        -> one-time free preview for a
+                                                            verified email: webcam minutes plus
+                                                            50 preview messages (server balance).
+                                                            403 if the email is not verified;
+                                                            400 once used. A later paid purchase
+                                                            adds 100 message_credits and rolls
+                                                            any unused preview messages in.
+  POST /keyhole/room/unlock             (bearer)        -> bedroom/VIP only with a paid
+                                                            Keyhole purchase. Passcodes such as
+                                                            KEY-VIP-ROOM are rejected
+  POST /keyhole/skin-on                                  -> 403. Skin controls are admin-only
+  POST /keyhole/extend-video                             -> 403. Extend-video is admin-only
   POST /keyhole/nowpayments/invoice {"package"} (bearer) -> {"invoice_id","invoice_url"}: a
                                                             NOWPayments invoice for that package,
                                                             order_id '<user_id>:<package>' so the
@@ -185,7 +207,12 @@ Env vars (Railway -> Variables):
                     sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
                     SOGNI_API_URL (default https://api.sogni.ai).
   KEYHOLE_MEDIA_DIR where uploaded/generated plates are stored (mount a Railway volume
-                    here or generated cuts vanish on redeploy).
+                    here or generated cuts vanish on redeploy). Remote character skins are
+                    downloaded into this directory before Gemini/Veo run.
+  KEYHOLE_CONTENT_SITES
+                    optional comma list for the admin content maker,
+                    Name=https://host/search?q={tag} (tag is substituted). Preset local
+                    libraries are always included. Admin-only.
   NOWPAYMENTS_IPN_URL
                     where NOWPayments posts the IPN for invoices we create
                     (default https://keyhole.cam/webhooks/nowpayments).
@@ -405,7 +432,7 @@ AUDIT_PRICE_USD = 0.99
 # Keyhole pricing & access rules defaults
 KEYHOLE_DEFAULT_CONFIG = {
     "free_preview_minutes": 10,
-    "free_preview_text_included": 20,
+    "free_preview_text_included": 50,   # verified-email preview messages (server balance)
     "intro_price": 5.99,          # 10-minute starter, one per account for life
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
@@ -441,6 +468,11 @@ KEYHOLE_DEFAULT_CONFIG = {
     "text_only_included": 100,
     "text_only_monthly_cap": 1,
 }
+# Paid Keyhole purchases add this many message credits. Unused credits stay on the
+# account and stack with the next purchase. The client never reports this number.
+KEYHOLE_MESSAGES_PER_PURCHASE = 100
+# Passcodes that used to unlock the VIP bedroom with no payment. They never grant access.
+VIP_CHEAT_CODES = frozenset({"KEY-VIP-ROOM", "KEY-VIP", "VIP-ROOM", "VIP", "MEMBER"})
 
 FREE_AUDITS = {   # free audits granted per MONTH per tier (reset with msg allowance)
     "visitor":   2,
@@ -1161,6 +1193,10 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS video_replies_left INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS fresh_videos_left INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_balance INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS message_credits INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS preview_message_credits INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_keyhole_purchases INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_pool TEXT NOT NULL DEFAULT '';
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_sessions_bought_this_month INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_only_bought_this_month INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS intro_bought INTEGER NOT NULL DEFAULT 0;
@@ -1285,6 +1321,7 @@ def init_db():
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+                ALTER TABLE house_rules ALTER COLUMN value TYPE TEXT;
                 -- lifetime counter for the free-audit promo (see FREE_AUDIT_PROMO_CAP)
                 CREATE TABLE IF NOT EXISTS promo_counters (
                     key   TEXT PRIMARY KEY,
@@ -2345,7 +2382,9 @@ def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT webcam_minutes_left, webcam_session_started_at, video_replies_left, fresh_videos_left FROM users WHERE user_id=%s", (user_id,))
+            cur.execute("""SELECT webcam_minutes_left, webcam_session_started_at, video_replies_left,
+                                  fresh_videos_left, paid_keyhole_purchases
+                           FROM users WHERE user_id=%s""", (user_id,))
             user = cur.fetchone()
             if not user:
                 return {"active": False, "reason": "user_not_found"}
@@ -2361,13 +2400,24 @@ def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
             elapsed_min = elapsed_s / 60.0
 
             if elapsed_min >= minutes_left:
-                # Session expired - reset session state and deduct minutes
-                cur.execute("""
-                    UPDATE users
-                    SET webcam_minutes_left = 0,
-                        webcam_session_started_at = NULL
-                    WHERE user_id=%s
-                """, (user_id,))
+                # Session expired - reset session state and deduct minutes.
+                # Preview messages exist only while the free preview is playing.
+                paid = int(user.get("paid_keyhole_purchases") or 0)
+                if paid <= 0:
+                    cur.execute("""
+                        UPDATE users
+                        SET webcam_minutes_left = 0,
+                            webcam_session_started_at = NULL,
+                            preview_message_credits = 0
+                        WHERE user_id=%s
+                    """, (user_id,))
+                else:
+                    cur.execute("""
+                        UPDATE users
+                        SET webcam_minutes_left = 0,
+                            webcam_session_started_at = NULL
+                        WHERE user_id=%s
+                    """, (user_id,))
                 conn.commit()
                 return {"active": False, "minutes_left": 0, "reason": "session_expired"}
 
@@ -2397,19 +2447,57 @@ def chat_preflight(user, girl_raw):
     conn = db()
     try:
         with conn.cursor() as cur:
-            # First check text_balance carryover, then fallback to tier limit
+            # Server balances only. Order: preview messages (while the free preview
+            # is playing), paid message credits (roll over), package text_balance, tier cap.
             cur.execute("""
-                UPDATE users SET text_balance = text_balance - 1
-                WHERE user_id=%s AND text_balance > 0
-                RETURNING text_balance
+                SELECT preview_message_credits, message_credits, paid_keyhole_purchases,
+                       free_preview_claimed_at, webcam_minutes_left, webcam_session_started_at
+                FROM users WHERE user_id=%s
             """, (user["user_id"],))
-            balance_used = cur.fetchone()
-            if balance_used:
-                conn.commit()
-                remaining = int(balance_used["text_balance"])
-            else:
+            pools = cur.fetchone() or {}
+            preview_playing = bool(
+                pools.get("free_preview_claimed_at")
+                and int(pools.get("paid_keyhole_purchases") or 0) <= 0
+                and (int(pools.get("webcam_minutes_left") or 0) > 0 or pools.get("webcam_session_started_at"))
+                and int(pools.get("preview_message_credits") or 0) > 0
+            )
+            remaining = None
+            if preview_playing:
                 cur.execute("""
-                    UPDATE users SET msg_used = msg_used + 1
+                    UPDATE users
+                    SET preview_message_credits = preview_message_credits - 1,
+                        last_message_pool = 'preview'
+                    WHERE user_id=%s AND preview_message_credits > 0
+                    RETURNING preview_message_credits
+                """, (user["user_id"],))
+                spent = cur.fetchone()
+                if spent:
+                    remaining = int(spent["preview_message_credits"])
+            if remaining is None:
+                cur.execute("""
+                    UPDATE users
+                    SET message_credits = message_credits - 1,
+                        last_message_pool = 'credits'
+                    WHERE user_id=%s AND message_credits > 0
+                    RETURNING message_credits
+                """, (user["user_id"],))
+                spent = cur.fetchone()
+                if spent:
+                    remaining = int(spent["message_credits"])
+            if remaining is None:
+                cur.execute("""
+                    UPDATE users
+                    SET text_balance = text_balance - 1,
+                        last_message_pool = 'text'
+                    WHERE user_id=%s AND text_balance > 0
+                    RETURNING text_balance
+                """, (user["user_id"],))
+                balance_used = cur.fetchone()
+                if balance_used:
+                    remaining = int(balance_used["text_balance"])
+            if remaining is None:
+                cur.execute("""
+                    UPDATE users SET msg_used = msg_used + 1, last_message_pool = 'tier'
                     WHERE user_id=%s AND msg_used < %s
                     RETURNING msg_used
                 """, (user["user_id"], limit))
@@ -2418,6 +2506,8 @@ def chat_preflight(user, girl_raw):
                 if got is None:
                     raise HTTPException(status_code=402, detail="out_of_messages")
                 remaining = max(0, limit - int(got["msg_used"]))
+            else:
+                conn.commit()
     finally:
         conn.close()
     try:
@@ -2428,12 +2518,26 @@ def chat_preflight(user, girl_raw):
 
 
 def refund_message(user_id):
-    """Hand back the message reserved by chat_preflight when she never answered."""
+    """Hand back the message reserved by chat_preflight when she never answered.
+    The pool that was charged is last_message_pool, written in the same UPDATE."""
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE users SET msg_used = GREATEST(msg_used - 1, 0) WHERE user_id=%s",
-                        (user_id,))
+            cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone() or {}
+            pool = (row.get("last_message_pool") or "")
+            if pool == "preview":
+                cur.execute("""UPDATE users SET preview_message_credits = preview_message_credits + 1,
+                               last_message_pool='' WHERE user_id=%s""", (user_id,))
+            elif pool == "credits":
+                cur.execute("""UPDATE users SET message_credits = message_credits + 1,
+                               last_message_pool='' WHERE user_id=%s""", (user_id,))
+            elif pool == "text":
+                cur.execute("""UPDATE users SET text_balance = text_balance + 1,
+                               last_message_pool='' WHERE user_id=%s""", (user_id,))
+            else:
+                cur.execute("UPDATE users SET msg_used = GREATEST(msg_used - 1, 0), last_message_pool='' WHERE user_id=%s",
+                            (user_id,))
             conn.commit()
     finally:
         conn.close()
@@ -3318,7 +3422,7 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow')loadKeyholeShows();if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
 
 let currentKhShows = [];
 
@@ -3662,6 +3766,95 @@ async function simulateDemoAction(action) {
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+let activeRefChar = 'chloe';
+async function loadCharacterRefs() {
+  try {
+    const r = await api('/admin/keyhole/character-references');
+    const cur = (r.references || {})[activeRefChar] || {};
+    const master = $('#refMasterText');
+    const outfit = $('#refAppearanceText');
+    if (master) master.value = cur.master_reference || '';
+    if (outfit) outfit.value = cur.current_appearance || '';
+    const box = $('#privateRefsList');
+    if (box) {
+      const list = cur.private_references || [];
+      box.innerHTML = list.length
+        ? list.map(u => `<a class="pill" href="${esc(u)}" target="_blank" rel="noopener">${esc(String(u).split('/').pop())}</a>`).join('')
+        : '<span class="mut">None yet</span>';
+    }
+    const chloeBtn = $('#btnCharChloe');
+    const baileyBtn = $('#btnCharBailey');
+    if (chloeBtn && baileyBtn) {
+      chloeBtn.className = 'kh-btn ' + (activeRefChar === 'chloe' ? 'kh-btn-pub' : 'kh-btn-sec');
+      baileyBtn.className = 'kh-btn ' + (activeRefChar === 'bailey' ? 'kh-btn-pub' : 'kh-btn-sec');
+      chloeBtn.style.cssText = 'flex:1; min-height:44px; margin-top:0;';
+      baileyBtn.style.cssText = 'flex:1; min-height:44px; margin-top:0;';
+    }
+  } catch (e) { toast(e.message, true); }
+}
+function switchRefChar(cid) {
+  activeRefChar = (cid || 'chloe').toLowerCase();
+  loadCharacterRefs();
+}
+async function saveMasterRefText() {
+  const value = ($('#refMasterText')?.value || '').trim();
+  if (!value) { toast('Enter a master reference', true); return; }
+  try {
+    await api('/admin/keyhole/character-references/set-master', {
+      method: 'POST', body: JSON.stringify({ character: activeRefChar, master_reference: value })
+    });
+    toast(activeRefChar + ' master reference saved');
+    await loadCharacterRefs();
+  } catch (e) { toast(e.message, true); }
+}
+async function saveAppearanceRefText() {
+  const value = ($('#refAppearanceText')?.value || '').trim();
+  if (!value) { toast('Enter the current outfit / skin', true); return; }
+  try {
+    await api('/admin/keyhole/character-references/set-appearance', {
+      method: 'POST', body: JSON.stringify({ character: activeRefChar, current_appearance: value })
+    });
+    toast(activeRefChar + ' skin saved');
+    await loadCharacterRefs();
+  } catch (e) { toast(e.message, true); }
+}
+async function uploadMasterRefFile() {
+  const input = $('#fileMasterRef');
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('character', activeRefChar);
+  fd.append('file', file, file.name);
+  try {
+    const r = await fetch('/admin/keyhole/character-references/upload-master', {
+      method: 'POST', headers: { 'X-Admin-Secret': SECRET }, body: fd
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || 'Upload failed');
+    toast(activeRefChar + ' skin image saved');
+    input.value = '';
+    await loadCharacterRefs();
+  } catch (e) { toast(e.message, true); }
+}
+async function uploadPrivateRefFile() {
+  const input = $('#filePrivateRef');
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('character', activeRefChar);
+  fd.append('file', file, file.name);
+  try {
+    const r = await fetch('/admin/keyhole/character-references/upload-private', {
+      method: 'POST', headers: { 'X-Admin-Secret': SECRET }, body: fd
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || 'Upload failed');
+    toast(activeRefChar + ' private reference saved');
+    input.value = '';
+    await loadCharacterRefs();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function loadMediaAssets(){
@@ -6101,7 +6294,9 @@ def _get_house_rule(key: str, default: str = "") -> str:
     return default
 
 
-def _set_house_rule(key: str, value: str) -> None:
+def _set_house_rule(key: str, value: str) -> bool:
+    """Persist a house rule. The in-process cache updates even when no database is configured.
+    Returns False when a database is configured and the write did not stick."""
     if key.startswith("ref_master_"):
         cid = key.replace("ref_master_", "")
         if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
@@ -6115,9 +6310,13 @@ def _set_house_rule(key: str, value: str) -> None:
         if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
         try: _CHARACTER_REFS_CACHE[cid]["private_references"] = json.loads(value)
         except Exception: pass
+    elif key.startswith("ref_skin_asset_"):
+        cid = key.replace("ref_skin_asset_", "")
+        if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
+        _CHARACTER_REFS_CACHE[cid]["skin_asset_id"] = value
 
     if not DATABASE_URL:
-        return
+        return True
     try:
         conn = db()
         try:
@@ -6127,10 +6326,13 @@ def _set_house_rule(key: str, value: str) -> None:
                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
                 """, (key, str(value)))
                 conn.commit()
+                cur.execute("SELECT value FROM house_rules WHERE key = %s", (key,))
+                row = cur.fetchone()
+                return bool(row) and str(row["value"]) == str(value)
         finally:
             conn.close()
     except Exception:
-        pass
+        return False
 
 
 def get_character_references(character_id: str) -> Dict[str, Any]:
@@ -6154,11 +6356,13 @@ def get_character_references(character_id: str) -> Dict[str, Any]:
     else:
         private_refs = default_private
 
+    skin_raw = _get_house_rule(f"ref_skin_asset_{cid}") or str(mem_refs.get("skin_asset_id") or "")
     res = {
         "character": cid.capitalize(),
         "master_reference": master,
         "current_appearance": appearance,
-        "private_references": private_refs
+        "private_references": private_refs,
+        "skin_asset_id": int(skin_raw) if str(skin_raw).isdigit() else None,
     }
     _CHARACTER_REFS_CACHE[cid] = dict(res)
     return res
@@ -6852,16 +7056,23 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
 
-            # Apply carryover: existing text_balance + add_text
+            # Apply carryover: existing text_balance + add_text, and +100 message
+            # credits. Unused preview messages move into message_credits so a purchase
+            # does not wipe what the free preview had not spent.
             cur.execute("""
                 UPDATE users
                 SET text_balance = text_balance + %s,
                     webcam_minutes_left = webcam_minutes_left + %s,
                     video_replies_left = video_replies_left + %s,
-                    fresh_videos_left = fresh_videos_left + %s
+                    fresh_videos_left = fresh_videos_left + %s,
+                    message_credits = message_credits + %s + preview_message_credits,
+                    preview_message_credits = 0,
+                    paid_keyhole_purchases = paid_keyhole_purchases + 1
                 WHERE user_id=%s
-                RETURNING text_balance, webcam_minutes_left, video_replies_left, fresh_videos_left, pic_credits
-            """, (add_text, add_webcam, add_video_replies, add_fresh_videos, user_id))
+                RETURNING text_balance, message_credits, webcam_minutes_left, video_replies_left,
+                          fresh_videos_left, pic_credits, paid_keyhole_purchases
+            """, (add_text, add_webcam, add_video_replies, add_fresh_videos,
+                  KEYHOLE_MESSAGES_PER_PURCHASE, user_id))
             updated = cur.fetchone()
             conn.commit()
             return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
@@ -6950,44 +7161,63 @@ def keyhole_me(user=Depends(current_user)):
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT webcam_minutes_left, text_balance, video_replies_left, fresh_videos_left, "
-                        "intro_bought, free_preview_claimed_at FROM users WHERE user_id=%s", (uid,))
+            cur.execute("""SELECT webcam_minutes_left, text_balance, message_credits, preview_message_credits,
+                                  video_replies_left, fresh_videos_left, intro_bought, free_preview_claimed_at,
+                                  paid_keyhole_purchases, webcam_session_started_at
+                           FROM users WHERE user_id=%s""", (uid,))
             row = cur.fetchone() or {}
     finally:
         conn.close()
     cfg = get_keyhole_config()
+    paid = int(row.get("paid_keyhole_purchases") or 0)
+    preview_left = int(row.get("preview_message_credits") or 0)
+    preview_playing = bool(
+        row.get("free_preview_claimed_at") and paid <= 0 and preview_left > 0
+        and (int(row.get("webcam_minutes_left") or 0) > 0 or row.get("webcam_session_started_at"))
+    )
+    credits = int(row.get("message_credits") or 0)
+    text_balance = int(row.get("text_balance") or 0)
     return {
         "user_id": uid,
         "email": _account_email(uid),
         "webcam_minutes_left": int(row.get("webcam_minutes_left") or 0),
-        "text_balance": int(row.get("text_balance") or 0),
+        "text_balance": text_balance,
+        "message_credits": credits,
+        "preview_message_credits": preview_left if preview_playing else 0,
+        "messages_left": credits + text_balance + (preview_left if preview_playing else 0),
         "video_replies_left": int(row.get("video_replies_left") or 0),
         "fresh_videos_left": int(row.get("fresh_videos_left") or 0),
         "session_active": bool(session.get("active")),
         "session_minutes_left": int(session.get("minutes_left") or 0),
         "free_preview_available": row.get("free_preview_claimed_at") is None,
         "intro_available": int(row.get("intro_bought") or 0) < int(cfg.get("intro_lifetime_cap", 1)),
+        "vip_room": paid > 0,
     }
 
 
 @app.post("/keyhole/preview/claim")
 def keyhole_preview_claim(user=Depends(current_user)):
-    """Grant the one-time free preview (free_preview_minutes) to the signed-in account.
-    Exactly once per account, for life; a second claim is a 400."""
+    """Grant the one-time free preview to a verified email.
+    Webcam minutes plus 50 preview messages, stored on the user row. A second claim is 400.
+    Unverified accounts get nothing — the balance is never taken from the client."""
     uid = user["user_id"]
     cfg = get_keyhole_config()
     minutes = int(cfg.get("free_preview_minutes", 10))
-    text = int(cfg.get("free_preview_text_included", 20))
+    text = int(cfg.get("free_preview_text_included", 50))
     conn = db()
     try:
         with conn.cursor() as cur:
+            cur.execute("SELECT verified_at FROM accounts WHERE user_id=%s", (uid,))
+            acct = cur.fetchone()
+            if not acct or acct.get("verified_at") is None:
+                raise HTTPException(status_code=403, detail="Verify your email to use the free preview.")
             cur.execute("""
                 UPDATE users
                 SET free_preview_claimed_at = now(),
                     webcam_minutes_left = webcam_minutes_left + %s,
-                    text_balance = text_balance + %s
+                    preview_message_credits = %s
                 WHERE user_id=%s AND free_preview_claimed_at IS NULL
-                RETURNING webcam_minutes_left, text_balance
+                RETURNING webcam_minutes_left, preview_message_credits, message_credits, text_balance
             """, (minutes, text, uid))
             row = cur.fetchone()
             conn.commit()
@@ -6996,8 +7226,46 @@ def keyhole_preview_claim(user=Depends(current_user)):
     if not row:
         raise HTTPException(status_code=400, detail="Your free preview has already been used.")
     return {"ok": True, "minutes_granted": minutes,
+            "preview_messages": int(row["preview_message_credits"]),
             "webcam_minutes_left": int(row["webcam_minutes_left"]),
-            "text_balance": int(row["text_balance"])}
+            "text_balance": int(row["text_balance"]),
+            "message_credits": int(row["message_credits"])}
+
+
+def _is_vip_cheat(token: str) -> bool:
+    cleaned = (token or "").strip().upper()
+    if not cleaned:
+        return False
+    return cleaned in VIP_CHEAT_CODES or cleaned.startswith("KEY-VIP")
+
+
+class KeyholeRoomUnlockIn(BaseModel):
+    passcode: Optional[str] = ""
+
+
+@app.post("/keyhole/room/unlock")
+def keyhole_room_unlock(body: KeyholeRoomUnlockIn, user=Depends(current_user)):
+    """VIP bedroom. A passcode never unlocks it; a paid Keyhole purchase does."""
+    if _is_vip_cheat(body.passcode or ""):
+        raise HTTPException(status_code=402, detail="VIP rooms require a paid entitlement.")
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT paid_keyhole_purchases FROM users WHERE user_id=%s", (uid,))
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    if int(row.get("paid_keyhole_purchases") or 0) <= 0:
+        raise HTTPException(status_code=402, detail="VIP bedroom requires a paid purchase.")
+    return {"ok": True, "room": "bedroom", "vip_room": True}
+
+
+@app.api_route("/keyhole/skin-on", methods=["GET", "POST", "PUT", "PATCH"])
+@app.api_route("/keyhole/extend-video", methods=["GET", "POST", "PUT", "PATCH"])
+def keyhole_customer_studio_blocked():
+    """Skin-on and extend-video are admin studio controls. Customer routes cannot run them."""
+    raise HTTPException(status_code=403, detail="Skin and extend-video controls are admin only.")
 
 
 class KeyholeInvoiceIn(BaseModel):
@@ -7223,7 +7491,10 @@ def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = 
 
 
 def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional[str] = None) -> Dict[str, Any]:
-    """Server-side payment verification and entitlement record for a show."""
+    """Server-side payment verification and entitlement record for a show.
+    A client-supplied passcode (KEY-VIP-ROOM and the like) is not a payment."""
+    if _is_vip_cheat(payment_id or ""):
+        raise HTTPException(status_code=402, detail="VIP rooms require a paid entitlement.")
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -7243,6 +7514,8 @@ def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional
             if show_price > 0:
                 if not p_id:
                     raise HTTPException(status_code=402, detail="Payment transaction reference required.")
+                if _is_vip_cheat(p_id):
+                    raise HTTPException(status_code=402, detail="VIP rooms require a paid entitlement.")
 
                 # Lock and verify payment_id has not already been consumed by any entitlement
                 cur.execute("SELECT 1 FROM keyhole_entitlements WHERE payment_id=%s FOR UPDATE", (p_id,))
@@ -7257,9 +7530,11 @@ def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional
                     cur.execute("SELECT 1 FROM picture_payments WHERE payment_id=%s AND user_id=%s", (p_id, user_id))
                     if cur.fetchone():
                         verified = True
-                    elif p_id.startswith("pay_") or p_id.startswith("tx_") or p_id.startswith("sub_") or p_id.startswith("pi_"):
-                        # Valid payment gateway transaction reference format
-                        verified = True
+                    else:
+                        cur.execute("""SELECT 1 FROM keyhole_payments
+                                       WHERE payment_id=%s AND user_id=%s AND granted""", (p_id, user_id))
+                        if cur.fetchone():
+                            verified = True
 
                 if not verified:
                     raise HTTPException(status_code=402, detail="Invalid or unverified payment transaction ID.")
@@ -9022,6 +9297,256 @@ def admin_keyhole_get_show(show_id: str):
     return {"ok": True, "show": show}
 
 
+def _preview_plates(char_id: str) -> Dict[str, list]:
+    """Enabled beat plates for a character, for the pre-live preview. Empty when no database."""
+    beats = {b: [] for b in ("idle", "tease", "give", "stop", "presence")}
+    if not DATABASE_URL or not char_id:
+        return beats
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT url, media_type, tags, file_path FROM media_assets
+                    WHERE character_id=%s AND is_enabled ORDER BY created_at ASC
+                """, (char_id,))
+                rows = cur.fetchall() or []
+        finally:
+            conn.close()
+    except Exception:
+        return beats
+    for r in rows:
+        if r.get("file_path") and not os.path.isfile(os.path.join(UPLOAD_DIR, os.path.basename(r["file_path"]))):
+            continue
+        tags = [str(t).lower() for t in (r.get("tags") or [])]
+        for beat in beats:
+            if beat in tags:
+                beats[beat].append({"url": r["url"], "media_type": r["media_type"]})
+    return beats
+
+
+@app.get("/admin/keyhole/shows/{show_id}/preview", dependencies=[Depends(admin_required)])
+def admin_keyhole_show_preview(show_id: str):
+    """What the show will look like before it goes live. Does not change status."""
+    shows = {s["id"]: s for s in _get_all_shows_db()}
+    show = shows.get(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    char_id = (show.get("character_id") or (show.get("character") or "")).strip().lower()
+    skin = get_character_references(char_id) if char_id in ("chloe", "bailey") else None
+    return {
+        "ok": True,
+        "live": False,
+        "show": show,
+        "character_id": char_id,
+        "skin": skin,
+        "plates": _preview_plates(char_id),
+    }
+
+
+# Preset content-maker sources. Remote sites are added with KEYHOLE_CONTENT_SITES
+# (Name=https://host/search?q={tag}). Recording still goes through the SSRF-safe downloader.
+_CONTENT_SITE_PRESETS = (
+    {"id": "library", "name": "Keyhole library", "mode": "local"},
+    {"id": "plates", "name": "Webcam plates", "mode": "local", "tag": "webcam"},
+    {"id": "downloads", "name": "Imported downloads", "mode": "local", "tag": "download"},
+)
+
+
+def _content_sites() -> List[Dict[str, str]]:
+    sites = [dict(s) for s in _CONTENT_SITE_PRESETS]
+    raw = os.environ.get("KEYHOLE_CONTENT_SITES", "")
+    for part in raw.split(","):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        name, url = part.split("=", 1)
+        name, url = name.strip(), url.strip()
+        if not name or not url:
+            continue
+        sid = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "site"
+        sites.append({"id": sid, "name": name, "mode": "remote", "search_url": url})
+    return sites
+
+
+def _search_local_content(tag: str, character_id: str, site: Dict[str, str]) -> List[Dict[str, Any]]:
+    if not DATABASE_URL:
+        return []
+    extra = (site.get("tag") or "").strip().lower()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, character_id, title, media_type, url, tags
+                FROM media_assets
+                WHERE is_enabled
+                  AND (%s = '' OR character_id = %s)
+                  AND (tags @> %s::jsonb OR title ILIKE %s)
+                ORDER BY updated_at DESC
+                LIMIT 24
+            """, (character_id, character_id, json.dumps([tag]), f"%{tag}%"))
+            rows = cur.fetchall() or []
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        tags = [str(t).lower() for t in (r.get("tags") or [])]
+        if extra and extra not in tags and tag not in tags and tag not in (r.get("title") or "").lower():
+            continue
+        out.append({
+            "site_id": site["id"],
+            "site_name": site["name"],
+            "asset_id": r["id"],
+            "character_id": r["character_id"],
+            "title": r["title"],
+            "media_type": r["media_type"],
+            "url": r["url"],
+            "tags": tags,
+        })
+    return out
+
+
+def _search_remote_content(site: Dict[str, str], tag: str) -> List[Dict[str, Any]]:
+    template = site.get("search_url") or ""
+    if not template:
+        return []
+    target = template.replace("{tag}", urllib.parse.quote(tag))
+    try:
+        resp = _safe_http_get(target, timeout=12)
+        html = resp.text or ""
+    except Exception as exc:
+        return [{"site_id": site["id"], "site_name": site["name"], "error": str(exc)[:200]}]
+    found = []
+    patterns = (
+        ("video", r'<meta\s+property=["\']og:video(?::url)?["\']\s+content=["\']([^"\']+)["\']'),
+        ("video", r'<video[^>]+src=["\']([^"\']+)["\']'),
+        ("video", r'<source[^>]+src=["\']([^"\']+)["\']'),
+        ("image", r'<meta\s+property=["\']og:image(?::url)?["\']\s+content=["\']([^"\']+)["\']'),
+        ("image", r'<img[^>]+src=["\']([^"\']+)["\']'),
+    )
+    seen = set()
+    for media_type, pattern in patterns:
+        for match in re.finditer(pattern, html, re.I):
+            media_url = urllib.parse.urljoin(target, match.group(1))
+            if media_url in seen or not media_url.startswith(("http://", "https://")):
+                continue
+            seen.add(media_url)
+            found.append({
+                "site_id": site["id"],
+                "site_name": site["name"],
+                "title": f"{site['name']} · {tag}",
+                "media_type": media_type,
+                "url": media_url,
+                "tag": tag,
+            })
+            if len(found) >= 8:
+                return found
+    return found
+
+
+class ContentSearchIn(BaseModel):
+    tag: str
+    site_id: str = ""
+    character_id: str = ""
+
+
+@app.get("/admin/keyhole/content/sites", dependencies=[Depends(admin_required)])
+def admin_content_sites():
+    """Preset webcam sources the content maker can search. Remote entries come from KEYHOLE_CONTENT_SITES."""
+    return {"ok": True, "sites": _content_sites()}
+
+
+@app.post("/admin/keyhole/content/search", dependencies=[Depends(admin_required)])
+def admin_content_search(body: ContentSearchIn):
+    """Tag search across the preset list and the local library."""
+    tag = (body.tag or "").strip().lower()
+    if not tag:
+        raise HTTPException(status_code=400, detail="tag is required")
+    sites = _content_sites()
+    if body.site_id.strip():
+        sites = [s for s in sites if s["id"] == body.site_id.strip()]
+        if not sites:
+            raise HTTPException(status_code=404, detail="Unknown content site")
+    char_id = (body.character_id or "").strip().lower()
+    results: List[Dict[str, Any]] = []
+    for site in sites:
+        if site.get("mode") == "remote":
+            results.extend(_search_remote_content(site, tag))
+        else:
+            results.extend(_search_local_content(tag, char_id, site))
+    return {"ok": True, "tag": tag, "results": results}
+
+
+class ContentRecordIn(BaseModel):
+    character_id: str
+    url: str
+    tag: str = "loop"
+    title: str = ""
+    loop_seconds: int = 60
+
+
+@app.post("/admin/keyhole/content/record", dependencies=[Depends(admin_required)])
+def admin_content_record(body: ContentRecordIn):
+    """Download an image or video, apply the selected character skin, and save it as a long loop."""
+    char_id = _keyhole_character(body.character_id)
+    url = _validate_media_url(body.url)
+    loop_seconds = body.loop_seconds if body.loop_seconds in (30, 60, 120, 180, 300) else 60
+    content, ext, mime, m_type = _fetch_remote_media(url, prefer="")
+    if m_type not in ("video", "image"):
+        raise HTTPException(status_code=400, detail="Download was not an image or video")
+    content, ext, mime, m_type, skinned = _apply_character_skin_bytes(char_id, content, ext, mime, m_type)
+    tags = [body.tag.strip().lower() or "loop", "loop", "content", "download", f"loop:{loop_seconds}"]
+    if skinned:
+        tags.append("skinned")
+    title = (body.title or "").strip() or f"{char_id.capitalize()} loop {loop_seconds}s"
+    asset = _save_generated_asset(char_id, content, ext or (".mp4" if m_type == "video" else ".png"),
+                                  m_type, title, tags)
+    return {"ok": True, "asset": asset, "loop_seconds": loop_seconds, "skinned": skinned, "media_type": m_type}
+
+
+class ContentEditIn(BaseModel):
+    title: Optional[str] = None
+    tags: Optional[List[str]] = None
+    loop_seconds: Optional[int] = None
+
+
+@app.post("/admin/keyhole/content/{asset_id}/edit", dependencies=[Depends(admin_required)])
+def admin_content_edit(asset_id: int, body: ContentEditIn):
+    """Edit a recorded loop's title, tags, or loop length."""
+    tags = list(body.tags) if body.tags is not None else None
+    if body.loop_seconds:
+        loop_seconds = body.loop_seconds if body.loop_seconds in (30, 60, 120, 180, 300) else 60
+        tags = _parse_tags_input(tags or [])
+        tags = [t for t in tags if not t.startswith("loop:")]
+        if "loop" not in tags:
+            tags.append("loop")
+        tags.append(f"loop:{loop_seconds}")
+    updated = admin_update_media_metadata(asset_id, AdminMediaUpdateIn(title=body.title, tags=tags))
+    return updated
+
+
+class ContentScheduleIn(BaseModel):
+    character: str
+    asset_id: Optional[int] = None
+    scheduled_at: str = "Tonight — 9:00 PM"
+    price: str = "$4.99"
+    details: str = ""
+
+
+@app.post("/admin/keyhole/content/{asset_id}/schedule", dependencies=[Depends(admin_required)])
+def admin_content_schedule(asset_id: int, body: ContentScheduleIn):
+    """Schedule a public show that plays a recorded loop. Does not go live."""
+    if body.asset_id is not None and body.asset_id != asset_id:
+        raise HTTPException(status_code=400, detail="asset_id does not match the URL")
+    details = (body.details or "").strip() or f"Scheduled loop asset #{asset_id}"
+    return admin_create_public_show(CreatePublicShowIn(
+        character=body.character,
+        scheduled_at=body.scheduled_at,
+        price=body.price or "$4.99",
+        details=details,
+    ))
+
+
 @app.post("/admin/keyhole/shows/{show_id}/start", dependencies=[Depends(admin_required)])
 def admin_start_keyhole_show(show_id: str):
     shows = {s["id"]: s for s in _get_all_shows_db()}
@@ -9299,22 +9824,87 @@ def admin_set_master_reference(body: SetMasterRefIn):
     cid = (body.character or "chloe").strip().lower()
     if cid not in ("chloe", "bailey"):
         raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
-    _set_house_rule(f"ref_master_{cid}", body.master_reference.strip())
+    if not _set_house_rule(f"ref_master_{cid}", body.master_reference.strip()):
+        raise HTTPException(status_code=500, detail=f"Could not save {cid}'s master reference")
     return {"ok": True, "character": cid, "references": get_character_references(cid)}
 
 
 class SetAppearanceRefIn(BaseModel):
     character: str
     current_appearance: str
+    skin_asset_id: Optional[int] = None
+
+
+def _ensure_asset_skin_tag(asset_id: int, cid: str) -> None:
+    """Mark an existing local asset as this character's skin so generation can find it."""
+    if not DATABASE_URL:
+        return
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT tags, character_id FROM media_assets WHERE id=%s", (asset_id,))
+                row = cur.fetchone()
+                if not row or (row.get("character_id") or "").lower() != cid:
+                    return
+                tags = _parse_tags_input(row.get("tags") or [])
+                for needed in ("skin", "reference"):
+                    if needed not in tags:
+                        tags.append(needed)
+                cur.execute("""UPDATE media_assets
+                               SET tags=%s, is_enabled=TRUE, updated_at=now()
+                               WHERE id=%s""", (Json(tags), asset_id))
+                conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        return
+
+
+def _register_character_skin(cid: str, safe_name: str, url: str, title: str, tags: List[str],
+                             media_type: str = "image") -> Optional[int]:
+    """Record a local skin/reference file in media_assets so the generator can load it."""
+    if not DATABASE_URL:
+        return None
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO media_assets (
+                        character_id, title, media_type, url, file_path, tags, is_enabled
+                    ) VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                    RETURNING id
+                """, (cid, title, media_type, url, safe_name, Json(_parse_tags_input(tags))))
+                asset_id = int(cur.fetchone()["id"])
+                conn.commit()
+                return asset_id
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 
 @app.post("/admin/keyhole/character-references/set-appearance", dependencies=[Depends(admin_required)])
 def admin_set_appearance_reference(body: SetAppearanceRefIn):
+    """Persist Chloe or Bailey's current outfit / skin. The master identity is not touched."""
     cid = (body.character or "chloe").strip().lower()
     if cid not in ("chloe", "bailey"):
         raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
-    _set_house_rule(f"ref_appearance_{cid}", body.current_appearance.strip())
-    return {"ok": True, "character": cid, "references": get_character_references(cid)}
+    appearance = (body.current_appearance or "").strip()
+    if not appearance:
+        raise HTTPException(status_code=400, detail="current_appearance is required")
+    if not _set_house_rule(f"ref_appearance_{cid}", appearance):
+        raise HTTPException(status_code=500, detail=f"Could not save {cid}'s skin")
+    if body.skin_asset_id:
+        if not _set_house_rule(f"ref_skin_asset_{cid}", str(int(body.skin_asset_id))):
+            raise HTTPException(status_code=500, detail=f"Could not save {cid}'s skin asset")
+        _ensure_asset_skin_tag(int(body.skin_asset_id), cid)
+    saved = get_character_references(cid)
+    if saved.get("current_appearance") != appearance:
+        _CHARACTER_REFS_CACHE.setdefault(cid, {})["current_appearance"] = appearance
+        saved = get_character_references(cid)
+    return {"ok": True, "character": cid, "references": saved}
 
 
 @app.post("/admin/keyhole/character-references/upload-master", dependencies=[Depends(admin_required)])
@@ -9341,11 +9931,20 @@ async def admin_upload_master_reference(
     with open(dest_path, "wb") as f:
         f.write(content)
 
-    url = f"/uploads/media/{safe_name}"
-    master_desc = f"Master Reference: {cid.capitalize()} — Approved Visual Reference ({url})"
-    _set_house_rule(f"ref_master_{cid}", master_desc)
+    url = f"/media/files/{safe_name}"
+    refs = get_character_references(cid)
+    master = refs.get("master_reference") or ""
+    if url not in master:
+        master = (master.rstrip() + f" Visual reference: {url}").strip()
+    if not _set_house_rule(f"ref_master_{cid}", master):
+        raise HTTPException(status_code=500, detail=f"Could not save {cid}'s master reference")
+    asset_id = _register_character_skin(
+        cid, safe_name, url, f"{cid.capitalize()} skin", ["skin", "reference", "master"])
+    if asset_id:
+        _set_house_rule(f"ref_skin_asset_{cid}", str(asset_id))
 
-    return {"ok": True, "character": cid, "url": url, "references": get_character_references(cid)}
+    return {"ok": True, "character": cid, "url": url, "asset_id": asset_id,
+            "references": get_character_references(cid)}
 
 
 @app.post("/admin/keyhole/character-references/upload-private", dependencies=[Depends(admin_required)])
@@ -9372,28 +9971,19 @@ async def admin_upload_private_reference(
     with open(dest_path, "wb") as f:
         f.write(content)
 
-    url = f"/uploads/media/{safe_name}"
+    url = f"/media/files/{safe_name}"
 
     refs = get_character_references(cid)
-    priv_list = refs.get("private_references", [])
+    priv_list = list(refs.get("private_references") or [])
     if url not in priv_list:
         priv_list.append(url)
-    _set_house_rule(f"ref_private_{cid}", json.dumps(priv_list))
+    if not _set_house_rule(f"ref_private_{cid}", json.dumps(priv_list)):
+        raise HTTPException(status_code=500, detail=f"Could not save {cid}'s private reference")
 
-    if DATABASE_URL:
-        try:
-            conn = db()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO media_assets (character_id, title, media_type, url, file_path, tags, is_default, is_fallback, is_enabled)
-                        VALUES (%s, %s, %s, %s, %s, %s, False, False, False)
-                    """, (cid, f"{cid.capitalize()} Private Reference", "image" if ext in (".png", ".jpg", ".jpeg", ".webp") else "video", url, safe_name, json.dumps(["private_reference"])))
-                conn.commit()
-            finally:
-                conn.close()
-        except Exception:
-            pass
+    media_type = "image" if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "video"
+    _register_character_skin(
+        cid, safe_name, url, f"{cid.capitalize()} Private Reference",
+        ["private_reference"], media_type=media_type)
 
     return {"ok": True, "character": cid, "url": url, "references": get_character_references(cid)}
 
@@ -9546,8 +10136,10 @@ def _detect_and_validate_media_signature(content: bytes, file_url: str = "") -> 
     if not content or len(content) < 4:
         raise ValueError("Invalid media content: file is empty or too short")
 
-    # Video magic signatures
-    if len(content) >= 8 and content[4:8] == b"ftyp":
+    # Video magic signatures. ftyp is not always at byte 4 (wide atoms, free boxes).
+    head = content[:4096]
+    ftyp_at = head.find(b"ftyp")
+    if 0 <= ftyp_at <= 64:
         ext = ".mp4"
         if file_url:
             parsed_ext = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower()
@@ -9599,7 +10191,7 @@ def _detect_and_validate_media_signature(content: bytes, file_url: str = "") -> 
     raise ValueError("Invalid media signature: content is not a recognized video or image format")
 
 
-def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[bytes, str, str, str]:
+def _fetch_remote_media(url: str, target_format: str = "original", prefer: str = "") -> tuple[bytes, str, str, str]:
     """
     Fetches media from a URL or webpage safely with SSRF protection, streaming size limits,
     magic byte signature validation, and anti-bot headers.
@@ -9625,7 +10217,12 @@ def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[byte
         if not img_match:
             img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_text, re.I)
 
-        if v_match:
+        want = (prefer or "").strip().lower()
+        if want == "image" and img_match:
+            media_url = urllib.parse.urljoin(url, img_match.group(1))
+        elif want == "video" and v_match:
+            media_url = urllib.parse.urljoin(url, v_match.group(1))
+        elif v_match:
             media_url = urllib.parse.urljoin(url, v_match.group(1))
         elif img_match:
             media_url = urllib.parse.urljoin(url, img_match.group(1))
@@ -9969,19 +10566,29 @@ def admin_import_media_url(body: AdminMediaUrlIn):
 
     if body.download_remote:
         try:
-            content, ext, mime, detected_mtype = _fetch_remote_media(url, target_format=body.target_format or "original")
-            if detected_mtype:
+            content, ext, mime, detected_mtype = _fetch_remote_media(
+                url, target_format=body.target_format or "original", prefer=m_type)
+            if detected_mtype in ("video", "image"):
                 m_type = detected_mtype
+            content, ext, mime, m_type, skinned = _apply_character_skin_bytes(char_id, content, ext, mime, m_type)
             safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
             dest_path = os.path.join(UPLOAD_DIR, safe_name)
             with open(dest_path, "wb") as f:
                 f.write(content)
             saved_path = safe_name
             asset_url = f"/media/files/{safe_name}"
+            body_skinned = skinned
         except Exception as e:
             logger.warning(f"Remote fetch/scrape for '{url}' fell back to direct URL import: {e}")
+            body_skinned = False
+    else:
+        body_skinned = False
 
     parsed_tags = _parse_tags_input(body.tags)
+    if body.download_remote and saved_path and "download" not in parsed_tags:
+        parsed_tags.append("download")
+    if body_skinned and "skinned" not in parsed_tags:
+        parsed_tags.append("skinned")
     asset_title = body.title.strip() or os.path.basename(urllib.parse.urlparse(url).path) or "Imported Media"
 
     conn = db()
@@ -10061,50 +10668,243 @@ def _save_generated_asset(char_id: str, content: bytes, ext: str, media_type: st
         conn.close()
 
 
-def _asset_bytes(asset: Dict[str, Any]) -> Optional[tuple]:
-    """(bytes, mime) for a stored media asset; None if the file is not local."""
-    if not asset.get("file_path"):
-        return None
-    path = os.path.join(UPLOAD_DIR, os.path.basename(asset["file_path"]))
-    if not os.path.isfile(path):
+_IMAGE_MIME_BY_EXT = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif",
+}
+
+
+def _image_bytes_at(path: str) -> Optional[tuple]:
+    if not path or not os.path.isfile(path):
         return None
     ext = os.path.splitext(path)[1].lower()
-    mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
-            ".gif": "image/gif"}.get(ext)
+    mime = _IMAGE_MIME_BY_EXT.get(ext)
     if not mime:
         return None
     with open(path, "rb") as f:
         return f.read(), mime
 
 
+def _local_media_file(file_path: str) -> Optional[str]:
+    """Resolve a media-dir relative name, /media/files URL, or path under KEYHOLE_MEDIA_DIR."""
+    raw = (file_path or "").split("?", 1)[0].strip()
+    if not raw:
+        return None
+    root = os.path.realpath(UPLOAD_DIR)
+    name = os.path.basename(raw)
+    candidate = os.path.realpath(os.path.join(UPLOAD_DIR, name))
+    if candidate.startswith(root + os.sep) and os.path.isfile(candidate):
+        return candidate
+    if os.path.isabs(raw):
+        abs_path = os.path.realpath(raw)
+        if (abs_path == root or abs_path.startswith(root + os.sep)) and os.path.isfile(abs_path):
+            return abs_path
+    return None
+
+
+def _cache_reference_file(char_id: str, content: bytes, ext: str, asset_id: Optional[int]) -> str:
+    """Write reference bytes under KEYHOLE_MEDIA_DIR and point the asset row at that file."""
+    ext = ext if str(ext).startswith(".") else f".{ext or 'jpg'}"
+    if ext not in _IMAGE_MIME_BY_EXT:
+        ext = ".jpg"
+    safe = f"skin_{char_id}_{secrets.token_hex(6)}{ext}"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    with open(os.path.join(UPLOAD_DIR, safe), "wb") as f:
+        f.write(content)
+    if asset_id:
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""UPDATE media_assets
+                                   SET file_path=%s, url=%s, media_type='image', updated_at=now()
+                                   WHERE id=%s""",
+                                (safe, f"/media/files/{safe}", asset_id))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    return safe
+
+
+def _asset_bytes(asset: Dict[str, Any]) -> Optional[tuple]:
+    """(bytes, mime) for a stored media asset; None if the file is not a local image."""
+    path = _local_media_file(asset.get("file_path") or "") or _local_media_file(asset.get("url") or "")
+    return _image_bytes_at(path) if path else None
+
+
+def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
+    """Local image bytes for a skin. Remote URLs and data URLs are cached under KEYHOLE_MEDIA_DIR first."""
+    local = _asset_bytes(asset)
+    if local:
+        return local
+    url = (asset.get("url") or "").strip()
+    char_id = (asset.get("character_id") or "ref").strip().lower() or "ref"
+    asset_id = asset.get("id")
+    if url.startswith("data:image"):
+        try:
+            header, b64 = url.split(",", 1)
+            mime = header.split(";", 1)[0].split(":", 1)[-1] or "image/png"
+            content = base64.b64decode(b64)
+        except Exception:
+            return None
+        ext = next((e for e, m in _IMAGE_MIME_BY_EXT.items() if m == mime), ".png")
+        _cache_reference_file(char_id, content, ext, asset_id)
+        return content, mime
+    if url.startswith("file://"):
+        local_path = _local_media_file(urllib.parse.urlparse(url).path)
+        data = _image_bytes_at(local_path) if local_path else None
+        return data
+    if url.startswith(("http://", "https://")):
+        try:
+            content, ext, mime, mtype = _fetch_remote_media(url, prefer="image")
+        except Exception as exc:
+            logger.warning("Could not cache reference %s: %s", url, exc)
+            return None
+        if mtype != "image" or not content:
+            return None
+        _cache_reference_file(char_id, content, ext, asset_id)
+        return content, mime or _IMAGE_MIME_BY_EXT.get(ext, "image/jpeg")
+    return None
+
+
+def _disk_character_skin(char_id: str) -> Optional[tuple]:
+    """Newest master/skin file already on disk for this character."""
+    if not os.path.isdir(UPLOAD_DIR):
+        return None
+    prefixes = (f"master_ref_{char_id}_", f"skin_{char_id}_")
+    found = []
+    for name in os.listdir(UPLOAD_DIR):
+        if not name.lower().startswith(prefixes):
+            continue
+        data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
+        if data:
+            found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
+    if not found:
+        return None
+    found.sort(key=lambda item: item[0])
+    return found[-1][1]
+
+
+def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]]:
+    cur.execute("SELECT * FROM media_assets WHERE id=%s AND character_id=%s", (asset_id, char_id))
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
 def _character_reference(char_id: str, asset_id: Optional[int]) -> Optional[tuple]:
     """The girl's skin: reference image bytes used to keep every generated cut looking like her.
-    An explicit asset_id wins; otherwise the newest enabled image tagged 'skin' or 'reference'."""
-    conn = db()
+    An explicit asset wins. Remote URLs are downloaded into KEYHOLE_MEDIA_DIR before use.
+    Otherwise the saved skin, then the newest enabled image tagged skin/reference, then a file on disk."""
+    preferred_id = asset_id
+    if not preferred_id:
+        raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
+            (_CHARACTER_REFS_CACHE.get(char_id) or {}).get("skin_asset_id") or "")
+        if str(raw).isdigit():
+            preferred_id = int(raw)
+    conn = None
     try:
-        with conn.cursor() as cur:
-            if asset_id:
-                cur.execute("SELECT * FROM media_assets WHERE id=%s AND character_id=%s", (asset_id, char_id))
-                row = cur.fetchone()
-                if not row:
-                    raise HTTPException(status_code=404, detail="Reference asset not found for this character")
-                data = _asset_bytes(dict(row))
-                if not data:
-                    raise HTTPException(status_code=400, detail="Reference asset must be a locally stored image")
-                return data
-            cur.execute("""
-                SELECT * FROM media_assets
-                WHERE character_id=%s AND media_type='image' AND is_enabled
-                  AND (tags ? 'skin' OR tags ? 'reference')
-                ORDER BY created_at DESC
-            """, (char_id,))
-            for row in cur.fetchall() or []:
-                data = _asset_bytes(dict(row))
-                if data:
-                    return data
-    finally:
-        conn.close()
+        conn = db()
+    except Exception:
+        conn = None
+    if conn is not None:
+        try:
+            with conn.cursor() as cur:
+                if preferred_id:
+                    row = _load_asset_row(cur, int(preferred_id), char_id)
+                    if asset_id and not row:
+                        raise HTTPException(status_code=404, detail="Reference asset not found for this character")
+                    if row:
+                        data = _materialize_reference(row)
+                        if data:
+                            return data
+                cur.execute("""
+                    SELECT * FROM media_assets
+                    WHERE character_id=%s AND media_type='image' AND is_enabled
+                      AND (tags ? 'skin' OR tags ? 'reference')
+                    ORDER BY created_at DESC
+                """, (char_id,))
+                for row in cur.fetchall() or []:
+                    data = _materialize_reference(dict(row))
+                    if data:
+                        return data
+                if asset_id:
+                    cur.execute("SELECT * FROM media_assets WHERE id=%s AND character_id=%s", (asset_id, char_id))
+                    row = cur.fetchone()
+                    if row and (row.get("media_type") or "") != "image":
+                        data = _materialize_reference(dict(row))
+                        if data:
+                            return data
+        finally:
+            conn.close()
+    data = _disk_character_skin(char_id)
+    if data:
+        return data
+    if asset_id:
+        raise HTTPException(status_code=400, detail="Reference asset must be a locally stored image")
     return None
+
+
+def _gemini_apply_skin(skin_bytes: bytes, skin_mime: str, scene_bytes: bytes, scene_mime: str, prompt: str):
+    """Image-to-image with the character skin and the downloaded scene. Returns (mime, base64)."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    payload = {"contents": [{"role": "user", "parts": [
+        {"text": "Character skin:"},
+        {"inline_data": {"mime_type": skin_mime, "data": base64.b64encode(skin_bytes).decode()}},
+        {"text": "Scene to restyle:"},
+        {"inline_data": {"mime_type": scene_mime, "data": base64.b64encode(scene_bytes).decode()}},
+        {"text": prompt},
+    ]}], "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
+    r = requests.post(f"{GEMINI_BASE}/{IMAGE_MODEL}:generateContent", json=payload,
+                      params={"key": GEMINI_API_KEY},
+                      headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Image model failed ({r.status_code}): {r.text[:300]}")
+    try:
+        for part in r.json()["candidates"][0]["content"]["parts"]:
+            blob = part.get("inlineData") or part.get("inline_data")
+            if blob and blob.get("data"):
+                return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
+    except Exception:
+        pass
+    raise HTTPException(status_code=502, detail="Skin apply failed")
+
+
+def _apply_character_skin_bytes(char_id: str, content: bytes, ext: str, mime: str, media_type: str):
+    """Apply the selected character skin onto downloaded media.
+    Images are restyled with her reference. Videos are kept as videos (downloads are not images-only)
+    and tagged by the caller when a skin reference exists for her."""
+    if media_type == "video":
+        try:
+            has_skin = _character_reference(char_id, None) is not None
+        except HTTPException:
+            has_skin = False
+        return content, ext or ".mp4", mime or "video/mp4", "video", has_skin
+    if media_type != "image":
+        return content, ext, mime, media_type, False
+    try:
+        ref = _character_reference(char_id, None)
+    except HTTPException:
+        ref = None
+    if not ref or not GEMINI_API_KEY:
+        return content, ext or ".png", mime or "image/png", "image", False
+    appearance = ""
+    if char_id in ("chloe", "bailey"):
+        appearance = get_character_references(char_id).get("current_appearance") or ""
+    prompt = (
+        "Recreate the scene image using the woman from the character skin: same face, hair, and body. "
+        "Keep the scene's pose, framing, furniture, and lighting. Fully clothed unless the scene already is. "
+        f"{appearance} No text, no watermark."
+    )
+    try:
+        new_mime, b64 = _gemini_apply_skin(ref[0], ref[1], content, mime or "image/jpeg", prompt)
+    except Exception as exc:
+        logger.warning("Skin apply skipped for %s: %s", char_id, exc)
+        return content, ext or ".png", mime or "image/png", "image", False
+    new_ext = ".jpg" if "jpeg" in (new_mime or "") else ".png"
+    return base64.b64decode(b64), new_ext, new_mime or "image/png", "image", True
 
 
 def _secondary_image(prompt: str, api_key: str) -> tuple:
