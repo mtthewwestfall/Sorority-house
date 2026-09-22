@@ -2786,6 +2786,43 @@ pre{white-space:pre-wrap;margin:0}
       <div style="text-align:center; padding:30px; color:var(--mut);">Loading Keyhole Show Panel...</div>
     </div>
 
+    <div class="kh-show-card" style="margin-top:16px;">
+      <h3 style="margin-top:0; margin-bottom:6px; font-size:18px; color:var(--acc);">MASTER IDENTITY &amp; REFERENCE SYSTEM</h3>
+      <p style="margin:0 0 14px 0; font-size:13px; color:var(--mut);">Separate Master Identity, Current Outfit, and Private References for Chloe and Bailey.</p>
+
+      <div style="display:flex; gap:10px; margin-bottom:14px;">
+        <button id="btnCharChloe" type="button" class="kh-btn kh-btn-pub" style="flex:1; min-height:44px; margin-top:0;" onclick="switchRefChar('chloe')">Chloe References</button>
+        <button id="btnCharBailey" type="button" class="kh-btn kh-btn-sec" style="flex:1; min-height:44px; margin-top:0;" onclick="switchRefChar('bailey')">Bailey References</button>
+      </div>
+
+      <div id="refPanelBox" style="display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Master Identity Reference (Defines Face &amp; Identity)</label>
+          <textarea id="refMasterText" style="width:100%; min-height:70px; font-size:14px;" placeholder="Master identity reference text..."></textarea>
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button type="button" class="kh-btn kh-btn-start" style="flex:1; min-height:44px; margin-top:0; font-size:15px;" onclick="saveMasterRefText()">Save Text Reference</button>
+            <label class="kh-btn kh-btn-sec" style="flex:1; min-height:44px; margin-top:0; font-size:15px; cursor:pointer;">
+              Upload Image Ref <input type="file" id="fileMasterRef" accept="image/*" style="display:none;" onchange="uploadMasterRefFile()">
+            </label>
+          </div>
+        </div>
+
+        <div style="border-top:1px dashed var(--line); padding-top:12px;">
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Current Appearance / Outfit Reference (Session Outfit)</label>
+          <textarea id="refAppearanceText" style="width:100%; min-height:60px; font-size:14px;" placeholder="Current outfit reference..."></textarea>
+          <button type="button" class="kh-btn kh-btn-pub" style="min-height:44px; margin-top:6px; font-size:15px;" onclick="saveAppearanceRefText()">Set Current Outfit</button>
+        </div>
+
+        <div style="border-top:1px dashed var(--line); padding-top:12px;">
+          <label class="kh-label" style="display:block; margin-bottom:4px;">Private References (Kept Separate from Public Media)</label>
+          <div id="privateRefsList" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
+          <label class="kh-btn kh-btn-sec" style="min-height:44px; margin-top:0; font-size:15px; cursor:pointer;">
+            + Upload Private Reference <input type="file" id="filePrivateRef" accept="image/*,video/*" style="display:none;" onchange="uploadPrivateRefFile()">
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="kh-show-card" style="margin-top:8px;">
       <h3 style="margin-top:0; margin-bottom:12px; font-size:18px; color:var(--acc);">NEW PUBLIC SHOW</h3>
       <div style="display:flex; flex-direction:column; gap:12px;">
@@ -5833,12 +5870,123 @@ AVATAR_STYLE = (
     "The person depicted is: "
 )
 
+DEFAULT_CHARACTER_REFERENCES = {
+    "chloe": {
+        "master_reference": "Master Reference: Chloe — Ancient Greek goddess character portrait with distinct symmetrical facial structure, emerald eyes, honey-blonde draped hair, laurel crown, natural fair skin tone, and timeless Greek features.",
+        "current_appearance": "Current Outfit: Draped white silk chiton top with gold laurel trim and subtle bronze brooch.",
+        "private_references": []
+    },
+    "bailey": {
+        "master_reference": "Master Reference: Bailey — Ancient Greek goddess character portrait with warm hazel eyes, dark chestnut hair pinned with golden olive leaf pins, athletic graceful posture, and radiant Greek features.",
+        "current_appearance": "Current Outfit: Form-fitting sandalwood chiton top with gold ribbon accents.",
+        "private_references": []
+    }
+}
 
-def generate_avatar(description):
+
+_CHARACTER_REFS_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_house_rule(key: str, default: str = "") -> str:
+    if not DATABASE_URL:
+        return default
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM house_rules WHERE key = %s", (key,))
+                row = cur.fetchone()
+                if row:
+                    return row["value"]
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return default
+
+
+def _set_house_rule(key: str, value: str) -> None:
+    if key.startswith("ref_master_"):
+        cid = key.replace("ref_master_", "")
+        if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
+        _CHARACTER_REFS_CACHE[cid]["master_reference"] = value
+    elif key.startswith("ref_appearance_"):
+        cid = key.replace("ref_appearance_", "")
+        if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
+        _CHARACTER_REFS_CACHE[cid]["current_appearance"] = value
+    elif key.startswith("ref_private_"):
+        cid = key.replace("ref_private_", "")
+        if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
+        try: _CHARACTER_REFS_CACHE[cid]["private_references"] = json.loads(value)
+        except Exception: pass
+
+    if not DATABASE_URL:
+        return
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO house_rules (key, value) VALUES (%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """, (key, str(value)))
+                conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def get_character_references(character_id: str) -> Dict[str, Any]:
+    cid = (character_id or "chloe").strip().lower()
+    if cid not in ("chloe", "bailey"):
+        cid = "chloe"
+
+    mem_refs = _CHARACTER_REFS_CACHE.get(cid, {})
+    default_master = mem_refs.get("master_reference") or DEFAULT_CHARACTER_REFERENCES[cid]["master_reference"]
+    default_appearance = mem_refs.get("current_appearance") or DEFAULT_CHARACTER_REFERENCES[cid]["current_appearance"]
+    default_private = mem_refs.get("private_references") or DEFAULT_CHARACTER_REFERENCES[cid]["private_references"]
+
+    master = _get_house_rule(f"ref_master_{cid}") or default_master
+    appearance = _get_house_rule(f"ref_appearance_{cid}") or default_appearance
+    private_raw = _get_house_rule(f"ref_private_{cid}")
+    if private_raw:
+        try:
+            private_refs = json.loads(private_raw)
+        except Exception:
+            private_refs = default_private
+    else:
+        private_refs = default_private
+
+    res = {
+        "character": cid.capitalize(),
+        "master_reference": master,
+        "current_appearance": appearance,
+        "private_references": private_refs
+    }
+    _CHARACTER_REFS_CACHE[cid] = dict(res)
+    return res
+
+
+def generate_avatar(description: str, character_id: Optional[str] = None):
     """Text-to-image player avatar in the God's Greek portrait style."""
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    prompt = AVATAR_STYLE + description.strip()[:300]
+
+    cid = (character_id or "").strip().lower()
+    if not cid:
+        lower_desc = description.lower()
+        if "bailey" in lower_desc:
+            cid = "bailey"
+        elif "chloe" in lower_desc:
+            cid = "chloe"
+
+    ref_prompt = ""
+    if cid in ("chloe", "bailey"):
+        refs = get_character_references(cid)
+        ref_prompt = f"[{refs['master_reference']}] [{refs['current_appearance']}] "
+
+    prompt = AVATAR_STYLE + ref_prompt + description.strip()[:300]
     payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
                "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
     r = requests.post(f"{GEMINI_BASE}/{IMAGE_MODEL}:generateContent", json=payload,
@@ -7831,6 +7979,131 @@ def admin_demo_simulate(body: DemoSimulateIn):
             finally:
                 conn.close()
     return {"ok": True, "shows": _get_all_shows_db()}
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE CHARACTER REFERENCE SYSTEM (CHLOE & BAILEY)
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/keyhole/character-references", dependencies=[Depends(admin_required)])
+def admin_get_character_references():
+    """Returns Master Identity, Current Appearance, and Private References for Chloe and Bailey."""
+    return {
+        "ok": True,
+        "references": {
+            "chloe": get_character_references("chloe"),
+            "bailey": get_character_references("bailey")
+        }
+    }
+
+
+class SetMasterRefIn(BaseModel):
+    character: str
+    master_reference: str
+
+
+@app.post("/admin/keyhole/character-references/set-master", dependencies=[Depends(admin_required)])
+def admin_set_master_reference(body: SetMasterRefIn):
+    cid = (body.character or "chloe").strip().lower()
+    if cid not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
+    _set_house_rule(f"ref_master_{cid}", body.master_reference.strip())
+    return {"ok": True, "character": cid, "references": get_character_references(cid)}
+
+
+class SetAppearanceRefIn(BaseModel):
+    character: str
+    current_appearance: str
+
+
+@app.post("/admin/keyhole/character-references/set-appearance", dependencies=[Depends(admin_required)])
+def admin_set_appearance_reference(body: SetAppearanceRefIn):
+    cid = (body.character or "chloe").strip().lower()
+    if cid not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
+    _set_house_rule(f"ref_appearance_{cid}", body.current_appearance.strip())
+    return {"ok": True, "character": cid, "references": get_character_references(cid)}
+
+
+@app.post("/admin/keyhole/character-references/upload-master", dependencies=[Depends(admin_required)])
+async def admin_upload_master_reference(
+    character: str = Form(...),
+    file: UploadFile = File(...)
+):
+    cid = (character or "chloe").strip().lower()
+    if cid not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file selected")
+    ext = os.path.splitext(file.filename)[1].lower() or ".png"
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+    safe_name = f"master_ref_{cid}_{secrets.token_hex(6)}{ext}"
+    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    url = f"/uploads/media/{safe_name}"
+    master_desc = f"Master Reference: {cid.capitalize()} — Approved Visual Reference ({url})"
+    _set_house_rule(f"ref_master_{cid}", master_desc)
+
+    return {"ok": True, "character": cid, "url": url, "references": get_character_references(cid)}
+
+
+@app.post("/admin/keyhole/character-references/upload-private", dependencies=[Depends(admin_required)])
+async def admin_upload_private_reference(
+    character: str = Form(...),
+    file: UploadFile = File(...)
+):
+    cid = (character or "chloe").strip().lower()
+    if cid not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file selected")
+    ext = os.path.splitext(file.filename)[1].lower() or ".png"
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
+
+    safe_name = f"private_ref_{cid}_{secrets.token_hex(6)}{ext}"
+    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    url = f"/uploads/media/{safe_name}"
+
+    refs = get_character_references(cid)
+    priv_list = refs.get("private_references", [])
+    if url not in priv_list:
+        priv_list.append(url)
+    _set_house_rule(f"ref_private_{cid}", json.dumps(priv_list))
+
+    if DATABASE_URL:
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO media_assets (character_id, title, media_type, url, file_path, tags, is_default, is_fallback, is_enabled)
+                        VALUES (%s, %s, %s, %s, %s, %s, False, False, False)
+                    """, (cid, f"{cid.capitalize()} Private Reference", "image" if ext in (".png", ".jpg", ".jpeg", ".webp") else "video", url, safe_name, json.dumps(["private_reference"])))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    return {"ok": True, "character": cid, "url": url, "references": get_character_references(cid)}
 
 
 @app.get("/admin/console/doors", dependencies=[Depends(admin_required)])
