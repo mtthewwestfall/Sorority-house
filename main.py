@@ -10843,7 +10843,7 @@ def _keyhole_character(char_id: str) -> str:
     cid = (char_id or "").strip().lower()
     if cid in KEYHOLE_CHARACTERS:
         return cid
-    return _validate_character_exists(cid)
+    raise HTTPException(status_code=400, detail="character must be chloe or bailey")
 
 
 def _plate_beat(beat: Optional[str]) -> str:
@@ -11045,10 +11045,17 @@ def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
 
 
 def _disk_character_skin(char_id: str) -> Optional[tuple]:
-    """Newest master/skin file already on disk for this character."""
+    """Owner-locked Chloe/Bailey skin first, then newest master/skin upload on disk."""
+    cid = (char_id or "").strip().lower()
+    # Locked owner skins shipped with the repo — never invent another person's face.
+    if cid in ("chloe", "bailey"):
+        owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid}.jpg")
+        data = _image_bytes_at(owner)
+        if data:
+            return data
     if not os.path.isdir(UPLOAD_DIR):
         return None
-    prefixes = (f"master_ref_{char_id}_", f"skin_{char_id}_")
+    prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
     found = []
     for name in os.listdir(UPLOAD_DIR):
         if not name.lower().startswith(prefixes):
@@ -11070,11 +11077,16 @@ def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]
 
 def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool = True) -> Optional[tuple]:
     """The girl's skin: reference image bytes used to keep every generated cut looking like her.
-    An explicit asset wins. Remote and relative /media URLs are downloaded into KEYHOLE_MEDIA_DIR
-    before use. Otherwise the saved skin, then the newest enabled image tagged skin/reference,
-    then a file on disk.
+    Owner-locked Chloe/Bailey disk skins always win (never another person's upload).
+    Otherwise an explicit asset, then tagged skins, then other disk files.
     strict=True (primary / webcam): an explicit asset_id that still cannot be loaded raises.
     strict=False (Sogni): the same miss returns None so generation can continue text-only."""
+    cid0 = (char_id or "").strip().lower()
+    # Always use the owner's locked Chloe/Bailey skin — ignore other people's uploads.
+    if cid0 in ("chloe", "bailey"):
+        owner = _disk_character_skin(cid0)
+        if owner:
+            return owner
     preferred_id = asset_id
     if not preferred_id:
         raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
@@ -11429,7 +11441,7 @@ def admin_generator_image(body: GeneratorImageIn):
     if engine == "primary":
         if ref:
             mime, b64 = _gemini_image_edit(ref[0], ref[1],
-                                           f"Keep this exact same woman, face, hair, body and outfit style. {prompt}")
+                                           f"IDENTITY LOCK: keep this exact woman's face, hair, and bust from the reference. Do NOT copy her reference pose. Change outfit/pose only as the prompt says. {prompt}")
         else:
             mime, b64 = generate_avatar(prompt)
         content = base64.b64decode(b64)
