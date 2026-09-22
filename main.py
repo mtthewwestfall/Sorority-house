@@ -148,7 +148,12 @@ API CONTRACT implemented here (point your chat app at these):
                                                             door_title,blurb,avatar_url,
                                                             min_tier,tier_label}]}
                                                             the doors to render; door text and
-                                                            art only, never the persona doc
+                                                            art only, never the persona doc.
+                                                            Chloe and Bailey avatar_url values
+                                                            are the Keyhole door photos
+                                                            (IMG_3542.jpeg blonde, IMG_3543.jpeg
+                                                            dark hair) unless an admin saved a
+                                                            different https portrait.
   POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,min_tier,sort_order,
                             active,difficulty,persona}     -> add or rewrite a sister; the
                                                             roster is data, so no deploy.
@@ -524,6 +529,17 @@ DOOR_RULE_DEFAULTS = {"doors_locked": False, "door_set": DOOR_PAIR, "unlock_stag
 def tier_rank(tier):
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
 
+# Same files as the Keyhole customer doors (rooms.html). Chloe is the blonde
+# city-window room; Bailey is dark hair. Do not swap these two.
+KEYHOLE_DOOR_ORIGIN = "https://keyhole-latest-production.up.railway.app"
+KEYHOLE_DOOR_AVATARS = {
+    "chloe": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3542.jpeg",
+    "bailey": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3543.jpeg",
+}
+_KEYHOLE_DOOR_FILES = (
+    "IMG_3542.jpeg", "IMG_3543.jpeg", "IMG_3547.jpeg", "IMG_3548.jpeg",
+)
+
 # The roster is the personas table, not this file, so a new sister can be added
 # from the admin console without a deploy. These are only the first-boot seeds:
 # door text, art and the tier she is sold on, all editable afterwards.
@@ -563,7 +579,9 @@ ROSTER_SEED = [
      "News reporter. The woman who knows everything first — curious, quick, always chasing the real story."),
     ("anna",     "visitor", 170, "assets/anna.jpg?v=3",
      "EMT and nurse. The woman who doesn't flinch — steady hands, steady heart, a calm that holds the room together."),
-    ("bailey",   "visitor", 180, "assets/bailey.jpg",
+    ("chloe",    "visitor", 175, KEYHOLE_DOOR_AVATARS["chloe"],
+     "Dirty-blonde, city window, navy room. Warm when she wants to be, and slow to be caught."),
+    ("bailey",   "visitor", 180, KEYHOLE_DOOR_AVATARS["bailey"],
      "Potter at the edge of town. Sharp, funny, deliberately too much — she dares you to dislike her so she controls the rejection. Outlast the dare."),
     ("sarah",    "visitor", 190, "assets/sarah.jpg",
      "The town's teacher. Warm, capable, endlessly giving — the one who holds everything. Ask if she's okay and wait for the real answer."),
@@ -591,6 +609,7 @@ DEFAULT_PERSONAS = {
     "jordan":   ("Jordan",   "The true believer","Deputy sheriff, 24. The law's youngest true believer; earnest, brave, still proving herself."),
     "mia":      ("Mia",      "The first to know","News reporter, 23. Curious and quick; the woman who knows everything first."),
     "anna":     ("Anna",     "The steady hands","EMT and nurse, 23. The woman who doesn't flinch; steady hands, steady heart."),
+    "chloe":    ("Chloe",    "The city window", "Dirty-blonde, city window, navy room. Warm when she wants to be, and slow to be caught."),
     "bailey":   ("Bailey",   "The dare",      "Potter, 23. Sharp and funny by design; the dare is armor over the girl who rebuilt everything herself. Outlast the provocation."),
     "sarah":    ("Sarah",    "The sanctuary", "Teacher, 26. Warm and capable; holds the whole town. Earn her by refusing the praise wall and witnessing the grief."),
     # --- God's Town (Roman) residents ---
@@ -1530,6 +1549,7 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
             """)
             _seed_roster(cur, backfill=legacy_rows)
+            _apply_keyhole_door_avatars(cur)
             _repair_dead_portraits(cur)
             # Doors no longer lock: every resident is talkable from day one.
             # Flip any stored lock so old databases match the new rule.
@@ -1582,6 +1602,38 @@ def init_db():
 
 
 DEAD_PORTRAIT_HOST = "https://myreal.live/"
+
+
+def _keyhole_door_avatar(girl, current):
+    """Avatar URL Chloe or Bailey should wear, or None when the stored one stays.
+
+    Only a blank portrait, a house-relative asset path, an SVG placeholder, or
+    one of the Keyhole room files is rewritten. Any other https portrait an
+    admin saved is left alone, and every other resident is left alone.
+    """
+    target = KEYHOLE_DOOR_AVATARS.get((girl or "").strip().lower())
+    if not target:
+        return None
+    current = (current or "").strip()
+    if current == target:
+        return None
+    legacy = (
+        not current
+        or current.startswith("assets/")
+        or current.startswith("data:image/svg")
+        or any(name in current for name in _KEYHOLE_DOOR_FILES)
+    )
+    return target if legacy else None
+
+
+def _apply_keyhole_door_avatars(cur):
+    """Point Chloe and Bailey at the live Keyhole door photos. Other rows stay."""
+    cur.execute("SELECT girl, avatar_url FROM personas WHERE girl IN ('chloe', 'bailey')")
+    for row in cur.fetchall():
+        new = _keyhole_door_avatar(row["girl"], row["avatar_url"])
+        if new:
+            cur.execute("UPDATE personas SET avatar_url = %s WHERE girl = %s",
+                        (new, row["girl"]))
 
 
 def _repair_dead_portraits(cur):
@@ -5148,11 +5200,17 @@ PORTRAIT_MAX_BYTES = 4 * 1024 * 1024
 
 def _portrait_bytes(avatar_url):
     """Her door portrait, as (mime, bytes), or None when it can't be fetched.
-    Only paths on our own site are fetched (roster art lives in web/assets), so a
-    stored URL can never point the server at something else."""
-    if not avatar_url or "://" in avatar_url or avatar_url.startswith("//"):
+    Relative paths are read from our own site. An absolute URL is fetched only
+    when it is a Keyhole door photo on the live asset host, so a stored URL
+    cannot point the server anywhere else."""
+    if not avatar_url or avatar_url.startswith("//") or ".." in avatar_url:
         return None
-    url = f"{SITE_URL}/{avatar_url.lstrip('/')}"
+    if "://" in avatar_url:
+        if not avatar_url.startswith(KEYHOLE_DOOR_ORIGIN + "/assets/"):
+            return None
+        url = avatar_url
+    else:
+        url = f"{SITE_URL}/{avatar_url.lstrip('/')}"
     try:
         with requests.get(url, timeout=15, stream=True, allow_redirects=False) as r:
             if r.status_code != 200:
