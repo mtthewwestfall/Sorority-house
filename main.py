@@ -6628,6 +6628,7 @@ def keyhole_packages():
 def keyhole_me(user=Depends(current_user)):
     """The signed-in customer's Keyhole entitlements, for the keyhole.cam page."""
     uid = user["user_id"]
+    session = check_keyhole_session_active(uid)  # expires a finished session before the read
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -6636,7 +6637,6 @@ def keyhole_me(user=Depends(current_user)):
             row = cur.fetchone() or {}
     finally:
         conn.close()
-    session = check_keyhole_session_active(uid)
     return {
         "user_id": uid,
         "email": _account_email(uid),
@@ -6653,6 +6653,29 @@ class KeyholeInvoiceIn(BaseModel):
     package: str
 
 
+def _check_keyhole_package_cap(user_id: str, pkg: str, cfg) -> None:
+    """Refuse to sell a capped package (quick / text_only) the account can no longer
+    receive this month, so a customer is not invoiced for a grant that would fail."""
+    if pkg not in ("quick", "text_only"):
+        return
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT quick_sessions_bought_this_month, text_only_bought_this_month "
+                        "FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    if pkg == "quick":
+        cap = int(cfg.get("quick_monthly_cap", 3))
+        if int(row.get("quick_sessions_bought_this_month") or 0) >= cap:
+            raise HTTPException(status_code=400, detail=f"Monthly limit of {cap} Quick Sessions reached.")
+    else:
+        cap = int(cfg.get("text_only_monthly_cap", 1))
+        if int(row.get("text_only_bought_this_month") or 0) >= cap:
+            raise HTTPException(status_code=400, detail=f"Monthly limit of {cap} Text-Only package reached.")
+
+
 @app.post("/keyhole/nowpayments/invoice")
 def keyhole_nowpayments_invoice(body: KeyholeInvoiceIn, user=Depends(current_user)):
     """Create a NOWPayments invoice for one Keyhole package, priced from the Keyhole
@@ -6660,14 +6683,15 @@ def keyhole_nowpayments_invoice(body: KeyholeInvoiceIn, user=Depends(current_use
     grants it to this account when the payment finishes."""
     if not NOWPAYMENTS_API_KEY:
         raise HTTPException(status_code=503, detail="NOWPAYMENTS_API_KEY must be set")
-    pkg = _keyhole_package_in(body.package)
-    if pkg is None:
+    pkg = body.package.lower().strip()
+    if pkg not in NEXAPAY_PACKAGES:
         raise HTTPException(status_code=400, detail="Unknown package")
     cfg = get_keyhole_config()
     price = float(cfg.get(f"{pkg}_price", 0) or 0)
     if price <= 0:
         raise HTTPException(status_code=400, detail="Package has no price")
     uid = user["user_id"]
+    _check_keyhole_package_cap(uid, pkg, cfg)
     payload = {
         "price_amount": price,
         "price_currency": "usd",
