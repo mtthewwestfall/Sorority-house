@@ -1308,6 +1308,17 @@ def init_db():
                     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS character_id TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS title        TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS media_type   TEXT NOT NULL DEFAULT 'video';
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS url          TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS file_path    TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS tags         JSONB NOT NULL DEFAULT '[]'::jsonb;
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS is_default   BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS is_fallback  BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS is_enabled   BOOLEAN NOT NULL DEFAULT TRUE;
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ NOT NULL DEFAULT now();
+                ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS updated_at   TIMESTAMPTZ NOT NULL DEFAULT now();
                 CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
 
                 -- KEYHOLE Live WebCam Shows (Unified Engine & Admin Control Panel)
