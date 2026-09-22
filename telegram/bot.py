@@ -751,8 +751,12 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await cmd_models(update, context)
     elif data.startswith("buy_show:"):
         sid = data.split(":", 1)[1]
-        await _txt(update, f"🎟️ Redirecting to checkout for show pass ({sid})…\nUse /upgrade or click below:")
-        await cmd_upgrade(update, context)
+        try:
+            show = await _call(update, purchase_show, sid)
+            await _txt(update, f"🎟️ Pass purchased for show {sid}! Status: {show.get('status', 'SCHEDULED')}. Use /shows or visit web lounge when LIVE.")
+        except Exception as exc:
+            await _txt(update, f"🎟️ Access pass checkout for show ({sid}):\nUse /upgrade or tap a package link below:")
+            await cmd_upgrade(update, context)
     elif data.startswith("girl:"):
         await _open_girl(update, data.split(":", 1)[1])
 
