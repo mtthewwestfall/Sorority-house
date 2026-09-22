@@ -12,3 +12,12 @@
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json"
+
+# keyhole.lockeddoor.ai is a domain alias of this site but is a different product:
+# proxy every request on that host to the Keyhole site on Railway (which itself fronts
+# the backend for /admin, /keyhole, /auth, /media and /webhooks).
+[[redirects]]
+  from = "https://keyhole.lockeddoor.ai/*"
+  to = "https://keyhole-latest-production.up.railway.app/:splat"
+  status = 200
+  force = true
