@@ -63,6 +63,11 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "free_left","paid_left"}
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
                                                             by hand (tier 'visitor' = cancelled)
+  POST /webhooks/nexapay                                 -> NexaPay webhook: a paid Payment Link
+                                                            grants the Keyhole package named in its
+                                                            metadata/SKU (quick, standard, extended,
+                                                            premium, text_only) to metadata.user_id,
+                                                            else the account with the payer's email
   POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
                                                             the account remembered for the customer,
                                                             else the one with the customer's email,
@@ -136,6 +141,11 @@ Env vars (Railway -> Variables):
   STRIPE_WEBHOOK_SECRET
                     signing secret of the Stripe webhook endpoint (whsec_...); the
                     /webhooks/stripe route refuses with 503 until it is set.
+  NEXAPAY_WEBHOOK_SECRET
+                    signing secret of the NexaPay webhook (HMAC-SHA256 of the raw body);
+                    the /webhooks/nexapay route refuses with 503 until it is set.
+  NEXAPAY_SIGNATURE_HEADER
+                    header NexaPay puts the signature in (default X-Nexapay-Signature).
   STRIPE_API_KEY    optional restricted key (Customers: read, Subscriptions: read).
                     Cancellations are matched by the customer id remembered from
                     invoice.paid; the key covers customers that never paid through this
@@ -316,6 +326,11 @@ WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+# Keyhole session packages sell through NexaPay Payment Links; /webhooks/nexapay grants the
+# package named in the payment's metadata/SKU to the buyer (user_id in metadata, else email).
+NEXAPAY_WEBHOOK_SECRET = os.environ.get("NEXAPAY_WEBHOOK_SECRET", "")
+NEXAPAY_SIGNATURE_HEADER = os.environ.get("NEXAPAY_SIGNATURE_HEADER", "X-Nexapay-Signature")
+NEXAPAY_PACKAGES = ("quick", "standard", "extended", "premium", "text_only")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
@@ -1102,6 +1117,13 @@ def init_db():
                     payment_id TEXT PRIMARY KEY,
                     user_id    TEXT NOT NULL,
                     credits    INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS keyhole_payments (
+                    payment_id TEXT PRIMARY KEY,
+                    provider   TEXT NOT NULL,
+                    user_id    TEXT NOT NULL,
+                    package    TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 -- distinct days the user actually talked to her at the current stage;
@@ -6719,11 +6741,132 @@ class StripePaymentProvider(BasePaymentProvider):
         return {"ok": True, "provider": "stripe", "status": "active"}
 
 
+def _nexapay_find(obj, *keys):
+    """First non-empty value for any of keys, searched on obj then one level down in
+    the usual nested containers (data/object/payment/metadata/customer/custom_fields)."""
+    if not isinstance(obj, dict):
+        return None
+    for k in keys:
+        v = obj.get(k)
+        if v not in (None, "", [], {}):
+            return v
+    for sub in ("data", "object", "payment", "transaction", "metadata", "meta",
+                "custom_fields", "customer", "buyer", "payer"):
+        v = _nexapay_find(obj.get(sub), *keys)
+        if v is not None:
+            return v
+    return None
+
+
+class NexaPayPaymentProvider(BasePaymentProvider):
+    """NexaPay Payment Links for Keyhole session packages. The webhook body is
+    HMAC-SHA256-signed with NEXAPAY_WEBHOOK_SECRET (hex or base64 digest of the raw
+    body in NEXAPAY_SIGNATURE_HEADER). The package is read from metadata.package /
+    sku / product code (quick, standard, extended, premium, text_only); the buyer from
+    metadata.user_id (client_reference_id / custom_id / reference), else the payer
+    email. Each payment id is granted once; repeats and non-paid events are no-ops."""
+    provider_name: str = "nexapay"
+
+    _PAID = {"paid", "succeeded", "success", "successful", "completed", "complete",
+             "approved", "captured", "settled", "confirmed"}
+
+    @staticmethod
+    def _signed(raw_body: bytes, header: str) -> bool:
+        if not header:
+            return False
+        mac = hmac.new(NEXAPAY_WEBHOOK_SECRET.encode(), raw_body, hashlib.sha256)
+        given = header.strip()
+        if "=" in given and not given.endswith("="):
+            given = given.split("=", 1)[1].strip()
+        if given.lower().startswith("sha256 "):
+            given = given[7:].strip()
+        for expected in (mac.hexdigest(), base64.b64encode(mac.digest()).decode()):
+            if hmac.compare_digest(expected, given):
+                return True
+        return False
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not NEXAPAY_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="NEXAPAY_WEBHOOK_SECRET must be set")
+        sig = next((v for k, v in headers.items() if k.lower() == NEXAPAY_SIGNATURE_HEADER.lower()), "")
+        if not self._signed(raw_body, sig):
+            raise HTTPException(status_code=401, detail="Bad NexaPay signature")
+        try:
+            event = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        if not isinstance(event, dict):
+            raise HTTPException(status_code=400, detail="Bad JSON")
+
+        kind = str(_nexapay_find(event, "event", "type", "event_type") or "").lower()
+        status = str(_nexapay_find(event, "status", "payment_status", "state") or "").lower()
+        if status not in self._PAID and not any(w in kind for w in ("paid", "succe", "complet", "approved")):
+            return {"ok": True, "ignored": f"not a paid event ({kind or status or 'unknown'})"}
+
+        payment_id = _nexapay_find(event, "payment_id", "transaction_id", "txn_id", "charge_id", "order_id", "id")
+        if not payment_id:
+            return {"ok": True, "ignored": "no payment id"}
+        payment_id = f"nexapay:{payment_id}"
+
+        package = str(_nexapay_find(event, "package", "package_type", "sku", "product_code",
+                                    "product_id", "plan", "product_name", "description") or "")
+        pkg = package.lower().strip().replace("-", "_").replace(" ", "_")
+        match = next((p for p in NEXAPAY_PACKAGES if p in pkg), None)
+        if match is None:
+            print(f"[nexapay] {payment_id}: no Keyhole package in '{package}', ignored")
+            return {"ok": True, "ignored": f"unknown package '{package}'"}
+
+        ref = _nexapay_find(event, "user_id", "client_reference_id", "custom_id", "reference", "reference_id")
+        user = None
+        if ref:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (str(ref),))
+                    user = cur.fetchone()
+            finally:
+                conn.close()
+        if user is None:
+            email = _nexapay_find(event, "email", "customer_email", "payer_email", "buyer_email")
+            if not email:
+                return {"ok": True, "ignored": "no user reference or email"}
+            try:
+                user = _user_for_email(str(email))
+            except HTTPException:
+                print(f"[nexapay] {payment_id}: no account for {email}, ignored")
+                return {"ok": True, "ignored": "no account"}
+
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO keyhole_payments (payment_id, provider, user_id, package) "
+                            "VALUES (%s,%s,%s,%s) ON CONFLICT (payment_id) DO NOTHING",
+                            (payment_id, self.provider_name, user["user_id"], match))
+                fresh = cur.rowcount == 1
+                conn.commit()
+        finally:
+            conn.close()
+        if not fresh:
+            return {"ok": True, "ignored": "already granted", "user_id": user["user_id"]}
+        try:
+            granted = grant_keyhole_package(user["user_id"], match)
+        except HTTPException as e:
+            # Package cap hit or bad state: keep the payment on record, report it, and
+            # answer 200 so NexaPay stops retrying.
+            print(f"[nexapay] {payment_id}: {match} for {user['user_id']} not granted: {e.detail}")
+            return {"ok": False, "user_id": user["user_id"], "package": match, "error": e.detail}
+        return {"ok": True, "user_id": user["user_id"], "package": match, "granted": granted}
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "nexapay", "status": "payment_link"}
+
+
 class PaymentGatewayManager:
     def __init__(self):
         self._providers: Dict[str, BasePaymentProvider] = {}
         self.register_provider(ShopifyPaymentProvider())
         self.register_provider(StripePaymentProvider())
+        self.register_provider(NexaPayPaymentProvider())
 
     def register_provider(self, provider: BasePaymentProvider):
         self._providers[provider.provider_name] = provider
@@ -7011,6 +7154,22 @@ def _stripe_tier_for_lines(lines) -> str:
         if tier and tier_rank(tier) > tier_rank(best):
             best = tier
     return best
+
+
+@app.post("/webhooks/nexapay")
+async def nexapay_webhook(request: Request):
+    """NexaPay webhook for the Keyhole Payment Links (see NexaPayPaymentProvider).
+    Refuses with 503 until NEXAPAY_WEBHOOK_SECRET is set."""
+    if not NEXAPAY_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="NEXAPAY_WEBHOOK_SECRET must be set")
+    if int(request.headers.get("Content-Length") or 0) > WEBHOOK_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > WEBHOOK_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Payload too large")
+    return payment_manager.get_provider("nexapay").process_webhook(raw, dict(request.headers))
 
 
 @app.post("/webhooks/stripe")

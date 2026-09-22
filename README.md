@@ -38,7 +38,7 @@ Single-file FastAPI app. The important systems:
 - **Player avatars** — users describe a character, get a graphic-novel-style avatar. Private to the account, profile-only, never a chat character. Monthly contest entries via `POST /avatar/contest`; winners are copied into the game through the admin console only.
 - **Tiers** — Visitor (free), Community Member, Resident, Neighbor. Subscriptions via Stripe Payment Links.
 
-Key environment variables (Railway): `DATABASE_URL`, `ADMIN_SECRET`, `GEMINI_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `SHOPIFY_WEBHOOK_SECRET`, `MAIL_FROM`, `SITE_PASSWORD`.
+Key environment variables (Railway): `DATABASE_URL`, `ADMIN_SECRET`, `GEMINI_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `SHOPIFY_WEBHOOK_SECRET`, `NEXAPAY_WEBHOOK_SECRET`, `MAIL_FROM`, `SITE_PASSWORD`.
 
 ## Frontend (web/)
 
