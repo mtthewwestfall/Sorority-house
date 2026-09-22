@@ -68,15 +68,19 @@ API CONTRACT implemented here (point your chat app at these):
                                                             (the prices NOWPayments invoices charge)
   GET  /keyhole/me                      (bearer)        -> {"user_id","email","webcam_minutes_left",
                                                             "text_balance","video_replies_left",
-                                                            "fresh_videos_left","session_active"}
+                                                            "fresh_videos_left","session_active",
+                                                            "free_preview_available","intro_available"}
+  POST /keyhole/preview/claim           (bearer)        -> grants the one-time free preview
+                                                            (free_preview_minutes); 400 once used
   POST /keyhole/nowpayments/invoice {"package"} (bearer) -> {"invoice_id","invoice_url"}: a
                                                             NOWPayments invoice for that package,
                                                             order_id '<user_id>:<package>' so the
                                                             IPN grants it to this account
   POST /webhooks/nexapay                                 -> NexaPay webhook: a paid Payment Link
                                                             grants the Keyhole package named in its
-                                                            metadata/SKU (quick, standard, extended,
-                                                            premium, text_only) to metadata.user_id,
+                                                            metadata/SKU (intro, quick, standard,
+                                                            extended, long, premium, marathon,
+                                                            text_only) to metadata.user_id,
                                                             else the account with the payer's email
   POST /webhooks/nowpayments                             -> NOWPayments IPN: payment_status
                                                             'finished' grants the Keyhole package
@@ -354,7 +358,7 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 # package named in the payment's metadata/SKU to the buyer (user_id in metadata, else email).
 NEXAPAY_WEBHOOK_SECRET = os.environ.get("NEXAPAY_WEBHOOK_SECRET", "")
 NEXAPAY_SIGNATURE_HEADER = os.environ.get("NEXAPAY_SIGNATURE_HEADER", "X-Nexapay-Signature")
-NEXAPAY_PACKAGES = ("quick", "standard", "extended", "premium", "text_only")
+NEXAPAY_PACKAGES = ("intro", "quick", "standard", "extended", "long", "premium", "marathon", "text_only")
 # NOWPayments (crypto) IPN callbacks land on /webhooks/nowpayments for the same packages.
 NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
@@ -383,21 +387,36 @@ AUDIT_PRICE_USD = 0.99
 # Keyhole pricing & access rules defaults
 KEYHOLE_DEFAULT_CONFIG = {
     "free_preview_minutes": 10,
-    "quick_price": 2.99,
+    "free_preview_text_included": 20,
+    "intro_price": 5.99,          # 10-minute starter, one per account for life
+    "intro_webcam_minutes": 10,
+    "intro_video_replies": 20,
+    "intro_text_included": 100,
+    "intro_lifetime_cap": 1,
+    "quick_price": 7.99,
     "quick_webcam_minutes": 15,
     "quick_video_replies": 35,
     "quick_text_included": 100,
     "quick_monthly_cap": 3,
-    "standard_price": 5.99,
+    "standard_price": 11.99,
     "standard_webcam_minutes": 30,
     "standard_video_replies": 70,
     "standard_text_included": 200,
-    "extended_price": 9.99,
+    "extended_price": 14.99,
     "extended_webcam_minutes": 45,
     "extended_video_replies": 100,
     "extended_text_included": 300,
-    "premium_price": 14.99,
+    "long_price": 17.99,
+    "long_webcam_minutes": 55,
+    "long_video_replies": 100,
+    "long_text_included": 300,
+    "premium_price": 19.99,
     "premium_webcam_minutes": 60,
+    "premium_text_included": 300,
+    "marathon_price": 23.99,
+    "marathon_webcam_minutes": 75,
+    "marathon_video_replies": 120,
+    "marathon_text_included": 400,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
     "text_only_price": 1.99,
@@ -1126,6 +1145,8 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_balance INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_sessions_bought_this_month INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_only_bought_this_month INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS intro_bought INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS free_preview_claimed_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_started_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_duration_s INTEGER NOT NULL DEFAULT 0;
                 -- Telegram users: the Telegram id is the login; /auth/telegram/link can
@@ -6508,7 +6529,11 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
             quick_cap = int(cfg.get("quick_monthly_cap", 3))
             text_cap = int(cfg.get("text_only_monthly_cap", 1))
 
-            if pkg == "quick":
+            if pkg == "intro":
+                intro_cap = int(cfg.get("intro_lifetime_cap", 1))
+                if int(user.get("intro_bought", 0)) >= intro_cap:
+                    raise HTTPException(status_code=400, detail="The 10-minute starter can only be bought once per account.")
+            elif pkg == "quick":
                 if int(user.get("quick_sessions_bought_this_month", 0)) >= quick_cap:
                     raise HTTPException(status_code=400, detail=f"Monthly limit of {quick_cap} Quick Sessions reached.")
             elif pkg == "text_only":
@@ -6521,7 +6546,12 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
             add_video_replies = 0
             add_fresh_videos = 0
 
-            if pkg == "quick":
+            if pkg == "intro":
+                add_webcam = int(cfg.get("intro_webcam_minutes", 10))
+                add_video_replies = int(cfg.get("intro_video_replies", 20))
+                add_text = int(cfg.get("intro_text_included", 100))
+                cur.execute("UPDATE users SET intro_bought = intro_bought + 1 WHERE user_id=%s", (user_id,))
+            elif pkg == "quick":
                 add_webcam = int(cfg.get("quick_webcam_minutes", 15))
                 add_video_replies = int(cfg.get("quick_video_replies", 35))
                 add_text = int(cfg.get("quick_text_included", 100))
@@ -6534,8 +6564,17 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
                 add_webcam = int(cfg.get("extended_webcam_minutes", 45))
                 add_video_replies = int(cfg.get("extended_video_replies", 100))
                 add_text = int(cfg.get("extended_text_included", 300))
+            elif pkg == "long":
+                add_webcam = int(cfg.get("long_webcam_minutes", 55))
+                add_video_replies = int(cfg.get("long_video_replies", 100))
+                add_text = int(cfg.get("long_text_included", 300))
+            elif pkg == "marathon":
+                add_webcam = int(cfg.get("marathon_webcam_minutes", 75))
+                add_video_replies = int(cfg.get("marathon_video_replies", 120))
+                add_text = int(cfg.get("marathon_text_included", 400))
             elif pkg == "premium":
                 add_webcam = int(cfg.get("premium_webcam_minutes", 60))
+                add_text = int(cfg.get("premium_text_included", 300))
                 add_fresh_videos = int(cfg.get("premium_fresh_videos", 3))
                 # Add picture credits
                 pics = int(cfg.get("premium_premade_pictures", 5))
@@ -6606,6 +6645,18 @@ def _account_email(user_id: str) -> Optional[str]:
         conn.close()
 
 
+def _keyhole_package_for_amount(amount_total, currency) -> str:
+    """The single Keyhole package whose configured USD price equals a Stripe amount
+    (minor units), or '' when none or more than one matches."""
+    if amount_total is None or (currency or "usd").lower() != "usd":
+        return ""
+    cfg = get_keyhole_config()
+    hits = [p for p in NEXAPAY_PACKAGES
+            if round(float(cfg.get(f"{p}_price", 0) or 0) * 100) == int(amount_total)
+            and float(cfg.get(f"{p}_price", 0) or 0) > 0]
+    return hits[0] if len(hits) == 1 else ""
+
+
 def _keyhole_packages(cfg) -> List[Dict[str, Any]]:
     out = []
     for p in NEXAPAY_PACKAGES:
@@ -6632,11 +6683,12 @@ def keyhole_me(user=Depends(current_user)):
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT webcam_minutes_left, text_balance, video_replies_left, fresh_videos_left "
-                        "FROM users WHERE user_id=%s", (uid,))
+            cur.execute("SELECT webcam_minutes_left, text_balance, video_replies_left, fresh_videos_left, "
+                        "intro_bought, free_preview_claimed_at FROM users WHERE user_id=%s", (uid,))
             row = cur.fetchone() or {}
     finally:
         conn.close()
+    cfg = get_keyhole_config()
     return {
         "user_id": uid,
         "email": _account_email(uid),
@@ -6646,7 +6698,39 @@ def keyhole_me(user=Depends(current_user)):
         "fresh_videos_left": int(row.get("fresh_videos_left") or 0),
         "session_active": bool(session.get("active")),
         "session_minutes_left": int(session.get("minutes_left") or 0),
+        "free_preview_available": row.get("free_preview_claimed_at") is None,
+        "intro_available": int(row.get("intro_bought") or 0) < int(cfg.get("intro_lifetime_cap", 1)),
     }
+
+
+@app.post("/keyhole/preview/claim")
+def keyhole_preview_claim(user=Depends(current_user)):
+    """Grant the one-time free preview (free_preview_minutes) to the signed-in account.
+    Exactly once per account, for life; a second claim is a 400."""
+    uid = user["user_id"]
+    cfg = get_keyhole_config()
+    minutes = int(cfg.get("free_preview_minutes", 10))
+    text = int(cfg.get("free_preview_text_included", 20))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET free_preview_claimed_at = now(),
+                    webcam_minutes_left = webcam_minutes_left + %s,
+                    text_balance = text_balance + %s
+                WHERE user_id=%s AND free_preview_claimed_at IS NULL
+                RETURNING webcam_minutes_left, text_balance
+            """, (minutes, text, uid))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=400, detail="Your free preview has already been used.")
+    return {"ok": True, "minutes_granted": minutes,
+            "webcam_minutes_left": int(row["webcam_minutes_left"]),
+            "text_balance": int(row["text_balance"])}
 
 
 class KeyholeInvoiceIn(BaseModel):
@@ -6654,19 +6738,22 @@ class KeyholeInvoiceIn(BaseModel):
 
 
 def _check_keyhole_package_cap(user_id: str, pkg: str, cfg) -> None:
-    """Refuse to sell a capped package (quick / text_only) the account can no longer
-    receive this month, so a customer is not invoiced for a grant that would fail."""
-    if pkg not in ("quick", "text_only"):
+    """Refuse to sell a capped package (intro / quick / text_only) the account can no
+    longer receive, so a customer is not invoiced for a grant that would fail."""
+    if pkg not in ("intro", "quick", "text_only"):
         return
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT quick_sessions_bought_this_month, text_only_bought_this_month "
+            cur.execute("SELECT quick_sessions_bought_this_month, text_only_bought_this_month, intro_bought "
                         "FROM users WHERE user_id=%s", (user_id,))
             row = cur.fetchone() or {}
     finally:
         conn.close()
-    if pkg == "quick":
+    if pkg == "intro":
+        if int(row.get("intro_bought") or 0) >= int(cfg.get("intro_lifetime_cap", 1)):
+            raise HTTPException(status_code=400, detail="The 10-minute starter can only be bought once per account.")
+    elif pkg == "quick":
         cap = int(cfg.get("quick_monthly_cap", 3))
         if int(row.get("quick_sessions_bought_this_month") or 0) >= cap:
             raise HTTPException(status_code=400, detail=f"Monthly limit of {cap} Quick Sessions reached.")
@@ -7515,6 +7602,9 @@ async def stripe_webhook(request: Request):
             return {"ok": True, "ignored": "not paid yet"}
         meta = obj.get("metadata") or {}
         package = meta.get("package") or meta.get("sku") or ""
+        if not package:
+            # Payment Links without metadata: match the charged amount to a package price
+            package = _keyhole_package_for_amount(obj.get("amount_total"), obj.get("currency"))
         if not package:
             return {"ok": True, "ignored": "no package metadata"}
         ref = (obj.get("client_reference_id") or meta.get("user_id") or "").strip()
