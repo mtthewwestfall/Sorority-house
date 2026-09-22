@@ -284,5 +284,144 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
         self.assertIn("preview_message_credits = preview_message_credits - 1", first_update)
 
 
+    @patch("main._blast_public_show")
+    @patch("main.db")
+    def test_04_public_show_schedule_blasts_once(self, mock_db, mock_blast):
+        """A new public show emails and DMs once, after the dedupe rows insert."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        show_row = {
+            "show_id": "pub_blast", "show_type": "public", "character_id": "bailey",
+            "character": "Bailey", "title": "Bailey Lounge", "status": "SCHEDULED",
+            "price": 4.99, "scheduled_at": "Tonight — 9:00 PM", "description": "",
+        }
+        mock_cur.fetchone.side_effect = [
+            {"id": 1},
+            {"id": 2},
+            show_row,
+        ]
+        mock_cur.fetchall.return_value = []
+
+        show = main.keyhole_create_public_show(character_id="bailey", price=4.99, title="Bailey Lounge")
+        self.assertEqual(show["show_id"], "pub_blast")
+        mock_blast.assert_called_once()
+        self.assertTrue(mock_blast.call_args.kwargs.get("email"))
+        self.assertTrue(mock_blast.call_args.kwargs.get("telegram"))
+
+    @patch("main._blast_public_show")
+    @patch("main.db")
+    def test_05_announce_dedupes_before_blast(self, mock_db, mock_blast):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = None
+        prev = main.DATABASE_URL
+        main.DATABASE_URL = "postgres://test"
+        try:
+            main._announce_scheduled_public_show({
+                "show_id": "pub_1", "character": "Chloe", "scheduled_at": "Tonight — 8:00 PM",
+            })
+        finally:
+            main.DATABASE_URL = prev
+        mock_blast.assert_not_called()
+
+        mock_cur.fetchone.side_effect = [{"id": 11}, {"id": 12}]
+        main.DATABASE_URL = "postgres://test"
+        try:
+            main._announce_scheduled_public_show({
+                "show_id": "pub_2", "character": "Bailey", "scheduled_at": "Tonight — 9:00 PM",
+                "price": "$4.99",
+            })
+        finally:
+            main.DATABASE_URL = prev
+        mock_blast.assert_called_once()
+
+    @patch("main.time.sleep")
+    @patch("main.requests.post")
+    @patch("main.db")
+    def test_06_blast_reaches_email_and_telegram(self, mock_db, mock_post, _sleep):
+        email_conn = MagicMock()
+        email_cur = MagicMock()
+        email_cur.fetchall.return_value = [
+            {"email": "fan@example.com"},
+            {"email": "tg:12345"},
+            {"email": "fan@example.com"},
+        ]
+        email_conn.cursor.return_value.__enter__.return_value = email_cur
+        tg_conn = MagicMock()
+        tg_cur = MagicMock()
+        tg_cur.fetchall.return_value = [{"telegram_id": 42}, {"telegram_id": 43}]
+        tg_conn.cursor.return_value.__enter__.return_value = tg_cur
+        mock_db.side_effect = [email_conn, tg_conn]
+
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.text = "ok"
+        mock_post.return_value = ok
+        prev_key = main.RESEND_API_KEY
+        prev_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        main.RESEND_API_KEY = "re_test"
+        os.environ["TELEGRAM_BOT_TOKEN"] = "123:test-token"
+        try:
+            main._blast_public_show({
+                "character": "Bailey",
+                "scheduled_at": "Tonight — 9:00 PM",
+                "title": "Bailey Public Lounge",
+                "price": 4.99,
+            }, email=True, telegram=True)
+        finally:
+            main.RESEND_API_KEY = prev_key
+            if prev_token is None:
+                os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            else:
+                os.environ["TELEGRAM_BOT_TOKEN"] = prev_token
+
+        urls = [call.args[0] for call in mock_post.call_args_list]
+        self.assertTrue(any(url.endswith("/emails/batch") for url in urls))
+        self.assertEqual(sum(1 for url in urls if "/sendMessage" in url), 2)
+        batch = next(call for call in mock_post.call_args_list if call.args[0].endswith("/emails/batch"))
+        payload = batch.kwargs["json"]
+        self.assertEqual([item["to"] for item in payload], [["fan@example.com"]])
+        body = payload[0]["text"]
+        self.assertIn("Bailey", body)
+        self.assertIn("Tonight — 9:00 PM", body)
+        self.assertIn("$4.99", body)
+        self.assertIn(main._public_pay_link(), body)
+        self.assertIn("https://keyhole.cam/rooms.html", body)
+
+    @patch("main.time.sleep")
+    @patch("main.requests.post")
+    @patch("main.db")
+    def test_07_blast_survives_one_bad_recipient(self, mock_db, mock_post, _sleep):
+        tg_conn = MagicMock()
+        tg_cur = MagicMock()
+        tg_cur.fetchall.return_value = [{"telegram_id": 1}, {"telegram_id": 2}]
+        tg_conn.cursor.return_value.__enter__.return_value = tg_cur
+        mock_db.return_value = tg_conn
+
+        def post(url, **kwargs):
+            if kwargs.get("json", {}).get("chat_id") == 2:
+                raise main.requests.exceptions.Timeout("slow")
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.text = "ok"
+            return resp
+
+        mock_post.side_effect = post
+        prev_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        os.environ["TELEGRAM_BOT_TOKEN"] = "999:token"
+        try:
+            main._blast_public_show({"character": "Chloe", "scheduled_at": "Tonight"}, email=False, telegram=True)
+        finally:
+            if prev_token is None:
+                os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            else:
+                os.environ["TELEGRAM_BOT_TOKEN"] = prev_token
+        self.assertEqual(mock_post.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

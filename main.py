@@ -242,6 +242,12 @@ Env vars (Railway -> Variables):
                     shared secret between this backend and telegram/bot.py; /auth/telegram*
                     refuse with 503 until it is set. Any long random string, same value
                     on both services.
+  TELEGRAM_BOT_TOKEN
+                    BotFather token (same value as the Telegram bot). When an admin
+                    schedules a public show, this backend DMs every telegram_accounts
+                    row. Unset skips the DMs; scheduling still succeeds.
+  PAY_LINK_PUBLIC   Stripe Payment Link for the $4.99 public lounge, included in
+                    that announcement (default the live lounge link).
   STRIPE_PRICE_COMMUNITY / STRIPE_PRICE_RESIDENT / STRIPE_PRICE_NEIGHBOR
                     price ids behind the three Payment Links (defaults are the live ones).
   SITE_PASSWORD / GAME_PASSWORD
@@ -427,6 +433,8 @@ STRIPE_PRICE_TIERS = {
 STRIPE_SIG_TOLERANCE_S = 300
 AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
 TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
+# $4.99 public lounge. Same default the Telegram bot uses for PAY_LINK_PUBLIC.
+PAY_LINK_PUBLIC = os.environ.get("PAY_LINK_PUBLIC", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -1477,6 +1485,18 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_keyhole_entitlements_user ON keyhole_entitlements (user_id);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_keyhole_entitlements_payid ON keyhole_entitlements (payment_id) WHERE payment_id <> '';
+
+                -- One row per show + channel so a public-show announcement cannot double-send.
+                CREATE TABLE IF NOT EXISTS keyhole_notifications (
+                    id                BIGSERIAL PRIMARY KEY,
+                    show_id           TEXT NOT NULL,
+                    notification_type TEXT NOT NULL,
+                    target            TEXT NOT NULL,
+                    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (show_id, notification_type, target)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_keyhole_notifications_dedupe
+                    ON keyhole_notifications (show_id, notification_type, target);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -7477,6 +7497,9 @@ def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = 
     else:
         parsed_scheduled = datetime.now(timezone.utc) + timedelta(hours=1)
 
+    sent_tg = False
+    sent_web = False
+    show = None
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -7487,14 +7510,19 @@ def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = 
                 RETURNING *
             """, (show_id, char_slug, show_title, show_desc, show_price, parsed_scheduled))
 
-            # Auto-announce public show before commit so notifications persist
-            _send_keyhole_notification(cur, show_id, "announcement", "telegram")
-            _send_keyhole_notification(cur, show_id, "announcement", "website")
-
+            # Record the announcement before commit so a retry cannot double-send.
+            sent_tg = _send_keyhole_notification(cur, show_id, "announcement", "telegram")
+            sent_web = _send_keyhole_notification(cur, show_id, "announcement", "website")
+            show = _fetch_show_dict(cur, show_id)
             conn.commit()
-            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
+    if sent_tg or sent_web:
+        try:
+            _blast_public_show(show, email=bool(sent_web), telegram=bool(sent_tg))
+        except Exception as exc:
+            print(f"[KEYHOLE NOTIFICATION] blast failed for {show_id}: {type(exc).__name__}", flush=True)
+    return show
 
 
 def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional[str] = None) -> Dict[str, Any]:
@@ -7655,7 +7683,11 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
 
 
 def _send_keyhole_notification(cur, show_id: str, notification_type: str, target: str) -> bool:
-    """Deduplicated dispatcher for show announcements, reminders, and previews using existing cursor."""
+    """Deduplicated dispatcher for show announcements, reminders, and previews using existing cursor.
+
+    Returns True only the first time this show/type/target is recorded. Callers that
+    schedule a public show fan out email and Telegram after that insert commits.
+    """
     cur.execute("""
         INSERT INTO keyhole_notifications (show_id, notification_type, target)
         VALUES (%s, %s, %s)
@@ -7669,6 +7701,219 @@ def _send_keyhole_notification(cur, show_id: str, notification_type: str, target
     # Dispatch logging
     print(f"[KEYHOLE NOTIFICATION] Dispatched {notification_type} for show {show_id} to {target}", flush=True)
     return True
+
+
+def _public_pay_link() -> str:
+    return (os.environ.get("PAY_LINK_PUBLIC") or PAY_LINK_PUBLIC or "").strip()
+
+
+def _format_show_price(value: Any) -> str:
+    if value is None or value == "":
+        return "$4.99"
+    if isinstance(value, (int, float)):
+        return f"${float(value):.2f}"
+    text = str(value).strip()
+    if not text:
+        return "$4.99"
+    if text.startswith("$"):
+        return text
+    try:
+        return f"${float(text):.2f}"
+    except ValueError:
+        return text
+
+
+def _public_show_blast_text(show: Dict[str, Any]) -> str:
+    """Character, time, public price, the $4.99 checkout, and the site when we have one."""
+    raw_name = show.get("character") or show.get("character_id") or "Keyhole"
+    name = str(raw_name).strip() or "Keyhole"
+    if name.islower():
+        name = name.capitalize()
+    when = show.get("scheduled_at") or "soon"
+    if isinstance(when, datetime):
+        when = when.strftime("%Y-%m-%d %H:%M UTC")
+    else:
+        when = str(when).strip() or "soon"
+    lines = [f"{name} has a public show on the schedule.", f"When: {when}"]
+    detail = str(show.get("title") or show.get("details") or show.get("description") or "").strip()
+    if detail and detail.lower() != name.lower():
+        lines.append(detail)
+    lines.append(f"Price: {_format_show_price(show.get('price'))}")
+    lines.append("Public lounge: $4.99")
+    link = _public_pay_link()
+    if link:
+        lines.append(f"Public pass ($4.99): {link}")
+    site = (KEYHOLE_SITE_URL or SITE_URL or "").strip()
+    if site:
+        lines.append(site)
+    return "\n".join(lines)
+
+
+def _resend_batch(emails: List[str], subject: str, text: str) -> bool:
+    payload = [{"from": MAIL_FROM, "to": [addr], "subject": subject, "text": text} for addr in emails]
+    try:
+        r = requests.post(
+            "https://api.resend.com/emails/batch",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=20,
+        )
+    except Exception:
+        print("[KEYHOLE NOTIFICATION] resend batch failed: request error", flush=True)
+        return False
+    if r.status_code >= 300:
+        print(f"[KEYHOLE NOTIFICATION] resend batch {r.status_code}", flush=True)
+        return False
+    return True
+
+
+def _resend_one(addr: str, subject: str, text: str) -> None:
+    try:
+        r = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={"from": MAIL_FROM, "to": [addr], "subject": subject, "text": text},
+            timeout=15,
+        )
+    except Exception:
+        print("[KEYHOLE NOTIFICATION] resend one failed: request error", flush=True)
+        return
+    if r.status_code >= 300:
+        print(f"[KEYHOLE NOTIFICATION] resend one {r.status_code}", flush=True)
+
+
+def _email_public_show(text: str) -> None:
+    """Best-effort email to every account that has a real address. Never raises."""
+    if not RESEND_API_KEY:
+        print("[KEYHOLE NOTIFICATION] RESEND_API_KEY unset; skipped email blast", flush=True)
+        return
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT email FROM accounts
+                WHERE email IS NOT NULL
+                  AND btrim(email) <> ''
+                  AND position('@' in email) > 1
+                  AND email NOT ILIKE 'tg:%'
+            """)
+            emails = []
+            seen = set()
+            for row in cur.fetchall():
+                addr = (row.get("email") or "").strip()
+                key = addr.lower()
+                if not addr or key in seen or key.startswith("tg:") or "@" not in addr:
+                    continue
+                seen.add(key)
+                emails.append(addr)
+    finally:
+        conn.close()
+    if not emails:
+        return
+    subject = "A public show is scheduled"
+    for i in range(0, len(emails), 50):
+        chunk = emails[i:i + 50]
+        if not _resend_batch(chunk, subject, text):
+            for addr in chunk:
+                _resend_one(addr, subject, text)
+                time.sleep(0.05)
+        if i + 50 < len(emails):
+            time.sleep(0.25)
+
+
+def _telegram_send(token: str, chat_id, text: str) -> None:
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+    except Exception:
+        print(f"[KEYHOLE NOTIFICATION] telegram {chat_id} failed: request error", flush=True)
+        return
+    if r.status_code == 429:
+        wait = 1.0
+        try:
+            wait = float((r.json().get("parameters") or {}).get("retry_after") or 1)
+        except Exception:
+            wait = 1.0
+        time.sleep(min(max(wait, 0.0), 5.0))
+        try:
+            r = requests.post(url, json=payload, timeout=15)
+        except Exception:
+            print(f"[KEYHOLE NOTIFICATION] telegram {chat_id} failed: request error", flush=True)
+            return
+    if r.status_code >= 300:
+        print(f"[KEYHOLE NOTIFICATION] telegram {chat_id} {r.status_code}", flush=True)
+
+
+def _telegram_public_show(text: str) -> None:
+    """Best-effort DM to every linked Telegram account. Never raises."""
+    token = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not token:
+        print("[KEYHOLE NOTIFICATION] TELEGRAM_BOT_TOKEN unset; skipped Telegram blast", flush=True)
+        return
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT telegram_id FROM telegram_accounts WHERE telegram_id IS NOT NULL")
+            ids = []
+            seen = set()
+            for row in cur.fetchall():
+                chat_id = row.get("telegram_id")
+                if chat_id is None or chat_id in seen:
+                    continue
+                seen.add(chat_id)
+                ids.append(chat_id)
+    finally:
+        conn.close()
+    for i, chat_id in enumerate(ids):
+        _telegram_send(token, chat_id, text)
+        if i + 1 < len(ids):
+            time.sleep(0.05)
+
+
+def _blast_public_show(show: Dict[str, Any], email: bool = True, telegram: bool = True) -> None:
+    """Email accounts and DM linked Telegrams. One failure does not stop the rest."""
+    try:
+        text = _public_show_blast_text(show)
+    except Exception as exc:
+        print(f"[KEYHOLE NOTIFICATION] could not build announcement: {type(exc).__name__}", flush=True)
+        return
+    if email:
+        try:
+            _email_public_show(text)
+        except Exception as exc:
+            print(f"[KEYHOLE NOTIFICATION] email blast failed: {type(exc).__name__}", flush=True)
+    if telegram:
+        try:
+            _telegram_public_show(text)
+        except Exception as exc:
+            print(f"[KEYHOLE NOTIFICATION] telegram blast failed: {type(exc).__name__}", flush=True)
+
+
+def _announce_scheduled_public_show(show: Dict[str, Any]) -> None:
+    """Website-admin schedule path: dedupe, then email + Telegram. Never raises."""
+    if not DATABASE_URL:
+        return
+    show_id = str(show.get("show_id") or show.get("id") or "").strip()
+    if not show_id:
+        return
+    sent_tg = False
+    sent_web = False
+    conn = None
+    try:
+        conn = db()
+        with conn.cursor() as cur:
+            sent_tg = _send_keyhole_notification(cur, show_id, "announcement", "telegram")
+            sent_web = _send_keyhole_notification(cur, show_id, "announcement", "website")
+        conn.commit()
+    except Exception as exc:
+        print(f"[KEYHOLE NOTIFICATION] could not record announcement for {show_id}: {type(exc).__name__}", flush=True)
+        return
+    finally:
+        if conn is not None:
+            conn.close()
+    if sent_tg or sent_web:
+        _blast_public_show(show, email=bool(sent_web), telegram=bool(sent_tg))
 
 
 def keyhole_moderate_preview(show_id: str, action: str, sanitized_preview_url: Optional[str] = None) -> Dict[str, Any]:
@@ -9277,6 +9522,10 @@ def admin_create_public_show(body: CreatePublicShowIn):
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     _save_show_db(show)
+    try:
+        _announce_scheduled_public_show(show)
+    except Exception as exc:
+        print(f"[KEYHOLE NOTIFICATION] schedule announce failed: {type(exc).__name__}", flush=True)
     return {"ok": True, "show": show}
 
 

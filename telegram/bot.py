@@ -32,6 +32,13 @@ TELEGRAM_BOT_TOKEN   from @BotFather. Never put the value in any file.
 PUBLIC_URL           the KEYHOLE backend base URL, e.g. Railway app URL.
                      Required (no default).
 TELEGRAM_BOT_SECRET  shared secret with the backend; unlocks /auth/telegram.
+PAY_LINK_15 / 30 / 55 / 60 / 75 / PUBLIC
+                     Stripe Payment Links. Defaults are the buy.stripe.com
+                     URLs on Keyhole rooms.html (and the $4.99 public lounge).
+PAY_LINK_45          45 minutes has no Stripe link on the site. Defaults to
+                     SITE_URL/rooms.html. Set this when a link exists.
+SITE_URL             website origin used for that 45-minute fallback
+                     (default https://lockeddoor.ai).
 """
 
 import asyncio
@@ -73,11 +80,30 @@ SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 # Restrict available models strictly to Chloe and Bailey
 ALLOWED_MODELS = {"chloe", "bailey"}
 
-# Stripe Payment Links for WebCam show packages & tiers
-PLAN_LINKS = [
-    ("Keyhole Private Pass · $19.99", os.environ.get("PAY_LINK_PRIVATE", "https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02")),
-    ("Keyhole Lounge Pass · $4.99", os.environ.get("PAY_LINK_PUBLIC", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")),
-]
+# Same session packages and Stripe Payment Links as Keyhole rooms.html.
+# 15 minutes is a real session (not the free preview) and does not include texts.
+_ROOMS_STRIPE = {
+    "15": "https://buy.stripe.com/00w14gav1bFddlR6jLdjO09",
+    "30": "https://buy.stripe.com/bJeeV67iPdNl2Hd8rTdjO08",
+    "55": "https://buy.stripe.com/4gM9AM46DbFda9F23vdjO03",
+    "60": "https://buy.stripe.com/9B600c0UrcJh4Pl0ZrdjO07",
+    "75": "https://buy.stripe.com/5kQ5kw0UrfVtepVaA1djO04",
+}
+_PUBLIC_LOUNGE_LINK = "https://buy.stripe.com/6oUfZh1jradL0he4098AE00"
+
+
+def plan_links():
+    """Website checkout links. Env vars override a single package without forking products."""
+    rooms = SITE_URL + "/rooms.html"
+    return [
+        ("15 min · $7.99", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
+        ("30 min · $11.99 · 100 texts", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
+        ("45 min · $14.99 · 100 texts", os.environ.get("PAY_LINK_45", rooms)),
+        ("55 min · $17.99 · 100 texts", os.environ.get("PAY_LINK_55", _ROOMS_STRIPE["55"])),
+        ("60 min · $19.99 · 100 texts", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
+        ("75 min · $23.99 · 100 texts", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
+        ("Public Lounge · $4.99", os.environ.get("PAY_LINK_PUBLIC", _PUBLIC_LOUNGE_LINK)),
+    ]
 
 # ---------------------------------------------------------------------------
 # Session store
@@ -832,7 +858,7 @@ def _pay_url(url: str, rec) -> str:
 
 def _plans_markup(rec=None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 " + label, url=_pay_url(url, rec))] for label, url in PLAN_LINKS])
+        [[InlineKeyboardButton("💳 " + label, url=_pay_url(url, rec))] for label, url in plan_links()])
 
 
 def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
@@ -849,7 +875,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     rec = await _ensure_session(update)
     await update.effective_message.reply_text(
         "KEYHOLE Live WebCam Show Menu:\n\n"
-        "Unlock 1-on-1 private webcam shows and lounge access instantly.",
+        "Same sessions as the website. 15 minutes is a real session, not the free preview.",
         reply_markup=_menu_markup(rec is not None))
 
 
@@ -858,7 +884,9 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if rec is None:
         return
     await update.effective_message.reply_text(
-        "Select a WebCam show package:",
+        "Website sessions — same checkout as the site.\n"
+        "15 minutes is a real session (not the free preview) and does not include texts.\n"
+        "30–75 minutes include 100 texts. Public lounge is $4.99.",
         reply_markup=_plans_markup(rec))
 
 

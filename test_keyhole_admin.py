@@ -1,5 +1,6 @@
 import unittest
 import os
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 import main
 
@@ -171,6 +172,25 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertEqual(scheduled.status_code, 200)
         self.assertEqual(scheduled.json()["show"]["status"], "SCHEDULED")
         self.assertNotEqual(scheduled.json()["show"]["status"], "LIVE")
+
+    @patch("main._announce_scheduled_public_show")
+    def test_public_show_schedule_announces(self, mock_announce):
+        create_resp = self.client.post(
+            "/admin/keyhole/shows/create-public",
+            json={
+                "character": "Bailey",
+                "scheduled_at": "Tonight — 9:00 PM",
+                "price": "$4.99",
+                "details": "Special Live Show"
+            },
+            headers=self.headers
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        mock_announce.assert_called_once()
+        show = mock_announce.call_args.args[0]
+        self.assertEqual(show["character"], "Bailey")
+        self.assertEqual(show["show_type"], "public")
+        self.assertEqual(show["status"], "SCHEDULED")
 
 
 if __name__ == "__main__":
