@@ -1379,6 +1379,16 @@ def init_db():
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS updated_at            TIMESTAMPTZ NOT NULL DEFAULT now();
                 -- Older deployments keyed keyhole_shows on id (TEXT PK) with TEXT price/scheduled_at.
                 -- Move the key to show_id and coerce the column types so the routes above work.
+                CREATE OR REPLACE FUNCTION pg_temp.keyhole_price(t TEXT) RETURNS NUMERIC LANGUAGE plpgsql AS $f$
+                BEGIN
+                    RETURN LEAST(regexp_replace(t, '[^0-9.]', '', 'g')::numeric, 99999999);
+                EXCEPTION WHEN OTHERS THEN RETURN 0;
+                END $f$;
+                CREATE OR REPLACE FUNCTION pg_temp.keyhole_ts(t TEXT) RETURNS TIMESTAMPTZ LANGUAGE plpgsql AS $f$
+                BEGIN
+                    RETURN t::timestamptz;
+                EXCEPTION WHEN OTHERS THEN RETURN NULL;
+                END $f$;
                 DO $$
                 BEGIN
                     UPDATE keyhole_shows SET show_id = id WHERE show_id IS NULL AND id IS NOT NULL;
@@ -1389,7 +1399,7 @@ def init_db():
                                  AND column_name = 'price' AND data_type = 'text') THEN
                         ALTER TABLE keyhole_shows ALTER COLUMN price DROP DEFAULT;
                         ALTER TABLE keyhole_shows ALTER COLUMN price TYPE NUMERIC(10, 2)
-                            USING COALESCE(NULLIF(regexp_replace(price, '[^0-9.]', '', 'g'), '')::numeric, 0);
+                            USING pg_temp.keyhole_price(price);
                         ALTER TABLE keyhole_shows ALTER COLUMN price SET DEFAULT 0.00;
                         ALTER TABLE keyhole_shows ALTER COLUMN price SET NOT NULL;
                     END IF;
@@ -1398,7 +1408,7 @@ def init_db():
                                  AND column_name = 'scheduled_at' AND data_type = 'text') THEN
                         ALTER TABLE keyhole_shows ALTER COLUMN scheduled_at DROP DEFAULT;
                         ALTER TABLE keyhole_shows ALTER COLUMN scheduled_at TYPE TIMESTAMPTZ
-                            USING CASE WHEN scheduled_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN scheduled_at::timestamptz ELSE NULL END;
+                            USING pg_temp.keyhole_ts(scheduled_at);
                     END IF;
                     IF NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_attribute a
                                      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
@@ -8858,6 +8868,25 @@ def _get_all_shows_db() -> List[Dict[str, Any]]:
         conn.close()
 
 
+def _coerce_show_price(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = re.search(r"\d+(?:\.\d+)?", str(value or ""))
+    return round(float(m.group(0)), 2) if m else 0.0
+
+
+def _coerce_show_time(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    s = str(value or "").strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _save_show_db(show: Dict[str, Any]) -> None:
     sid = show.get("show_id") or show.get("id")
     show["id"] = sid
@@ -8902,8 +8931,8 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                 show.get("character", "Chloe"),
                 show.get("character_id", (show.get("character") or "Chloe").lower()),
                 show["status"],
-                str(show.get("scheduled_at", "")),
-                str(show.get("price", "")),
+                _coerce_show_time(show.get("scheduled_at")),
+                _coerce_show_price(show.get("price")),
                 show.get("details", ""),
                 show.get("description", show.get("details", "")),
                 show.get("viewer_count", 0),
