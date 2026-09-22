@@ -58,6 +58,7 @@ API CONTRACT implemented here (point your chat app at these):
   GET  /state                           (bearer)        -> {"tier","remaining","audit_count",
                                                             "free_audits_left","audit_credits",
                                                             "girls":{girl:{open,milestone}}}
+  POST /character/engine/evaluate       {"character","message",...} -> {"ok":true,"result":{...}}
   POST /audit       {"girl"}            (bearer)        -> {"audit","audit_count",
                                                             "free_left","paid_left"}
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
@@ -215,6 +216,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
+
+from character_engine import CharacterEngine
 
 # ---------------------------------------------------------------------------
 # CONFIG — edit here if you change plans/girls (no redeploy needed for persona text)
@@ -6710,6 +6713,36 @@ def keyhole_session_start(user=Depends(current_user)):
             return {"ok": True, "started_at": str(row["webcam_session_started_at"]), "minutes_left": row["webcam_minutes_left"]}
     finally:
         conn.close()
+
+
+class CharacterEngineEvaluateIn(BaseModel):
+    character: str = "chloe"
+    message: str
+    last_ask_time: Optional[float] = None
+    last_ask_message: Optional[str] = None
+    last_turn_action: Optional[str] = None
+    backed_off: bool = False
+    clip_length: Optional[float] = None
+    seed: Optional[int] = None
+
+
+@app.post("/character/engine/evaluate")
+def evaluate_character_turn(body: CharacterEngineEvaluateIn):
+    """
+    Evaluates turn decision using Character Engine for Chloe or Bailey.
+    Obey the card, not the chat. Chloe satisfy ~30%, Bailey satisfy ~15%.
+    """
+    engine = CharacterEngine(character=body.character)
+    res = engine.evaluate_turn(
+        message=body.message,
+        last_ask_time=body.last_ask_time,
+        last_ask_message=body.last_ask_message,
+        last_turn_action=body.last_turn_action,
+        backed_off=body.backed_off,
+        clip_length=body.clip_length,
+        seed=body.seed,
+    )
+    return {"ok": True, "result": res}
 
 
 # ---------------------------------------------------------------------------
