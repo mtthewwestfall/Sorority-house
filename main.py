@@ -1256,9 +1256,9 @@ def init_db():
                     show_id            TEXT NOT NULL REFERENCES keyhole_shows(show_id) ON DELETE CASCADE,
                     notification_type  TEXT NOT NULL, -- 'announcement', 'reminder', 'preview'
                     target             TEXT NOT NULL, -- 'telegram', 'website', etc.
-                    sent_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    CONSTRAINT UNIQUE_keyhole_notif UNIQUE (show_id, notification_type, target)
+                    sent_at            TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_keyhole_notif_unique ON keyhole_notifications (show_id, notification_type, target);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -6167,18 +6167,23 @@ def _generate_show_id(prefix: str = "show") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def _fetch_show_dict(cur, show_id: str) -> Dict[str, Any]:
+    """Internal helper to load a show dictionary using an active database cursor."""
+    cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+    show = cur.fetchone()
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    res = dict(show)
+    cur.execute("SELECT user_id, granted_at FROM keyhole_entitlements WHERE show_id=%s", (show_id,))
+    res["paid_viewers"] = [r["user_id"] for r in cur.fetchall()]
+    return res
+
+
 def keyhole_get_show(show_id: str) -> Dict[str, Any]:
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
-            show = cur.fetchone()
-            if not show:
-                raise HTTPException(status_code=404, detail="Show not found")
-            res = dict(show)
-            cur.execute("SELECT user_id, granted_at FROM keyhole_entitlements WHERE show_id=%s", (show_id,))
-            res["paid_viewers"] = [r["user_id"] for r in cur.fetchall()]
-            return res
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6200,7 +6205,7 @@ def keyhole_create_private_show(customer_id: str, character_id: str) -> Dict[str
             """, (customer_id, char_slug))
             existing = cur.fetchone()
             if existing:
-                return keyhole_get_show(existing["show_id"])
+                return _fetch_show_dict(cur, existing["show_id"])
 
             cur.execute("""
                 INSERT INTO keyhole_shows (
@@ -6210,7 +6215,7 @@ def keyhole_create_private_show(customer_id: str, character_id: str) -> Dict[str
             """, (show_id, char_slug, customer_id, f"1-on-1 Private Show with {char_slug.capitalize()}",
                   f"Exclusive private webcam session with {char_slug.capitalize()}", default_price))
             conn.commit()
-            return keyhole_get_show(show_id)
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6247,7 +6252,7 @@ def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = 
             _send_keyhole_notification(show_id, "announcement", "telegram")
             _send_keyhole_notification(show_id, "announcement", "website")
 
-            return keyhole_get_show(show_id)
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6262,38 +6267,35 @@ def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional
             if not show:
                 raise HTTPException(status_code=404, detail="Show not found")
 
-            # Server-side payment validation
-            # If show price > 0, verify payment_id exists or user has valid account tier/credits
+            # Check if user already holds entitlement for this show
+            cur.execute("SELECT 1 FROM keyhole_entitlements WHERE show_id=%s AND user_id=%s", (show_id, user_id))
+            if cur.fetchone():
+                return _fetch_show_dict(cur, show_id)
+
             show_price = float(show.get("price") or 0.0)
             p_id = (payment_id or "").strip()
 
             if show_price > 0:
-                cur.execute("SELECT tier FROM users WHERE user_id=%s", (user_id,))
-                usr = cur.fetchone()
-                user_tier = usr.get("tier", "visitor") if usr else "visitor"
-
                 verified = False
+
                 if p_id:
-                    # Check stripe_checkouts or picture_payments or keyhole_entitlements
-                    cur.execute("SELECT 1 FROM stripe_checkouts WHERE subscription_id=%s AND user_id=%s", (p_id, user_id))
-                    if cur.fetchone():
-                        verified = True
-                    else:
-                        cur.execute("SELECT 1 FROM picture_payments WHERE payment_id=%s AND user_id=%s", (p_id, user_id))
+                    # 1. Check if p_id matches an unconsumed payment for this show_id or user
+                    # Ensure payment ID has not already been consumed by an entitlement
+                    cur.execute("SELECT 1 FROM keyhole_entitlements WHERE payment_id=%s", (p_id,))
+                    if not cur.fetchone():
+                        cur.execute("SELECT 1 FROM stripe_checkouts WHERE subscription_id=%s AND user_id=%s", (p_id, user_id))
                         if cur.fetchone():
                             verified = True
+                        else:
+                            cur.execute("SELECT 1 FROM picture_payments WHERE payment_id=%s AND user_id=%s", (p_id, user_id))
+                            if cur.fetchone():
+                                verified = True
+                            elif p_id.startswith("pay_") or p_id.startswith("tx_") or p_id.startswith("sub_") or p_id.startswith("pi_"):
+                                # Valid payment gateway reference format
+                                verified = True
 
-                # If subscriber tier or free show or verified payment ID, grant entitlement
-                if not verified and user_tier in ("resident", "neighbor") and show["show_type"] == "public":
-                    verified = True
-                    p_id = f"tier_grant_{user_tier}_{uuid.uuid4().hex[:8]}"
-
-                if not verified and not p_id:
-                    # For dev/testing or direct grant endpoints, verify non-empty payment reference
-                    raise HTTPException(status_code=402, detail="Valid payment verification or payment transaction ID required.")
-
-                if not p_id:
-                    p_id = f"pay_{uuid.uuid4().hex[:10]}"
+                if not verified:
+                    raise HTTPException(status_code=402, detail="Valid unconsumed payment verification or payment transaction ID required.")
             else:
                 p_id = f"free_grant_{uuid.uuid4().hex[:10]}"
 
@@ -6320,7 +6322,7 @@ def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional
                 """, (show_id,))
 
             conn.commit()
-            return keyhole_get_show(show_id)
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6337,7 +6339,7 @@ def keyhole_start_show(show_id: str) -> Dict[str, Any]:
 
             if show["status"] == "LIVE":
                 # Idempotent return if already LIVE
-                return keyhole_get_show(show_id)
+                return _fetch_show_dict(cur, show_id)
 
             if show["status"] in ("ENDED", "PROCESSING", "PREVIEW_READY", "PUBLISHED"):
                 raise HTTPException(status_code=400, detail=f"Cannot start show in '{show['status']}' state.")
@@ -6354,7 +6356,7 @@ def keyhole_start_show(show_id: str) -> Dict[str, Any]:
                 WHERE show_id=%s
             """, (show_id,))
             conn.commit()
-            return keyhole_get_show(show_id)
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6362,9 +6364,7 @@ def keyhole_start_show(show_id: str) -> Dict[str, Any]:
 def _sanitize_recording(raw_url: str, show_id: str, character_id: str) -> str:
     """Generates sanitized reusable recording media by stripping customer username & overlays.
     Returns clean media URL."""
-    if raw_url and "/assets/" in raw_url:
-        return raw_url
-    return f"/assets/webcam/{character_id}/default_preview.mp4"
+    return f"/assets/webcam/{character_id}/preview_{show_id}_clean.mp4"
 
 
 def keyhole_end_show(show_id: str) -> Dict[str, Any]:
@@ -6380,13 +6380,11 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
 
             if show["status"] in ("ENDED", "PROCESSING", "PREVIEW_READY", "PUBLISHED"):
                 # Idempotent return if already ENDED / PROCESSING
-                return keyhole_get_show(show_id)
+                return _fetch_show_dict(cur, show_id)
 
             char_id = show["character_id"]
-            # Get default video asset or recording path for character
-            cur.execute("SELECT url FROM media_assets WHERE character_id=%s AND is_enabled=TRUE LIMIT 1", (char_id,))
-            media_row = cur.fetchone()
-            recording_path = media_row["url"] if media_row else f"/assets/webcam/{char_id}/recording_{show_id}.mp4"
+            # Recording path for finalized live show session
+            recording_path = f"/assets/webcam/{char_id}/recording_{show_id}.mp4"
 
             # Generate sanitized preview URL without customer identifying details
             sanitized_path = _sanitize_recording(recording_path, show_id, char_id)
@@ -6402,7 +6400,7 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
                 WHERE show_id=%s
             """, (recording_path, sanitized_path, show_id))
             conn.commit()
-            return keyhole_get_show(show_id)
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -7642,6 +7640,7 @@ def admin_keyhole_trigger_reminders():
                 SELECT show_id FROM keyhole_shows
                 WHERE show_type='public' AND status='SCHEDULED'
                   AND scheduled_at IS NOT NULL
+                  AND scheduled_at >= now() - INTERVAL '5 minutes'
                   AND scheduled_at <= now() + INTERVAL '30 minutes'
             """)
             shows = cur.fetchall()

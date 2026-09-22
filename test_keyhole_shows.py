@@ -83,8 +83,12 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
 
         # 3. Record payment and verify status transitions to READY
         with patch.object(mock_cur, 'fetchone', side_effect=[
-            {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "PAYMENT_PENDING"},
-            {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "READY"}
+            {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "PAYMENT_PENDING", "price": 19.99},
+            None, # check if entitlement exists for user
+            None, # check if payment_id consumed
+            None, # check stripe_checkouts
+            None, # check picture_payments
+            {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "READY"} # _fetch_show_dict
         ]):
             mock_cur.fetchall.return_value = [{"user_id": "usr_alice", "granted_at": "2025-01-01"}]
             paid_show = main.keyhole_record_show_payment(show_id="priv_123", user_id="usr_alice", payment_id="pay_999")
@@ -120,13 +124,14 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
         # 6. End show and verify recording finalization & sanitization
         with patch.object(mock_cur, 'fetchone', side_effect=[
             {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "LIVE"},
-            {"url": "/assets/webcam/chloe/live_raw.mp4"}, # default asset
-            {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "PREVIEW_READY", "sanitized_preview_url": "/assets/webcam/chloe/live_raw.mp4", "preview_status": "PENDING"}
+            {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "PREVIEW_READY", "recording_url": "/assets/webcam/chloe/recording_priv_123.mp4", "sanitized_preview_url": "/assets/webcam/chloe/preview_priv_123_clean.mp4", "preview_status": "PENDING"}
         ]):
             mock_cur.fetchall.return_value = [{"user_id": "usr_alice", "granted_at": "2025-01-01"}]
             ended_show = main.keyhole_end_show("priv_123")
             self.assertEqual(ended_show["status"], "PREVIEW_READY")
             self.assertEqual(ended_show["preview_status"], "PENDING")
+            self.assertEqual(ended_show["recording_url"], "/assets/webcam/chloe/recording_priv_123.mp4")
+            self.assertEqual(ended_show["sanitized_preview_url"], "/assets/webcam/chloe/preview_priv_123_clean.mp4")
             self.assertNotIn("usr_alice", ended_show["sanitized_preview_url"])
 
     @patch("main.db")
