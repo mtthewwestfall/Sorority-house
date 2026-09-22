@@ -384,5 +384,311 @@ class TestWebcamMediaManager(unittest.TestCase):
         self.assertIn("download", saved_tags)
 
 
+class TestGeneratorReferenceLoading(unittest.TestCase):
+    def setUp(self):
+        os.environ["ADMIN_SECRET"] = "test-admin-secret"
+        self.headers = {"X-Admin-Secret": "test-admin-secret"}
+
+    def _asset_db(self, asset):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = asset
+        mock_cur.fetchall.return_value = []
+        return mock_conn
+
+    def _missing_skin(self):
+        return {
+            "id": 99, "character_id": "bailey",
+            "url": "/media/files/missing-skin.png",
+            "file_path": "missing-skin.png",
+            "media_type": "image", "tags": ["skin"],
+        }
+
+    def test_relative_media_url_fetched_via_public_url(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        asset = {
+            "id": 5, "character_id": "bailey",
+            "url": "/media/files/bailey_skin.png?v=1",
+            "file_path": "bailey_skin.png",
+            "media_type": "image",
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), \
+                 patch.object(main, "PUBLIC_URL", "https://keyhole.example"), \
+                 patch.dict(os.environ, {"PUBLIC_API_BASE": ""}, clear=False), \
+                 patch("main._fetch_remote_media", return_value=(png, ".png", "image/png", "image")) as fetch, \
+                 patch("main.db", side_effect=HTTPException(status_code=500, detail="no db")):
+                data = main._materialize_reference(asset)
+            names = os.listdir(folder)
+        self.assertEqual(data[0], png)
+        self.assertEqual(data[1], "image/png")
+        self.assertEqual(fetch.call_args.args[0], "https://keyhole.example/media/files/bailey_skin.png")
+        self.assertEqual(fetch.call_args.kwargs.get("prefer"), "image")
+        self.assertTrue(any(name.startswith("skin_bailey_") for name in names))
+
+    def test_relative_media_uses_public_api_base_when_public_url_fails(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+        asset = {"id": 5, "character_id": "chloe", "url": "/media/chloe.png", "file_path": "", "media_type": "image"}
+
+        def fetch(url, prefer=""):
+            if url.startswith("https://first.example"):
+                raise RuntimeError("404 from public url")
+            return png, ".png", "image/png", "image"
+
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), \
+                 patch.object(main, "PUBLIC_URL", "https://first.example"), \
+                 patch.dict(os.environ, {"PUBLIC_API_BASE": "https://api.example"}, clear=False), \
+                 patch("main._fetch_remote_media", side_effect=fetch) as mocked, \
+                 patch("main.db", side_effect=HTTPException(status_code=500, detail="no db")):
+                data = main._materialize_reference(asset)
+        self.assertEqual(data[0], png)
+        self.assertEqual(mocked.call_args_list[0].args[0], "https://first.example/media/chloe.png")
+        self.assertEqual(mocked.call_args_list[1].args[0], "https://api.example/media/chloe.png")
+
+    @patch("main.db")
+    def test_primary_error_names_asset_and_missing_file(self, mock_db):
+        mock_db.return_value = self._asset_db(self._missing_skin())
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), patch.object(main, "PUBLIC_URL", ""):
+                with self.assertRaises(HTTPException) as ctx:
+                    main._character_reference("bailey", 99)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("99", ctx.exception.detail)
+        self.assertIn("missing file", ctx.exception.detail)
+        self.assertNotIn("locally stored", ctx.exception.detail)
+
+    @patch("main.db")
+    def test_relative_fetch_failure_names_fetch(self, mock_db):
+        mock_db.return_value = self._asset_db(self._missing_skin())
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), \
+                 patch.object(main, "PUBLIC_URL", "https://keyhole.example"), \
+                 patch("main._fetch_remote_media", side_effect=RuntimeError("404 gone")):
+                with self.assertRaises(HTTPException) as ctx:
+                    main._character_reference("bailey", 99)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Reference asset 99", ctx.exception.detail)
+        self.assertIn("fetch failed", ctx.exception.detail)
+        self.assertIn("404 gone", ctx.exception.detail)
+
+    @patch("main.db")
+    def test_secondary_lookup_does_not_raise_when_skin_missing(self, mock_db):
+        mock_db.return_value = self._asset_db(self._missing_skin())
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), patch.object(main, "PUBLIC_URL", ""):
+                data = main._character_reference("bailey", 99, strict=False)
+        self.assertIsNone(data)
+
+    def test_sogni_krea_keeps_generate_image_and_attaches_reference(self):
+        with patch.object(main, "SOGNI_IMAGE_MODEL", "krea-2-turbo"):
+            body = main._sogni_workflow_body("a plate", "https://cdn.example/skin.png")
+        step = body["input"]["steps"][0]
+        self.assertEqual(step["toolName"], "generate_image")
+        self.assertEqual(step["arguments"]["model"], "krea-2-turbo")
+        self.assertEqual(step["arguments"]["sourceImageIndex"], -1)
+        self.assertEqual(step["arguments"]["starting_image_strength"], 0.75)
+        self.assertEqual(body["media_references"], [{"kind": "image", "url": "https://cdn.example/skin.png"}])
+
+    def test_sogni_text_workflow_has_no_reference(self):
+        with patch.object(main, "SOGNI_IMAGE_MODEL", "krea-2-turbo"):
+            body = main._sogni_workflow_body("a plate", "")
+        self.assertNotIn("media_references", body)
+        self.assertNotIn("sourceImageIndex", body["input"]["steps"][0]["arguments"])
+
+    def test_edit_model_uses_edit_image(self):
+        with patch.object(main, "SOGNI_IMAGE_MODEL", "krea-identity-edit"):
+            body = main._sogni_workflow_body("change the outfit", "https://cdn.example/skin.png")
+        step = body["input"]["steps"][0]
+        self.assertEqual(step["toolName"], "edit_image")
+        self.assertEqual(step["arguments"]["sourceImageIndex"], -1)
+        self.assertNotIn("starting_image_strength", step["arguments"])
+
+    def test_text_only_prompt_includes_stored_look(self):
+        text = main._secondary_prompt("bailey", "sitting on the bed", with_image=False)
+        self.assertIn("Current Outfit", text)
+        self.assertIn("Master Reference: Bailey", text)
+        self.assertTrue(text.endswith("sitting on the bed"))
+
+    def test_image_prompt_keeps_outfit_without_repeating_master(self):
+        text = main._secondary_prompt("bailey", "sitting on the bed", with_image=True)
+        self.assertIn("Current Outfit", text)
+        self.assertNotIn("Master Reference", text)
+
+    def _sogni_transport(self, posts, start_statuses=(201,)):
+        png = b"\x89PNG\r\n\x1a\n" + b"out"
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.text = ""
+            resp.headers = {"Content-Type": "image/png"}
+            resp.content = png
+            if str(url).endswith("/v2/image/uploadUrl"):
+                resp.json.return_value = {"data": {
+                    "url": "https://upload.example/post",
+                    "fields": {"key": "k", "Content-Type": "image/png"},
+                }}
+                return resp
+            if str(url).endswith("/v2/image/downloadUrl"):
+                resp.json.return_value = {"data": {"downloadUrl": "https://cdn.example/skin.png"}}
+                return resp
+            if "/creative-agent/workflows/wf1" in str(url):
+                resp.json.return_value = {"data": {"workflow": {
+                    "status": "completed",
+                    "steps": [{"artifacts": [{"url": "https://cdn.example/out.png"}]}],
+                }}}
+                return resp
+            if url == "https://cdn.example/out.png":
+                return resp
+            raise AssertionError(url)
+
+        def fake_post(url, **kwargs):
+            resp = MagicMock()
+            resp.text = "bad reference"
+            if url == "https://upload.example/post":
+                resp.status_code = 204
+                return resp
+            posts.append(kwargs.get("json"))
+            status = start_statuses[min(len(posts) - 1, len(start_statuses) - 1)]
+            resp.status_code = status
+            resp.json.return_value = {"data": {"workflow": {"workflowId": "wf1"}}}
+            return resp
+
+        return fake_get, fake_post, png
+
+    def test_secondary_sends_skin_when_bytes_exist(self):
+        posts = []
+        fake_get, fake_post, png = self._sogni_transport(posts)
+        skin = b"\x89PNG\r\n\x1a\n" + b"skin"
+        with patch.object(main, "SOGNI_IMAGE_MODEL", "krea-2-turbo"), \
+             patch("main.requests.get", side_effect=fake_get), \
+             patch("main.requests.post", side_effect=fake_post):
+            content, ext, used = main._secondary_image("on the couch", "sogni-key", "bailey", (skin, "image/png"))
+        self.assertTrue(used)
+        self.assertEqual(content, png)
+        self.assertEqual(ext, ".png")
+        step = posts[0]["input"]["steps"][0]
+        self.assertEqual(step["toolName"], "generate_image")
+        self.assertEqual(posts[0]["media_references"][0]["url"], "https://cdn.example/skin.png")
+        self.assertIn("Current Outfit", step["arguments"]["prompt"])
+        self.assertNotIn("Master Reference", step["arguments"]["prompt"])
+
+    def test_secondary_retries_text_only_when_reference_start_is_rejected(self):
+        posts = []
+        fake_get, fake_post, png = self._sogni_transport(posts, start_statuses=(400, 201))
+        skin = b"\x89PNG\r\n\x1a\n" + b"skin"
+        with patch.object(main, "SOGNI_IMAGE_MODEL", "krea-2-turbo"), \
+             patch("main.requests.get", side_effect=fake_get), \
+             patch("main.requests.post", side_effect=fake_post):
+            content, ext, used = main._secondary_image("on the couch", "sogni-key", "bailey", (skin, "image/png"))
+        self.assertFalse(used)
+        self.assertEqual(content, png)
+        self.assertEqual(ext, ".png")
+        self.assertIn("media_references", posts[0])
+        self.assertNotIn("media_references", posts[1])
+        self.assertIn("Master Reference: Bailey", posts[1]["input"]["steps"][0]["arguments"]["prompt"])
+
+    def test_secondary_text_only_when_upload_fails(self):
+        posts = []
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.text = "nope"
+            resp.headers = {"Content-Type": "image/jpeg"}
+            resp.content = b"\xff\xd8\xff" + b"jpeg"
+            if str(url).endswith("/v2/image/uploadUrl"):
+                resp.status_code = 500
+                return resp
+            resp.status_code = 200
+            if "/creative-agent/workflows/wf1" in str(url):
+                resp.json.return_value = {"data": {"workflow": {
+                    "status": "completed",
+                    "steps": [{"artifacts": [{"url": "https://cdn.example/out.jpg"}]}],
+                }}}
+                return resp
+            if url == "https://cdn.example/out.jpg":
+                return resp
+            raise AssertionError(url)
+
+        def fake_post(url, **kwargs):
+            posts.append(kwargs.get("json"))
+            resp = MagicMock()
+            resp.status_code = 201
+            resp.text = ""
+            resp.json.return_value = {"data": {"workflow": {"workflowId": "wf1"}}}
+            return resp
+
+        skin = b"\x89PNG\r\n\x1a\n" + b"skin"
+        with patch.object(main, "SOGNI_IMAGE_MODEL", "krea-2-turbo"), \
+             patch("main.requests.get", side_effect=fake_get), \
+             patch("main.requests.post", side_effect=fake_post):
+            content, ext, used = main._secondary_image("on the couch", "sogni-key", "bailey", (skin, "image/png"))
+        self.assertFalse(used)
+        self.assertEqual(ext, ".jpg")
+        self.assertTrue(content.startswith(b"\xff\xd8\xff"))
+        self.assertNotIn("media_references", posts[0])
+        self.assertIn("Master Reference: Bailey", posts[0]["input"]["steps"][0]["arguments"]["prompt"])
+
+    @patch("main._save_generated_asset", return_value={"id": 3, "url": "/media/files/bailey_out.png"})
+    @patch("main._secondary_image", return_value=(b"pngbytes", ".png", False))
+    @patch("main.db")
+    def test_secondary_route_generates_when_reference_file_is_missing(self, mock_db, mock_sogni, _save):
+        mock_db.return_value = self._asset_db(self._missing_skin())
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), patch.object(main, "PUBLIC_URL", ""):
+                res = client.post("/admin/generator/image", headers=self.headers, json={
+                    "prompt": "she waves at the camera",
+                    "character": "bailey",
+                    "engine": "secondary",
+                    "use_reference": True,
+                    "reference_asset_id": 99,
+                })
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["url"], "/media/files/bailey_out.png")
+        self.assertEqual(body["engine"], "secondary")
+        self.assertFalse(body["used_reference"])
+        self.assertIsNone(mock_sogni.call_args.args[3])
+        self.assertNotIn("locally stored", res.text)
+
+    @patch("main.db")
+    def test_primary_route_reports_why_the_reference_failed(self, mock_db):
+        mock_db.return_value = self._asset_db(self._missing_skin())
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder), patch.object(main, "PUBLIC_URL", ""):
+                res = client.post("/admin/generator/image", headers=self.headers, json={
+                    "prompt": "she waves at the camera",
+                    "character": "bailey",
+                    "engine": "primary",
+                    "use_reference": True,
+                    "reference_asset_id": 99,
+                })
+        self.assertEqual(res.status_code, 400)
+        detail = res.json()["detail"]
+        self.assertIn("Reference asset 99", detail)
+        self.assertIn("missing file", detail)
+        self.assertNotIn("locally stored", detail)
+
+    @patch("main._save_generated_asset", return_value={"id": 1, "url": "/media/files/a.png"})
+    @patch("main.generate_avatar", return_value=("image/png", "cG5n"))
+    @patch("main.db")
+    def test_primary_without_any_skin_still_generates(self, mock_db, _avatar, _save):
+        mock_db.return_value = self._asset_db(None)
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder):
+                res = client.post("/admin/generator/image", headers=self.headers, json={
+                    "prompt": "a portrait",
+                    "character": "bailey",
+                    "engine": "primary",
+                    "use_reference": True,
+                })
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertTrue(res.json()["ok"])
+        self.assertFalse(res.json()["used_reference"])
+
+
 if __name__ == "__main__":
     unittest.main()

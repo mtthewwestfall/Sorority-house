@@ -68,7 +68,12 @@ API CONTRACT implemented here (point your chat app at these):
                                                             from media_assets tagged with a beat
   POST /admin/generator/image   (X-Admin-Secret)        {"prompt","character","beat","engine":
                                                             primary|secondary,"reference_asset_id"}
-                                                            -> {"asset"} still saved as her plate
+                                                            -> {"asset"} still saved as her plate.
+                                                            secondary (Sogni) still generates when
+                                                            the selected skin cannot be loaded.
+                                                            primary, given reference_asset_id,
+                                                            fails only after a relative /media
+                                                            URL cannot be fetched either.
   POST /admin/generator/webcam  (X-Admin-Secret)        {"prompt","character","beat",
                                                             "reference_asset_id","duration_seconds"}
                                                             -> {"job_id"} Veo motion clip
@@ -208,7 +213,9 @@ Env vars (Railway -> Variables):
                     SOGNI_API_URL (default https://api.sogni.ai).
   KEYHOLE_MEDIA_DIR where uploaded/generated plates are stored (mount a Railway volume
                     here or generated cuts vanish on redeploy). Remote character skins are
-                    downloaded into this directory before Gemini/Veo run.
+                    downloaded into this directory before Gemini/Veo run. A relative
+                    /media/files or /media URL is fetched from PUBLIC_URL, then
+                    PUBLIC_API_BASE, when that file is missing on disk.
   KEYHOLE_CONTENT_SITES
                     optional comma list for the admin content maker,
                     Name=https://host/search?q={tag} (tag is substituted). Preset local
@@ -10734,39 +10741,106 @@ def _asset_bytes(asset: Dict[str, Any]) -> Optional[tuple]:
     return _image_bytes_at(path) if path else None
 
 
-def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
-    """Local image bytes for a skin. Remote URLs and data URLs are cached under KEYHOLE_MEDIA_DIR first."""
+def _public_media_bases() -> List[str]:
+    """Origins that can serve a relative /media URL when the file is not on this disk."""
+    bases: List[str] = []
+    for raw in (PUBLIC_URL, os.environ.get("PUBLIC_API_BASE", "")):
+        base = (raw or "").strip().rstrip("/")
+        if base.startswith(("http://", "https://")) and base not in bases:
+            bases.append(base)
+    return bases
+
+
+def _relative_media_path(url: str) -> Optional[str]:
+    """'/media/...' path, or None when url is empty, absolute, or not a media path."""
+    raw = (url or "").strip()
+    if not raw or "://" in raw.split("?", 1)[0]:
+        return None
+    path = raw.split("?", 1)[0].replace("\\", "/")
+    if not path.startswith("/"):
+        path = "/" + path
+    parts = [p for p in path.split("/") if p]
+    if ".." in parts or not parts or parts[0] != "media":
+        return None
+    return "/" + "/".join(parts)
+
+
+def _exc_reason(exc: Exception) -> str:
+    detail = getattr(exc, "detail", None)
+    text = str(detail if detail else exc)
+    return " ".join(text.split())[:180]
+
+
+def _materialize_reference_explained(asset: Dict[str, Any]) -> tuple:
+    """(bytes, mime) plus a short failure reason. Reason is empty when bytes were loaded.
+    Relative /media URLs are fetched from PUBLIC_URL / PUBLIC_API_BASE when the file is not on disk."""
     local = _asset_bytes(asset)
     if local:
-        return local
+        return local, ""
     url = (asset.get("url") or "").strip()
     char_id = (asset.get("character_id") or "ref").strip().lower() or "ref"
     asset_id = asset.get("id")
+    where = _relative_media_path(url) or (os.path.basename(asset.get("file_path") or "") or "asset")
+
+    def _cache(content: bytes, ext: str, mime: str) -> tuple:
+        _cache_reference_file(char_id, content, ext, asset_id)
+        return (content, mime or _IMAGE_MIME_BY_EXT.get(ext, "image/jpeg")), ""
+
     if url.startswith("data:image"):
         try:
             header, b64 = url.split(",", 1)
             mime = header.split(";", 1)[0].split(":", 1)[-1] or "image/png"
             content = base64.b64decode(b64)
-        except Exception:
-            return None
+        except Exception as exc:
+            return None, f"fetch failed: {_exc_reason(exc) or 'data URL could not be decoded'}"
+        if not content:
+            return None, "fetch failed: data URL was empty"
         ext = next((e for e, m in _IMAGE_MIME_BY_EXT.items() if m == mime), ".png")
-        _cache_reference_file(char_id, content, ext, asset_id)
-        return content, mime
+        return _cache(content, ext, mime)
     if url.startswith("file://"):
         local_path = _local_media_file(urllib.parse.urlparse(url).path)
         data = _image_bytes_at(local_path) if local_path else None
-        return data
+        if data:
+            return data, ""
+        return None, f"missing file ({where})"
     if url.startswith(("http://", "https://")):
         try:
             content, ext, mime, mtype = _fetch_remote_media(url, prefer="image")
         except Exception as exc:
             logger.warning("Could not cache reference %s: %s", url, exc)
-            return None
+            return None, f"fetch failed: {_exc_reason(exc)}"
         if mtype != "image" or not content:
-            return None
-        _cache_reference_file(char_id, content, ext, asset_id)
-        return content, mime or _IMAGE_MIME_BY_EXT.get(ext, "image/jpeg")
-    return None
+            return None, "fetch failed: response was not an image"
+        return _cache(content, ext, mime)
+    rel = _relative_media_path(url)
+    if rel:
+        bases = _public_media_bases()
+        if not bases:
+            return None, f"missing file ({rel})"
+        errors: List[str] = []
+        for base in bases:
+            absolute = base + rel
+            try:
+                content, ext, mime, mtype = _fetch_remote_media(absolute, prefer="image")
+            except Exception as exc:
+                logger.warning("Could not fetch relative reference %s: %s", absolute, exc)
+                errors.append(_exc_reason(exc))
+                continue
+            if mtype != "image" or not content:
+                errors.append("response was not an image")
+                continue
+            return _cache(content, ext, mime)
+        detail = errors[-1] if errors else "no response"
+        return None, f"fetch failed: {detail}"
+    if asset.get("file_path") or url:
+        return None, f"missing file ({where})"
+    return None, "missing file"
+
+
+def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
+    """Local image bytes for a skin. Remote URLs and data URLs are cached under KEYHOLE_MEDIA_DIR first."""
+    data, _reason = _materialize_reference_explained(asset)
+    return data
 
 
 def _disk_character_skin(char_id: str) -> Optional[tuple]:
@@ -10793,16 +10867,20 @@ def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]
     return dict(row) if row else None
 
 
-def _character_reference(char_id: str, asset_id: Optional[int]) -> Optional[tuple]:
+def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool = True) -> Optional[tuple]:
     """The girl's skin: reference image bytes used to keep every generated cut looking like her.
-    An explicit asset wins. Remote URLs are downloaded into KEYHOLE_MEDIA_DIR before use.
-    Otherwise the saved skin, then the newest enabled image tagged skin/reference, then a file on disk."""
+    An explicit asset wins. Remote and relative /media URLs are downloaded into KEYHOLE_MEDIA_DIR
+    before use. Otherwise the saved skin, then the newest enabled image tagged skin/reference,
+    then a file on disk.
+    strict=True (primary / webcam): an explicit asset_id that still cannot be loaded raises.
+    strict=False (Sogni): the same miss returns None so generation can continue text-only."""
     preferred_id = asset_id
     if not preferred_id:
         raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
             (_CHARACTER_REFS_CACHE.get(char_id) or {}).get("skin_asset_id") or "")
         if str(raw).isdigit():
             preferred_id = int(raw)
+    explicit_reason = "missing file"
     conn = None
     try:
         conn = db()
@@ -10814,19 +10892,25 @@ def _character_reference(char_id: str, asset_id: Optional[int]) -> Optional[tupl
                 if preferred_id:
                     row = _load_asset_row(cur, int(preferred_id), char_id)
                     if asset_id and not row:
-                        raise HTTPException(status_code=404, detail="Reference asset not found for this character")
-                    if row:
-                        data = _materialize_reference(row)
+                        if strict:
+                            raise HTTPException(status_code=404, detail="Reference asset not found for this character")
+                    elif row:
+                        data, reason = _materialize_reference_explained(row)
                         if data:
                             return data
+                        if asset_id and int(row.get("id") or 0) == int(asset_id):
+                            explicit_reason = reason or "missing file"
                 cur.execute("""
                     SELECT * FROM media_assets
                     WHERE character_id=%s AND media_type='image' AND is_enabled
                       AND (tags ? 'skin' OR tags ? 'reference')
                     ORDER BY created_at DESC
                 """, (char_id,))
-                for row in cur.fetchall() or []:
-                    data = _materialize_reference(dict(row))
+                for raw in cur.fetchall() or []:
+                    row = dict(raw)
+                    if asset_id and int(row.get("id") or 0) == int(asset_id):
+                        continue
+                    data = _materialize_reference(row)
                     if data:
                         return data
                 if asset_id:
@@ -10841,8 +10925,10 @@ def _character_reference(char_id: str, asset_id: Optional[int]) -> Optional[tupl
     data = _disk_character_skin(char_id)
     if data:
         return data
-    if asset_id:
-        raise HTTPException(status_code=400, detail="Reference asset must be a locally stored image")
+    if asset_id and strict:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
     return None
 
 
@@ -10907,23 +10993,136 @@ def _apply_character_skin_bytes(char_id: str, content: bytes, ext: str, mime: st
     return base64.b64decode(b64), new_ext, new_mime or "image/png", "image", True
 
 
-def _secondary_image(prompt: str, api_key: str) -> tuple:
-    """Text-to-image on Sogni: one-step generate_image workflow, polled to completion; returns (bytes, ext)."""
-    key = (api_key or SOGNI_API_KEY).strip()
-    if not key:
-        raise HTTPException(status_code=503, detail="Secondary generator needs a Sogni key (SOGNI_API_KEY or api_key)")
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    r = requests.post(f"{SOGNI_API_URL}/v1/creative-agent/workflows", headers=headers, timeout=60, json={
+# krea-2-turbo / z-image take a starting image on generate_image. Other creative-agent
+# image models that accept a reference do it through edit_image. generate_image stays
+# the default so NSFW plates are not rerouted onto Gemini or a censored editor.
+_SOGNI_IMG2IMG_MODELS = {"krea-2-turbo", "z-turbo", "z-image"}
+_SOGNI_EDIT_MODELS = {
+    "gpt-image-2", "qwen-lightning", "qwen",
+    "krea-identity-edit", "dark-beast-krea2-identity-edit",
+}
+
+
+def _sogni_reference_mode(model: str) -> str:
+    """'img2img', 'edit', or '' when this Sogni model cannot take a reference image."""
+    name = (model or "").strip().lower()
+    if name in _SOGNI_IMG2IMG_MODELS:
+        return "img2img"
+    if name in _SOGNI_EDIT_MODELS:
+        return "edit"
+    return ""
+
+
+def _secondary_prompt(char_id: str, prompt: str, *, with_image: bool) -> str:
+    """Lean a text-only Sogni prompt toward her stored look. An attached skin image
+    still gets the outfit line; the face description is only needed without pixels."""
+    text = (prompt or "").strip()
+    if char_id not in ("chloe", "bailey"):
+        return text
+    try:
+        refs = get_character_references(char_id)
+    except Exception:
+        refs = {}
+    bits = []
+    appearance = str(refs.get("current_appearance") or "").strip()
+    if appearance and appearance not in text:
+        bits.append(appearance)
+    if not with_image:
+        master = str(refs.get("master_reference") or "").strip()
+        if master and master not in text:
+            bits.append(master)
+    if not bits:
+        return text
+    return f"{' '.join(bits)} {text}".strip()
+
+
+def _sogni_workflow_body(prompt: str, reference_url: str = "") -> Dict[str, Any]:
+    """One-step creative-agent body. reference_url attaches the skin when the model can use it."""
+    model = SOGNI_IMAGE_MODEL
+    arguments: Dict[str, Any] = {"prompt": (prompt or "")[:4000], "model": model}
+    tool = "generate_image"
+    mode = _sogni_reference_mode(model) if reference_url else ""
+    if mode == "img2img":
+        arguments["sourceImageIndex"] = -1
+        arguments["starting_image_strength"] = 0.75
+    elif mode == "edit":
+        tool = "edit_image"
+        arguments["sourceImageIndex"] = -1
+    body: Dict[str, Any] = {
         "input": {"title": "Keyhole plate", "steps": [
-            {"id": "image1", "toolName": "generate_image",
-             "arguments": {"prompt": prompt[:4000], "model": SOGNI_IMAGE_MODEL}}]},
-        "confirm_cost": True, "app_source": "keyhole-admin"})
+            {"id": "image1", "toolName": tool, "arguments": arguments}]},
+        "confirm_cost": True,
+        "app_source": "keyhole-admin",
+    }
+    if mode and reference_url:
+        body["media_references"] = [{"kind": "image", "url": reference_url}]
+    return body
+
+
+def _sogni_image_type(content: bytes, mime: str) -> str:
+    allowed = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+    clean = (mime or "").split(";")[0].strip().lower()
+    if clean == "image/jpg":
+        clean = "image/jpeg"
+    if clean in allowed:
+        return clean
+    if content[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if content[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "image/jpeg"
+
+
+def _sogni_upload_reference(content: bytes, mime: str, api_key: str, mode: str) -> str:
+    """Put skin bytes on Sogni and return the presigned download URL workflows can fetch."""
+    ctype = _sogni_image_type(content, mime)
+    upload_type = "startingImage" if mode == "img2img" else "referenceImage"
+    job_id = f"keyhole-{secrets.token_hex(8)}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    params = {"jobId": job_id, "type": upload_type, "contentType": ctype}
+    slot = requests.get(f"{SOGNI_API_URL}/v2/image/uploadUrl", headers=headers, params=params, timeout=30)
+    if slot.status_code != 200:
+        raise RuntimeError(f"upload url {slot.status_code}: {(slot.text or '')[:180]}")
+    data = (slot.json() or {}).get("data") or {}
+    post_url = data.get("url") or ""
+    fields = data.get("fields") or {}
+    if not post_url or not isinstance(fields, dict):
+        raise RuntimeError("upload url missing fields")
+    ext = next((e for e, m in _IMAGE_MIME_BY_EXT.items() if m == ctype), ".jpg")
+    up = requests.post(post_url, data=fields, files={"file": (f"skin{ext}", content, ctype)}, timeout=60)
+    if up.status_code not in (200, 201, 204):
+        raise RuntimeError(f"upload {up.status_code}: {(up.text or '')[:180]}")
+    got = requests.get(f"{SOGNI_API_URL}/v2/image/downloadUrl", headers=headers, params=params, timeout=30)
+    if got.status_code != 200:
+        raise RuntimeError(f"download url {got.status_code}: {(got.text or '')[:180]}")
+    download = ((got.json() or {}).get("data") or {}).get("downloadUrl") or ""
+    if not download:
+        raise RuntimeError("no downloadUrl")
+    return download
+
+
+def _sogni_headers(api_key: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+
+def _sogni_start_workflow(body: Dict[str, Any], api_key: str) -> str:
+    r = requests.post(f"{SOGNI_API_URL}/v1/creative-agent/workflows", headers=_sogni_headers(api_key),
+                      timeout=60, json=body)
     if r.status_code not in (200, 201, 202):
         raise HTTPException(status_code=502, detail=f"Sogni failed ({r.status_code}): {r.text[:300]}")
     try:
-        wf_id = r.json()["data"]["workflow"]["workflowId"]
+        return r.json()["data"]["workflow"]["workflowId"]
     except Exception:
         raise HTTPException(status_code=502, detail="Unexpected Sogni response")
+
+
+def _sogni_finish_workflow(wf_id: str, api_key: str) -> tuple:
+    """Poll a creative-agent workflow and download its first image. Returns (bytes, ext)."""
+    headers = _sogni_headers(api_key)
     deadline = time.time() + MODEL_TIMEOUT_S
     url = ""
     while time.time() < deadline:
@@ -10941,9 +11140,11 @@ def _secondary_image(prompt: str, api_key: str) -> tuple:
             why = str(wf.get("error") or "")
             if not why:
                 try:
-                    ev = requests.get(f"{SOGNI_API_URL}/v1/creative-agent/workflows/{wf_id}/events", headers=headers, timeout=30).json()
+                    ev = requests.get(f"{SOGNI_API_URL}/v1/creative-agent/workflows/{wf_id}/events",
+                                      headers=headers, timeout=30).json()
                     evs = (ev.get("data") or {}).get("events") or ev.get("data") or []
-                    why = next((e.get("message", "") for e in reversed(evs) if isinstance(e, dict) and e.get("status") == "failed"), "")
+                    why = next((e.get("message", "") for e in reversed(evs)
+                                if isinstance(e, dict) and e.get("status") == "failed"), "")
                 except Exception:
                     why = ""
             raise HTTPException(status_code=502, detail=f"Sogni workflow {status}: {why[:300]}")
@@ -10958,6 +11159,37 @@ def _secondary_image(prompt: str, api_key: str) -> tuple:
     ctype = (img.headers.get("Content-Type") or "").lower()
     ext = ".jpg" if "jpeg" in ctype else (".webp" if "webp" in ctype else ".png")
     return img.content, ext
+
+
+def _secondary_image(prompt: str, api_key: str, char_id: str = "", ref: Optional[tuple] = None) -> tuple:
+    """Sogni still. Returns (bytes, ext, used_reference_image).
+    A loadable skin is uploaded and passed as a creative-agent reference when this model
+    accepts one. If the skin is missing, or Sogni rejects the reference, generation continues
+    text-only with her stored appearance in the prompt. Never raises the local-file reference error."""
+    key = (api_key or SOGNI_API_KEY).strip()
+    if not key:
+        raise HTTPException(status_code=503, detail="Secondary generator needs a Sogni key (SOGNI_API_KEY or api_key)")
+    mode = _sogni_reference_mode(SOGNI_IMAGE_MODEL) if ref else ""
+    ref_url = ""
+    if ref and mode:
+        try:
+            ref_url = _sogni_upload_reference(ref[0], ref[1], key, mode)
+        except Exception as exc:
+            logger.warning("Sogni reference upload skipped: %s", exc)
+            ref_url = ""
+    used = bool(ref_url)
+    text = _secondary_prompt(char_id, prompt, with_image=used)
+    try:
+        wf_id = _sogni_start_workflow(_sogni_workflow_body(text, ref_url), key)
+    except HTTPException as exc:
+        if not used:
+            raise
+        logger.warning("Sogni reference workflow rejected (%s); retrying text-only", exc.detail)
+        used = False
+        text = _secondary_prompt(char_id, prompt, with_image=False)
+        wf_id = _sogni_start_workflow(_sogni_workflow_body(text, ""), key)
+    content, ext = _sogni_finish_workflow(wf_id, key)
+    return content, ext, used
 
 
 class GeneratorImageIn(BaseModel):
@@ -10975,8 +11207,11 @@ class GeneratorImageIn(BaseModel):
 def admin_generator_image(body: GeneratorImageIn):
     """Generate a still for a girl and save it as her plate/reference.
     primary: Gemini image model; with a reference image it is image-to-image so the result keeps her
-    look (the 'skin'). secondary: OpenAI-compatible images API with its own key. The result is a
-    media asset tagged [beat, 'generated', engine]; beat may be empty for a plain reference still."""
+    look (the 'skin'). An explicit reference that cannot be loaded (after a relative /media fetch)
+    is an error. secondary: Sogni. A missing skin does not block it; when the bytes are available
+    and the model accepts a reference they are sent, otherwise her stored appearance is added to
+    the prompt. NSFW stays on this engine. The result is a media asset tagged
+    [beat, 'generated', engine]; beat may be empty for a plain reference still."""
     char_id = _keyhole_character(body.character)
     beat = _plate_beat(body.beat)
     prompt = (body.prompt or "").strip()
@@ -10986,7 +11221,10 @@ def admin_generator_image(body: GeneratorImageIn):
     if engine not in ("primary", "secondary"):
         raise HTTPException(status_code=400, detail="engine must be 'primary' or 'secondary'")
 
-    ref = _character_reference(char_id, body.reference_asset_id) if body.use_reference else None
+    # Sogni is text-to-image capable. A skin that is not on disk must not 400 the request.
+    ref = None
+    if body.use_reference:
+        ref = _character_reference(char_id, body.reference_asset_id, strict=(engine == "primary"))
     if engine == "primary":
         if ref:
             mime, b64 = _gemini_image_edit(ref[0], ref[1],
@@ -10996,7 +11234,12 @@ def admin_generator_image(body: GeneratorImageIn):
         content = base64.b64decode(b64)
         ext = ".jpg" if "jpeg" in mime else ".png"
     else:
-        content, ext = _secondary_image(prompt, body.api_key or "")
+        if body.use_reference and not ref:
+            logger.warning("Sogni image for %s continuing without a local skin (asset %s)",
+                           char_id, body.reference_asset_id)
+        content, ext, applied = _secondary_image(prompt, body.api_key or "", char_id, ref)
+        if not applied:
+            ref = None
 
     tags = [t for t in (beat, "generated", engine, "skinned" if ref else "") if t]
     title = (body.title or "").strip() or f"{char_id.capitalize()} {beat or 'still'} ({engine})"
