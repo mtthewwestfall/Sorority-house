@@ -1351,6 +1351,64 @@ def init_db():
                     ended_at              TIMESTAMPTZ,
                     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS show_id               TEXT;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS id                    TEXT;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS character_id          TEXT NOT NULL DEFAULT 'chloe';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS "character"           TEXT NOT NULL DEFAULT 'Chloe';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS customer_id           TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS customer              TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS title                 TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS description           TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS details               TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS price                 NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS scheduled_at          TIMESTAMPTZ;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS status                TEXT NOT NULL DEFAULT 'REQUESTED';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS recording_url         TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS sanitized_preview_url TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS preview_url           TEXT NOT NULL DEFAULT '';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS preview_status        TEXT NOT NULL DEFAULT 'NONE';
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS preview_approved      BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS published_targets     JSONB NOT NULL DEFAULT '[]'::jsonb;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS published_telegram    BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS published_website     BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS viewer_count          INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS is_demo               BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS created_at            TIMESTAMPTZ NOT NULL DEFAULT now();
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS started_at            TIMESTAMPTZ;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS ended_at              TIMESTAMPTZ;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS updated_at            TIMESTAMPTZ NOT NULL DEFAULT now();
+                -- Older deployments keyed keyhole_shows on id (TEXT PK) with TEXT price/scheduled_at.
+                -- Move the key to show_id and coerce the column types so the routes above work.
+                DO $$
+                BEGIN
+                    UPDATE keyhole_shows SET show_id = id WHERE show_id IS NULL AND id IS NOT NULL;
+                    UPDATE keyhole_shows SET character_id = lower("character")
+                        WHERE character_id = 'chloe' AND "character" <> '' AND lower("character") <> 'chloe';
+                    IF EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_schema = current_schema() AND table_name = 'keyhole_shows'
+                                 AND column_name = 'price' AND data_type = 'text') THEN
+                        ALTER TABLE keyhole_shows ALTER COLUMN price DROP DEFAULT;
+                        ALTER TABLE keyhole_shows ALTER COLUMN price TYPE NUMERIC(10, 2)
+                            USING COALESCE(NULLIF(regexp_replace(price, '[^0-9.]', '', 'g'), '')::numeric, 0);
+                        ALTER TABLE keyhole_shows ALTER COLUMN price SET DEFAULT 0.00;
+                        ALTER TABLE keyhole_shows ALTER COLUMN price SET NOT NULL;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_schema = current_schema() AND table_name = 'keyhole_shows'
+                                 AND column_name = 'scheduled_at' AND data_type = 'text') THEN
+                        ALTER TABLE keyhole_shows ALTER COLUMN scheduled_at DROP DEFAULT;
+                        ALTER TABLE keyhole_shows ALTER COLUMN scheduled_at TYPE TIMESTAMPTZ
+                            USING CASE WHEN scheduled_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN scheduled_at::timestamptz ELSE NULL END;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_attribute a
+                                     ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+                                   WHERE c.conrelid = 'keyhole_shows'::regclass AND c.contype = 'p'
+                                     AND a.attname = 'show_id') THEN
+                        ALTER TABLE keyhole_shows DROP CONSTRAINT IF EXISTS keyhole_shows_pkey;
+                        ALTER TABLE keyhole_shows ALTER COLUMN id DROP NOT NULL;
+                        ALTER TABLE keyhole_shows ADD PRIMARY KEY (show_id);
+                    END IF;
+                END $$;
                 CREATE INDEX IF NOT EXISTS idx_keyhole_shows_type_status ON keyhole_shows (show_type, status);
                 CREATE INDEX IF NOT EXISTS idx_keyhole_shows_char ON keyhole_shows (character_id);
                 CREATE INDEX IF NOT EXISTS idx_keyhole_shows_cust ON keyhole_shows (customer_id);
