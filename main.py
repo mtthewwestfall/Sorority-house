@@ -63,10 +63,34 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "free_left","paid_left"}
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
                                                             by hand (tier 'visitor' = cancelled)
+  GET  /keyhole/plates                                   -> {"characters":{char:{beat:[{url,variant,
+                                                            media_type}]}}} plate manifest built
+                                                            from media_assets tagged with a beat
+  POST /admin/generator/image   (X-Admin-Secret)        {"prompt","character","beat","engine":
+                                                            primary|secondary,"reference_asset_id"}
+                                                            -> {"asset"} still saved as her plate
+  POST /admin/generator/webcam  (X-Admin-Secret)        {"prompt","character","beat",
+                                                            "reference_asset_id","duration_seconds"}
+                                                            -> {"job_id"} Veo motion clip
+  GET  /admin/generator/webcam/{job_id}                  -> {"job":{status,asset,error}}
+  GET  /keyhole/packages                                 -> {"packages":[{"package","price",
+                                                            "webcam_minutes","text_included"}]}
+                                                            (the prices NOWPayments invoices charge)
+  GET  /keyhole/me                      (bearer)        -> {"user_id","email","webcam_minutes_left",
+                                                            "text_balance","video_replies_left",
+                                                            "fresh_videos_left","session_active",
+                                                            "free_preview_available","intro_available"}
+  POST /keyhole/preview/claim           (bearer)        -> grants the one-time free preview
+                                                            (free_preview_minutes); 400 once used
+  POST /keyhole/nowpayments/invoice {"package"} (bearer) -> {"invoice_id","invoice_url"}: a
+                                                            NOWPayments invoice for that package,
+                                                            order_id '<user_id>:<package>' so the
+                                                            IPN grants it to this account
   POST /webhooks/nexapay                                 -> NexaPay webhook: a paid Payment Link
                                                             grants the Keyhole package named in its
-                                                            metadata/SKU (quick, standard, extended,
-                                                            premium, text_only) to metadata.user_id,
+                                                            metadata/SKU (intro, quick, standard,
+                                                            extended, long, premium, marathon,
+                                                            text_only) to metadata.user_id,
                                                             else the account with the payer's email
   POST /webhooks/nowpayments                             -> NOWPayments IPN: payment_status
                                                             'finished' grants the Keyhole package
@@ -153,6 +177,20 @@ Env vars (Railway -> Variables):
   NOWPAYMENTS_IPN_SECRET
                     NOWPayments IPN secret (HMAC-SHA512 of the key-sorted body in
                     x-nowpayments-sig); /webhooks/nowpayments refuses with 503 until set.
+  NOWPAYMENTS_API_KEY
+                    NOWPayments API key; /keyhole/nowpayments/invoice refuses with 503 until set.
+  VIDEO_MODEL       Veo model behind /admin/generator/webcam
+                    (default veo-3.1-fast-generate-preview; uses GEMINI_API_KEY).
+  SOGNI_API_KEY     Sogni key behind /admin/generator/image engine=secondary (may also be
+                    sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
+                    SOGNI_API_URL (default https://api.sogni.ai).
+  KEYHOLE_MEDIA_DIR where uploaded/generated plates are stored (mount a Railway volume
+                    here or generated cuts vanish on redeploy).
+  NOWPAYMENTS_IPN_URL
+                    where NOWPayments posts the IPN for invoices we create
+                    (default https://keyhole.cam/webhooks/nowpayments).
+  KEYHOLE_SITE_URL  the Keyhole page the buyer returns to after paying
+                    (default https://keyhole.cam/rooms.html).
   STRIPE_API_KEY    optional restricted key (Customers: read, Subscriptions: read).
                     Cancellations are matched by the customer id remembered from
                     invoice.paid; the key covers customers that never paid through this
@@ -338,9 +376,12 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 # package named in the payment's metadata/SKU to the buyer (user_id in metadata, else email).
 NEXAPAY_WEBHOOK_SECRET = os.environ.get("NEXAPAY_WEBHOOK_SECRET", "")
 NEXAPAY_SIGNATURE_HEADER = os.environ.get("NEXAPAY_SIGNATURE_HEADER", "X-Nexapay-Signature")
-NEXAPAY_PACKAGES = ("quick", "standard", "extended", "premium", "text_only")
+NEXAPAY_PACKAGES = ("intro", "quick", "standard", "extended", "long", "premium", "marathon", "text_only")
 # NOWPayments (crypto) IPN callbacks land on /webhooks/nowpayments for the same packages.
 NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
+NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
+NOWPAYMENTS_IPN_URL = os.environ.get("NOWPAYMENTS_IPN_URL", "https://keyhole.cam/webhooks/nowpayments")
+KEYHOLE_SITE_URL = os.environ.get("KEYHOLE_SITE_URL", "https://keyhole.cam/rooms.html").rstrip("/")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
@@ -364,21 +405,36 @@ AUDIT_PRICE_USD = 0.99
 # Keyhole pricing & access rules defaults
 KEYHOLE_DEFAULT_CONFIG = {
     "free_preview_minutes": 10,
-    "quick_price": 2.99,
+    "free_preview_text_included": 20,
+    "intro_price": 5.99,          # 10-minute starter, one per account for life
+    "intro_webcam_minutes": 10,
+    "intro_video_replies": 20,
+    "intro_text_included": 100,
+    "intro_lifetime_cap": 1,
+    "quick_price": 7.99,
     "quick_webcam_minutes": 15,
     "quick_video_replies": 35,
     "quick_text_included": 100,
     "quick_monthly_cap": 3,
-    "standard_price": 5.99,
+    "standard_price": 11.99,
     "standard_webcam_minutes": 30,
     "standard_video_replies": 70,
     "standard_text_included": 200,
-    "extended_price": 9.99,
+    "extended_price": 14.99,
     "extended_webcam_minutes": 45,
     "extended_video_replies": 100,
     "extended_text_included": 300,
-    "premium_price": 14.99,
+    "long_price": 17.99,
+    "long_webcam_minutes": 55,
+    "long_video_replies": 100,
+    "long_text_included": 300,
+    "premium_price": 19.99,
     "premium_webcam_minutes": 60,
+    "premium_text_included": 300,
+    "marathon_price": 23.99,
+    "marathon_webcam_minutes": 75,
+    "marathon_video_replies": 120,
+    "marathon_text_included": 400,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
     "text_only_price": 1.99,
@@ -1107,6 +1163,8 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_balance INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_sessions_bought_this_month INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_only_bought_this_month INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS intro_bought INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS free_preview_claimed_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_started_at TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS webcam_session_duration_s INTEGER NOT NULL DEFAULT 0;
                 -- Telegram users: the Telegram id is the login; /auth/telegram/link can
@@ -3606,9 +3664,7 @@ async function importMediaUrlAsset(){
         is_fallback:$('#mIsFallback').checked,
         is_enabled:$('#mIsEnabled').checked,
         target_format:$('#mFormat').value,
-        download_remote:true,
-        key1:'Westfall13!',
-        key2:'Saintkiller13!'
+        download_remote:true
       })
     });
     toast('Media URL imported!');
@@ -6661,7 +6717,11 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
             quick_cap = int(cfg.get("quick_monthly_cap", 3))
             text_cap = int(cfg.get("text_only_monthly_cap", 1))
 
-            if pkg == "quick":
+            if pkg == "intro":
+                intro_cap = int(cfg.get("intro_lifetime_cap", 1))
+                if int(user.get("intro_bought", 0)) >= intro_cap:
+                    raise HTTPException(status_code=400, detail="The 10-minute starter can only be bought once per account.")
+            elif pkg == "quick":
                 if int(user.get("quick_sessions_bought_this_month", 0)) >= quick_cap:
                     raise HTTPException(status_code=400, detail=f"Monthly limit of {quick_cap} Quick Sessions reached.")
             elif pkg == "text_only":
@@ -6674,7 +6734,12 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
             add_video_replies = 0
             add_fresh_videos = 0
 
-            if pkg == "quick":
+            if pkg == "intro":
+                add_webcam = int(cfg.get("intro_webcam_minutes", 10))
+                add_video_replies = int(cfg.get("intro_video_replies", 20))
+                add_text = int(cfg.get("intro_text_included", 100))
+                cur.execute("UPDATE users SET intro_bought = intro_bought + 1 WHERE user_id=%s", (user_id,))
+            elif pkg == "quick":
                 add_webcam = int(cfg.get("quick_webcam_minutes", 15))
                 add_video_replies = int(cfg.get("quick_video_replies", 35))
                 add_text = int(cfg.get("quick_text_included", 100))
@@ -6687,8 +6752,17 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
                 add_webcam = int(cfg.get("extended_webcam_minutes", 45))
                 add_video_replies = int(cfg.get("extended_video_replies", 100))
                 add_text = int(cfg.get("extended_text_included", 300))
+            elif pkg == "long":
+                add_webcam = int(cfg.get("long_webcam_minutes", 55))
+                add_video_replies = int(cfg.get("long_video_replies", 100))
+                add_text = int(cfg.get("long_text_included", 300))
+            elif pkg == "marathon":
+                add_webcam = int(cfg.get("marathon_webcam_minutes", 75))
+                add_video_replies = int(cfg.get("marathon_video_replies", 120))
+                add_text = int(cfg.get("marathon_text_included", 400))
             elif pkg == "premium":
                 add_webcam = int(cfg.get("premium_webcam_minutes", 60))
+                add_text = int(cfg.get("premium_text_included", 300))
                 add_fresh_videos = int(cfg.get("premium_fresh_videos", 3))
                 # Add picture credits
                 pics = int(cfg.get("premium_premade_pictures", 5))
@@ -6746,6 +6820,178 @@ def keyhole_session_start(user=Depends(current_user)):
             return {"ok": True, "started_at": str(row["webcam_session_started_at"]), "minutes_left": row["webcam_minutes_left"]}
     finally:
         conn.close()
+
+
+def _account_email(user_id: str) -> Optional[str]:
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT email FROM accounts WHERE user_id=%s", (user_id,))
+            row = cur.fetchone()
+            return row["email"] if row else None
+    finally:
+        conn.close()
+
+
+def _keyhole_package_for_amount(amount_total, currency) -> str:
+    """The single Keyhole package whose configured USD price equals a Stripe amount
+    (minor units), or '' when none or more than one matches."""
+    if amount_total is None or (currency or "usd").lower() != "usd":
+        return ""
+    cfg = get_keyhole_config()
+    hits = [p for p in NEXAPAY_PACKAGES
+            if round(float(cfg.get(f"{p}_price", 0) or 0) * 100) == int(amount_total)
+            and float(cfg.get(f"{p}_price", 0) or 0) > 0]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def _keyhole_packages(cfg) -> List[Dict[str, Any]]:
+    out = []
+    for p in NEXAPAY_PACKAGES:
+        out.append({
+            "package": p,
+            "price": float(cfg.get(f"{p}_price", 0) or 0),
+            "webcam_minutes": int(cfg.get(f"{p}_webcam_minutes", 0) or 0),
+            "text_included": int(cfg.get(f"{p}_text_included", 0) or 0),
+        })
+    return out
+
+
+@app.get("/keyhole/packages")
+def keyhole_packages():
+    """The Keyhole packages and the prices a NOWPayments invoice charges for them."""
+    return {"packages": _keyhole_packages(get_keyhole_config())}
+
+
+@app.get("/keyhole/me")
+def keyhole_me(user=Depends(current_user)):
+    """The signed-in customer's Keyhole entitlements, for the keyhole.cam page."""
+    uid = user["user_id"]
+    session = check_keyhole_session_active(uid)  # expires a finished session before the read
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webcam_minutes_left, text_balance, video_replies_left, fresh_videos_left, "
+                        "intro_bought, free_preview_claimed_at FROM users WHERE user_id=%s", (uid,))
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    cfg = get_keyhole_config()
+    return {
+        "user_id": uid,
+        "email": _account_email(uid),
+        "webcam_minutes_left": int(row.get("webcam_minutes_left") or 0),
+        "text_balance": int(row.get("text_balance") or 0),
+        "video_replies_left": int(row.get("video_replies_left") or 0),
+        "fresh_videos_left": int(row.get("fresh_videos_left") or 0),
+        "session_active": bool(session.get("active")),
+        "session_minutes_left": int(session.get("minutes_left") or 0),
+        "free_preview_available": row.get("free_preview_claimed_at") is None,
+        "intro_available": int(row.get("intro_bought") or 0) < int(cfg.get("intro_lifetime_cap", 1)),
+    }
+
+
+@app.post("/keyhole/preview/claim")
+def keyhole_preview_claim(user=Depends(current_user)):
+    """Grant the one-time free preview (free_preview_minutes) to the signed-in account.
+    Exactly once per account, for life; a second claim is a 400."""
+    uid = user["user_id"]
+    cfg = get_keyhole_config()
+    minutes = int(cfg.get("free_preview_minutes", 10))
+    text = int(cfg.get("free_preview_text_included", 20))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET free_preview_claimed_at = now(),
+                    webcam_minutes_left = webcam_minutes_left + %s,
+                    text_balance = text_balance + %s
+                WHERE user_id=%s AND free_preview_claimed_at IS NULL
+                RETURNING webcam_minutes_left, text_balance
+            """, (minutes, text, uid))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=400, detail="Your free preview has already been used.")
+    return {"ok": True, "minutes_granted": minutes,
+            "webcam_minutes_left": int(row["webcam_minutes_left"]),
+            "text_balance": int(row["text_balance"])}
+
+
+class KeyholeInvoiceIn(BaseModel):
+    package: str
+
+
+def _check_keyhole_package_cap(user_id: str, pkg: str, cfg) -> None:
+    """Refuse to sell a capped package (intro / quick / text_only) the account can no
+    longer receive, so a customer is not invoiced for a grant that would fail."""
+    if pkg not in ("intro", "quick", "text_only"):
+        return
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT quick_sessions_bought_this_month, text_only_bought_this_month, intro_bought "
+                        "FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    if pkg == "intro":
+        if int(row.get("intro_bought") or 0) >= int(cfg.get("intro_lifetime_cap", 1)):
+            raise HTTPException(status_code=400, detail="The 10-minute starter can only be bought once per account.")
+    elif pkg == "quick":
+        cap = int(cfg.get("quick_monthly_cap", 3))
+        if int(row.get("quick_sessions_bought_this_month") or 0) >= cap:
+            raise HTTPException(status_code=400, detail=f"Monthly limit of {cap} Quick Sessions reached.")
+    else:
+        cap = int(cfg.get("text_only_monthly_cap", 1))
+        if int(row.get("text_only_bought_this_month") or 0) >= cap:
+            raise HTTPException(status_code=400, detail=f"Monthly limit of {cap} Text-Only package reached.")
+
+
+@app.post("/keyhole/nowpayments/invoice")
+def keyhole_nowpayments_invoice(body: KeyholeInvoiceIn, user=Depends(current_user)):
+    """Create a NOWPayments invoice for one Keyhole package, priced from the Keyhole
+    config, with order_id '<user_id>:<package>' so the IPN (/webhooks/nowpayments)
+    grants it to this account when the payment finishes."""
+    if not NOWPAYMENTS_API_KEY:
+        raise HTTPException(status_code=503, detail="NOWPAYMENTS_API_KEY must be set")
+    pkg = body.package.lower().strip()
+    if pkg not in NEXAPAY_PACKAGES:
+        raise HTTPException(status_code=400, detail="Unknown package")
+    cfg = get_keyhole_config()
+    price = float(cfg.get(f"{pkg}_price", 0) or 0)
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="Package has no price")
+    uid = user["user_id"]
+    _check_keyhole_package_cap(uid, pkg, cfg)
+    payload = {
+        "price_amount": price,
+        "price_currency": "usd",
+        "order_id": f"{uid}:{pkg}",
+        "order_description": f"Keyhole {pkg} package",
+        "ipn_callback_url": NOWPAYMENTS_IPN_URL,
+        "success_url": f"{KEYHOLE_SITE_URL}?paid={pkg}",
+        "cancel_url": KEYHOLE_SITE_URL,
+    }
+    email = _account_email(uid)
+    if email:
+        payload["customer_email"] = email
+    try:
+        r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload,
+                          headers={"x-api-key": NOWPAYMENTS_API_KEY}, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"NOWPayments unreachable: {e}")
+    if r.status_code >= 400:
+        print(f"[nowpayments] invoice for {uid}/{pkg} failed {r.status_code}: {r.text[:300]}")
+        raise HTTPException(status_code=502, detail="NOWPayments refused the invoice")
+    inv = r.json()
+    if not inv.get("invoice_url"):
+        raise HTTPException(status_code=502, detail="NOWPayments returned no invoice_url")
+    return {"ok": True, "invoice_id": str(inv.get("id")), "invoice_url": inv["invoice_url"],
+            "package": pkg, "price": price}
 
 
 class CharacterEngineEvaluateIn(BaseModel):
@@ -7951,6 +8197,9 @@ async def stripe_webhook(request: Request):
             return {"ok": True, "ignored": "not paid yet"}
         meta = obj.get("metadata") or {}
         package = meta.get("package") or meta.get("sku") or ""
+        if not package:
+            # Payment Links without metadata: match the charged amount to a package price
+            package = _keyhole_package_for_amount(obj.get("amount_total"), obj.get("currency"))
         if not package:
             return {"ok": True, "ignored": "no package metadata"}
         ref = (obj.get("client_reference_id") or meta.get("user_id") or "").strip()
@@ -9303,38 +9552,6 @@ def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[byte
     return content, ext, mime_type, m_type
 
 
-SECRET_KEY_1 = os.environ.get("LOCK_KEY_WESTFALL", "Westfall13!")
-SECRET_KEY_2 = os.environ.get("LOCK_KEY_SAINTKILLER", "Saintkiller13!")
-
-
-def _verify_dual_secret_locks(
-    key1: Optional[str] = None,
-    key2: Optional[str] = None,
-    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
-    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
-) -> bool:
-    """
-    Dual secret lock validation. Both Key 1 (Westfall13!) and Key 2 (Saintkiller13!) must be turned.
-    If valid, the green matrix shield activates. If invalid, triggers a warning log notification and HTTP 403 response.
-    """
-    provided_key1 = (key1 or x_westfall_key or "").strip()
-    provided_key2 = (key2 or x_saintkiller_key or "").strip()
-
-    valid_key1 = hmac.compare_digest(provided_key1.encode(), SECRET_KEY_1.encode())
-    valid_key2 = hmac.compare_digest(provided_key2.encode(), SECRET_KEY_2.encode())
-
-    if not (valid_key1 and valid_key2):
-        logger.warning(
-            f"SECURITY ALERT / WARNING: Dual secret lock breach attempt! Key1 valid: {valid_key1}, Key2 valid: {valid_key2}"
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="Dual lock access denied: both Westfall and Saintkiller secrets required to disarm shield."
-        )
-
-    logger.info("SECURITY MATRIX: Green matrix shield active. Dual lock authorized.")
-    return True
-
 
 class AdminMediaUrlIn(BaseModel):
     character_id: str
@@ -9394,6 +9611,8 @@ def _validate_character_exists(char_id: str):
     cid = char_id.strip().lower()
     if not cid:
         raise HTTPException(status_code=400, detail="character_id is required")
+    if cid in KEYHOLE_CHARACTERS:
+        return cid
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -9639,13 +9858,8 @@ async def admin_upload_media(
 
 
 @app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
-def admin_import_media_url(
-    body: AdminMediaUrlIn,
-    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
-    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
-):
+def admin_import_media_url(body: AdminMediaUrlIn):
     """Import an external media URL or webpage, fetching assets locally with anti-bot bypass & format options."""
-    _verify_dual_secret_locks(key1=body.key1, key2=body.key2, x_westfall_key=x_westfall_key, x_saintkiller_key=x_saintkiller_key)
     char_id = _validate_character_exists(body.character_id)
     url = _validate_media_url(body.url)
 
@@ -9693,6 +9907,324 @@ def admin_import_media_url(
             return {"ok": True, "asset": dict(asset)}
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE PLATE GENERATORS (ADMIN)
+# Default action on the show floor is to play a plate from the girl's folder; these
+# routes are how a plate gets made. Every generated file is saved into media_assets
+# tagged with its beat, so the plate engine (GET /keyhole/plates) picks it up and the
+# same cut is a plate from then on. Nothing here fetches from third-party sites.
+# ---------------------------------------------------------------------------
+KEYHOLE_CHARACTERS = ("bailey", "chloe")
+PLATE_BEATS = ("idle", "tease", "give", "stop", "presence")
+VIDEO_MODEL = os.environ.get("VIDEO_MODEL", "veo-3.1-fast-generate-preview")
+SOGNI_API_URL = os.environ.get("SOGNI_API_URL", "https://api.sogni.ai")
+SOGNI_IMAGE_MODEL = os.environ.get("SOGNI_IMAGE_MODEL", "krea-2-turbo")
+SOGNI_API_KEY = os.environ.get("SOGNI_API_KEY", "")
+_WEBCAM_JOBS: Dict[str, Dict[str, Any]] = {}
+_WEBCAM_JOBS_LOCK = threading.Lock()
+
+
+def _keyhole_character(char_id: str) -> str:
+    cid = (char_id or "").strip().lower()
+    if cid in KEYHOLE_CHARACTERS:
+        return cid
+    return _validate_character_exists(cid)
+
+
+def _plate_beat(beat: Optional[str]) -> str:
+    b = (beat or "").strip().lower()
+    if b and b not in PLATE_BEATS:
+        raise HTTPException(status_code=400, detail=f"beat must be one of {', '.join(PLATE_BEATS)}")
+    return b
+
+
+def _save_generated_asset(char_id: str, content: bytes, ext: str, media_type: str, title: str,
+                          tags: List[str]) -> Dict[str, Any]:
+    """Write generated bytes under UPLOAD_DIR and register them as a media asset."""
+    safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
+    with open(os.path.join(UPLOAD_DIR, safe_name), "wb") as f:
+        f.write(content)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO media_assets (character_id, title, media_type, url, file_path, tags)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id, character_id, title, media_type, url, file_path, tags,
+                          is_default, is_fallback, is_enabled, created_at, updated_at
+            """, (char_id, title[:200], media_type, f"/media/files/{safe_name}", safe_name,
+                  Json(_parse_tags_input(tags))))
+            asset = dict(cur.fetchone())
+            conn.commit()
+            return asset
+    finally:
+        conn.close()
+
+
+def _asset_bytes(asset: Dict[str, Any]) -> Optional[tuple]:
+    """(bytes, mime) for a stored media asset; None if the file is not local."""
+    if not asset.get("file_path"):
+        return None
+    path = os.path.join(UPLOAD_DIR, os.path.basename(asset["file_path"]))
+    if not os.path.isfile(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+            ".gif": "image/gif"}.get(ext)
+    if not mime:
+        return None
+    with open(path, "rb") as f:
+        return f.read(), mime
+
+
+def _character_reference(char_id: str, asset_id: Optional[int]) -> Optional[tuple]:
+    """The girl's skin: reference image bytes used to keep every generated cut looking like her.
+    An explicit asset_id wins; otherwise the newest enabled image tagged 'skin' or 'reference'."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            if asset_id:
+                cur.execute("SELECT * FROM media_assets WHERE id=%s AND character_id=%s", (asset_id, char_id))
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Reference asset not found for this character")
+                data = _asset_bytes(dict(row))
+                if not data:
+                    raise HTTPException(status_code=400, detail="Reference asset must be a locally stored image")
+                return data
+            cur.execute("""
+                SELECT * FROM media_assets
+                WHERE character_id=%s AND media_type='image' AND is_enabled
+                  AND (tags ? 'skin' OR tags ? 'reference')
+                ORDER BY created_at DESC
+            """, (char_id,))
+            for row in cur.fetchall() or []:
+                data = _asset_bytes(dict(row))
+                if data:
+                    return data
+    finally:
+        conn.close()
+    return None
+
+
+def _secondary_image(prompt: str, api_key: str) -> tuple:
+    """Text-to-image on Sogni: one-step generate_image workflow, polled to completion; returns (bytes, ext)."""
+    key = (api_key or SOGNI_API_KEY).strip()
+    if not key:
+        raise HTTPException(status_code=503, detail="Secondary generator needs a Sogni key (SOGNI_API_KEY or api_key)")
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    r = requests.post(f"{SOGNI_API_URL}/v1/creative-agent/workflows", headers=headers, timeout=60, json={
+        "input": {"title": "Keyhole plate", "steps": [
+            {"id": "image1", "toolName": "generate_image",
+             "arguments": {"prompt": prompt[:4000], "model": SOGNI_IMAGE_MODEL}}]},
+        "confirm_cost": True, "app_source": "keyhole-admin"})
+    if r.status_code not in (200, 201, 202):
+        raise HTTPException(status_code=502, detail=f"Sogni failed ({r.status_code}): {r.text[:300]}")
+    try:
+        wf_id = r.json()["data"]["workflow"]["workflowId"]
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected Sogni response")
+    deadline = time.time() + MODEL_TIMEOUT_S
+    url = ""
+    while time.time() < deadline:
+        s = requests.get(f"{SOGNI_API_URL}/v1/creative-agent/workflows/{wf_id}", headers=headers, timeout=30)
+        if s.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Sogni poll failed ({s.status_code}): {s.text[:300]}")
+        wf = ((s.json() or {}).get("data") or {}).get("workflow") or {}
+        status = str(wf.get("status") or "").lower()
+        steps = wf.get("steps") or []
+        arts = (steps[0].get("artifacts") if steps and isinstance(steps[0], dict) else None) or []
+        if arts and arts[0].get("url"):
+            url = arts[0]["url"]
+            break
+        if status in ("failed", "cancelled", "canceled", "error", "rejected"):
+            why = str(wf.get("error") or "")
+            if not why:
+                try:
+                    ev = requests.get(f"{SOGNI_API_URL}/v1/creative-agent/workflows/{wf_id}/events", headers=headers, timeout=30).json()
+                    evs = (ev.get("data") or {}).get("events") or ev.get("data") or []
+                    why = next((e.get("message", "") for e in reversed(evs) if isinstance(e, dict) and e.get("status") == "failed"), "")
+                except Exception:
+                    why = ""
+            raise HTTPException(status_code=502, detail=f"Sogni workflow {status}: {why[:300]}")
+        if status in ("completed", "succeeded", "success"):
+            break
+        time.sleep(3)
+    if not url:
+        raise HTTPException(status_code=504, detail="Sogni did not return an image in time")
+    img = requests.get(url, timeout=120)
+    if img.status_code != 200 or not img.content:
+        raise HTTPException(status_code=502, detail="Could not download Sogni output")
+    ctype = (img.headers.get("Content-Type") or "").lower()
+    ext = ".jpg" if "jpeg" in ctype else (".webp" if "webp" in ctype else ".png")
+    return img.content, ext
+
+
+class GeneratorImageIn(BaseModel):
+    prompt: str
+    character: str = "bailey"
+    beat: Optional[str] = ""
+    engine: str = "primary"          # 'primary' (Gemini) or 'secondary' (Sogni)
+    reference_asset_id: Optional[int] = None
+    use_reference: bool = True
+    api_key: Optional[str] = None    # secondary engine only; never stored
+    title: Optional[str] = ""
+
+
+@app.post("/admin/generator/image", dependencies=[Depends(admin_required)])
+def admin_generator_image(body: GeneratorImageIn):
+    """Generate a still for a girl and save it as her plate/reference.
+    primary: Gemini image model; with a reference image it is image-to-image so the result keeps her
+    look (the 'skin'). secondary: OpenAI-compatible images API with its own key. The result is a
+    media asset tagged [beat, 'generated', engine]; beat may be empty for a plain reference still."""
+    char_id = _keyhole_character(body.character)
+    beat = _plate_beat(body.beat)
+    prompt = (body.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    engine = (body.engine or "primary").strip().lower()
+    if engine not in ("primary", "secondary"):
+        raise HTTPException(status_code=400, detail="engine must be 'primary' or 'secondary'")
+
+    ref = _character_reference(char_id, body.reference_asset_id) if body.use_reference else None
+    if engine == "primary":
+        if ref:
+            mime, b64 = _gemini_image_edit(ref[0], ref[1],
+                                           f"Keep this exact same woman, face, hair, body and outfit style. {prompt}")
+        else:
+            mime, b64 = generate_avatar(prompt)
+        content = base64.b64decode(b64)
+        ext = ".jpg" if "jpeg" in mime else ".png"
+    else:
+        content, ext = _secondary_image(prompt, body.api_key or "")
+
+    tags = [t for t in (beat, "generated", engine, "skinned" if ref else "") if t]
+    title = (body.title or "").strip() or f"{char_id.capitalize()} {beat or 'still'} ({engine})"
+    asset = _save_generated_asset(char_id, content, ext, "image", title, tags)
+    return {"ok": True, "asset": asset, "url": asset["url"], "used_reference": bool(ref), "engine": engine}
+
+
+class GeneratorWebcamIn(BaseModel):
+    prompt: str
+    character: str = "bailey"
+    beat: str = "idle"
+    reference_asset_id: Optional[int] = None
+    use_reference: bool = True
+    duration_seconds: int = 8
+    aspect_ratio: str = "16:9"
+    title: Optional[str] = ""
+
+
+def _veo_headers():
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    return {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+
+
+@app.post("/admin/generator/webcam", dependencies=[Depends(admin_required)])
+def admin_generator_webcam(body: GeneratorWebcamIn):
+    """Start an AI motion clip (Veo, VIDEO_MODEL) for a girl's beat. With a reference image the clip is
+    image-to-video from her skin so it is her on cam. Returns a job id; poll
+    GET /admin/generator/webcam/{job_id}. When done the clip is saved as a media asset tagged
+    [beat, 'webcam', 'generated'] and is that beat's plate from then on."""
+    char_id = _keyhole_character(body.character)
+    beat = _plate_beat(body.beat) or "idle"
+    prompt = (body.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    aspect = body.aspect_ratio if body.aspect_ratio in ("16:9", "9:16") else "16:9"
+    duration = body.duration_seconds if body.duration_seconds in (4, 6, 8) else 8
+
+    instance: Dict[str, Any] = {"prompt": f"Locked static webcam view, single continuous shot, no cuts, no camera movement. {prompt}"}
+    ref = _character_reference(char_id, body.reference_asset_id) if body.use_reference else None
+    if ref:
+        instance["image"] = {"bytesBase64Encoded": base64.b64encode(ref[0]).decode(), "mimeType": ref[1]}
+    payload = {"instances": [instance],
+               "parameters": {"aspectRatio": aspect, "durationSeconds": duration, "sampleCount": 1,
+                              "personGeneration": "allow_adult"}}
+    r = requests.post(f"{GEMINI_BASE}/{VIDEO_MODEL}:predictLongRunning", json=payload,
+                      headers=_veo_headers(), timeout=MODEL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Video model failed ({r.status_code}): {r.text[:300]}")
+    op_name = (r.json() or {}).get("name") or ""
+    if not op_name:
+        raise HTTPException(status_code=502, detail="Video model returned no operation")
+
+    job_id = secrets.token_hex(8)
+    with _WEBCAM_JOBS_LOCK:
+        _WEBCAM_JOBS[job_id] = {
+            "job_id": job_id, "operation": op_name, "status": "running", "character": char_id, "beat": beat,
+            "prompt": prompt, "used_reference": bool(ref), "title": (body.title or "").strip(),
+            "duration_seconds": duration, "asset": None, "error": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    return {"ok": True, "job_id": job_id, "status": "running", "used_reference": bool(ref), "model": VIDEO_MODEL}
+
+
+@app.get("/admin/generator/webcam/{job_id}", dependencies=[Depends(admin_required)])
+def admin_generator_webcam_status(job_id: str):
+    """Poll a webcam generation job. status: running | done (asset set) | error."""
+    with _WEBCAM_JOBS_LOCK:
+        job = _WEBCAM_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unknown job (jobs live in memory until the server restarts)")
+    if job["status"] != "running":
+        return {"ok": True, "job": job}
+
+    base = GEMINI_BASE.rsplit("/models", 1)[0]
+    r = requests.get(f"{base}/{job['operation']}", headers=_veo_headers(), timeout=60)
+    if r.status_code != 200:
+        job["status"], job["error"] = "error", f"Poll failed ({r.status_code}): {r.text[:300]}"
+        return {"ok": True, "job": job}
+    data = r.json() or {}
+    if not data.get("done"):
+        return {"ok": True, "job": job}
+    if data.get("error"):
+        job["status"], job["error"] = "error", str(data["error"])[:500]
+        return {"ok": True, "job": job}
+    try:
+        samples = data["response"]["generateVideoResponse"]["generatedSamples"]
+        uri = samples[0]["video"]["uri"]
+    except Exception:
+        filtered = ((data.get("response") or {}).get("generateVideoResponse") or {}).get("raiMediaFilteredReasons")
+        job["status"], job["error"] = "error", (f"Filtered by the model: {filtered}" if filtered else "No video in response")
+        return {"ok": True, "job": job}
+    vid = requests.get(uri, headers={"x-goog-api-key": GEMINI_API_KEY}, timeout=300, allow_redirects=True)
+    if vid.status_code != 200 or not vid.content:
+        job["status"], job["error"] = "error", f"Download failed ({vid.status_code})"
+        return {"ok": True, "job": job}
+    tags = [job["beat"], "webcam", "generated", "skinned" if job["used_reference"] else ""]
+    title = job["title"] or f"{job['character'].capitalize()} {job['beat']} (webcam)"
+    job["asset"] = _save_generated_asset(job["character"], vid.content, ".mp4", "video", title, [t for t in tags if t])
+    job["status"] = "done"
+    return {"ok": True, "job": job}
+
+
+@app.get("/keyhole/plates")
+def keyhole_plates():
+    """Plate manifest for the plate engine: every enabled media asset tagged with a beat, grouped
+    character -> beat -> [{url, variant, media_type}]. A beat with no file is OFF on the floor."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT character_id, url, media_type, tags FROM media_assets
+                WHERE is_enabled ORDER BY created_at ASC
+            """)
+            rows = cur.fetchall() or []
+    finally:
+        conn.close()
+    chars: Dict[str, Dict[str, list]] = {c: {b: [] for b in PLATE_BEATS} for c in KEYHOLE_CHARACTERS}
+    for r in rows:
+        tags = [str(t).lower() for t in (r.get("tags") or [])]
+        variant = next((t.split(":", 1)[1] for t in tags if t.startswith("variant:")), "")
+        folder = chars.setdefault(r["character_id"], {b: [] for b in PLATE_BEATS})
+        for beat in PLATE_BEATS:
+            if beat in tags:
+                folder[beat].append({"url": r["url"], "variant": variant, "media_type": r["media_type"]})
+    return {"ok": True, "characters": chars}
 
 
 @app.post("/admin/media/{asset_id}/update", dependencies=[Depends(admin_required)])

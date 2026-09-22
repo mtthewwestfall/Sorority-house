@@ -262,27 +262,15 @@ class TestWebcamMediaManager(unittest.TestCase):
         self.assertEqual(mime, "video/mp4")
 
     @patch("main.db")
-    def test_dual_secret_lock_and_warning_system(self, mock_db):
-        headers = {"X-Admin-Secret": "test-admin-secret"}
-
-        # 1. Reject without secret keys
-        res_fail = client.post("/admin/media/import-url", headers=headers, json={
+    def test_import_url_needs_only_admin_secret(self, mock_db):
+        # 1. Reject without the admin secret
+        res_fail = client.post("/admin/media/import-url", json={
             "character_id": "zoe",
             "url": "https://example.com/video.mp4"
         })
         self.assertEqual(res_fail.status_code, 403)
-        self.assertIn("Dual lock access denied", res_fail.json()["detail"])
 
-        # 2. Reject with only 1 correct key
-        res_half = client.post("/admin/media/import-url", headers=headers, json={
-            "character_id": "zoe",
-            "url": "https://example.com/video.mp4",
-            "key1": "Westfall13!",
-            "key2": "WrongKey"
-        })
-        self.assertEqual(res_half.status_code, 403)
-
-        # 3. Accept with both correct keys
+        # 2. Accept with ADMIN_SECRET alone (no second password)
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_cur.fetchone.return_value = {
@@ -300,12 +288,10 @@ class TestWebcamMediaManager(unittest.TestCase):
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
         mock_db.return_value = mock_conn
 
-        res_ok = client.post("/admin/media/import-url", headers=headers, json={
+        res_ok = client.post("/admin/media/import-url", headers={"X-Admin-Secret": "test-admin-secret"}, json={
             "character_id": "zoe",
             "url": "https://example.com/video.mp4",
-            "download_remote": False,
-            "key1": "Westfall13!",
-            "key2": "Saintkiller13!"
+            "download_remote": False
         })
         self.assertEqual(res_ok.status_code, 200)
         self.assertTrue(res_ok.json()["ok"])
