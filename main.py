@@ -7154,6 +7154,21 @@ def keyhole_packages():
     return {"packages": _keyhole_packages(get_keyhole_config())}
 
 
+@app.get("/keyhole/scene-config")
+def keyhole_scene_config():
+    """Retrieve Keyhole webcam room, model sprite, and futuristic equipment scene configuration."""
+    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "webcam", "scene_config.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                data["ok"] = True
+                return data
+        except Exception:
+            pass
+    return {"ok": True, "rooms": {}, "models": {}, "equipment": {}}
+
+
 @app.get("/keyhole/me")
 def keyhole_me(user=Depends(current_user)):
     """The signed-in customer's Keyhole entitlements, for the keyhole.cam page."""

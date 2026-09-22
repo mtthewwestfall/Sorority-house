@@ -21,6 +21,19 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertIn("shows", data)
         self.assertGreaterEqual(len(data["shows"]), 1)
 
+    def test_get_scene_config(self):
+        response = self.client.get("/keyhole/scene-config")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data.get("ok"))
+        self.assertIn("quick_setup", data)
+        self.assertIn("equipment", data)
+        webcams = data["equipment"]["webcams"]
+        cam_ids = [w["id"] for w in webcams]
+        self.assertIn("logitech_mx_brio_8k_quantum", cam_ids)
+        self.assertIn("emeet_s800_pro_holographic", cam_ids)
+        self.assertIn("obsbot_tiny_3_ai_gimbal_max", cam_ids)
+
     def test_unauthorized_access(self):
         # Incorrect secret
         response = self.client.get("/admin/keyhole/shows", headers={"X-Admin-Secret": "wrong-secret"})
