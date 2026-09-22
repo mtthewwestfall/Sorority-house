@@ -68,6 +68,10 @@ API CONTRACT implemented here (point your chat app at these):
                                                             metadata/SKU (quick, standard, extended,
                                                             premium, text_only) to metadata.user_id,
                                                             else the account with the payer's email
+  POST /webhooks/nowpayments                             -> NOWPayments IPN: payment_status
+                                                            'finished' grants the Keyhole package
+                                                            named in order_id ('<user_id>:<package>')
+                                                            or order_description
   POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
                                                             the account remembered for the customer,
                                                             else the one with the customer's email,
@@ -146,6 +150,9 @@ Env vars (Railway -> Variables):
                     the /webhooks/nexapay route refuses with 503 until it is set.
   NEXAPAY_SIGNATURE_HEADER
                     header NexaPay puts the signature in (default X-Nexapay-Signature).
+  NOWPAYMENTS_IPN_SECRET
+                    NOWPayments IPN secret (HMAC-SHA512 of the key-sorted body in
+                    x-nowpayments-sig); /webhooks/nowpayments refuses with 503 until set.
   STRIPE_API_KEY    optional restricted key (Customers: read, Subscriptions: read).
                     Cancellations are matched by the customer id remembered from
                     invoice.paid; the key covers customers that never paid through this
@@ -331,6 +338,8 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 NEXAPAY_WEBHOOK_SECRET = os.environ.get("NEXAPAY_WEBHOOK_SECRET", "")
 NEXAPAY_SIGNATURE_HEADER = os.environ.get("NEXAPAY_SIGNATURE_HEADER", "X-Nexapay-Signature")
 NEXAPAY_PACKAGES = ("quick", "standard", "extended", "premium", "text_only")
+# NOWPayments (crypto) IPN callbacks land on /webhooks/nowpayments for the same packages.
+NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
@@ -6835,65 +6844,142 @@ class NexaPayPaymentProvider(BasePaymentProvider):
 
         package = str(_nexapay_find(event, "package", "package_type", "sku", "product_code",
                                     "product_id", "plan", "product_name", "description") or "")
-        pkg = package.lower().strip().replace("-", "_").replace(" ", "_")
-        match = next((p for p in NEXAPAY_PACKAGES if p in pkg), None)
-        if match is None:
-            print(f"[nexapay] {payment_id}: no Keyhole package in '{package}', ignored")
-            return {"ok": True, "ignored": f"unknown package '{package}'"}
-
         ref = _nexapay_find(event, "user_id", "client_reference_id", "custom_id", "reference", "reference_id")
-        user = None
-        if ref:
-            conn = db()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (str(ref),))
-                    user = cur.fetchone()
-            finally:
-                conn.close()
-        if user is None:
-            email = _nexapay_find(event, "email", "customer_email", "payer_email", "buyer_email")
-            if not email:
-                return {"ok": True, "ignored": "no user reference or email"}
-            try:
-                user = _user_for_email(str(email))
-            except HTTPException:
-                print(f"[nexapay] {payment_id}: no account for {email}, ignored")
-                return {"ok": True, "ignored": "no account"}
-
-        # claim the payment (pending), fulfil, then mark granted; a retry of a claimed but
-        # unfulfilled payment (crash, DB error, cap) fulfils it instead of skipping it
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("INSERT INTO keyhole_payments (payment_id, provider, user_id, package) "
-                            "VALUES (%s,%s,%s,%s) ON CONFLICT (payment_id) DO NOTHING",
-                            (payment_id, self.provider_name, user["user_id"], match))
-                cur.execute("SELECT granted FROM keyhole_payments WHERE payment_id=%s", (payment_id,))
-                row = cur.fetchone()
-                conn.commit()
-        finally:
-            conn.close()
-        if row and row["granted"]:
-            return {"ok": True, "ignored": "already granted", "user_id": user["user_id"]}
-        try:
-            granted = grant_keyhole_package(user["user_id"], match)
-        except HTTPException as e:
-            # Package cap hit or bad state: leave the claim pending, report it, and
-            # answer 200 so NexaPay stops retrying (the next event for it retries the grant).
-            print(f"[nexapay] {payment_id}: {match} for {user['user_id']} not granted: {e.detail}")
-            return {"ok": False, "user_id": user["user_id"], "package": match, "error": e.detail}
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE keyhole_payments SET granted=TRUE WHERE payment_id=%s", (payment_id,))
-                conn.commit()
-        finally:
-            conn.close()
-        return {"ok": True, "user_id": user["user_id"], "package": match, "granted": granted}
+        email = _nexapay_find(event, "email", "customer_email", "payer_email", "buyer_email")
+        return _fulfil_keyhole_payment(self.provider_name, payment_id, package, ref, email)
 
     def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
         return {"ok": True, "provider": "nexapay", "status": "payment_link"}
+
+
+def _keyhole_package_in(text) -> Optional[str]:
+    """The Keyhole package named somewhere in a SKU / description / order id, or None."""
+    pkg = str(text or "").lower().strip().replace("-", "_").replace(" ", "_")
+    return next((p for p in NEXAPAY_PACKAGES if p in pkg), None)
+
+
+def _fulfil_keyhole_payment(provider: str, payment_id: str, package, ref, email) -> Dict[str, Any]:
+    """Grant the Keyhole package named in `package` for one paid webhook event, once.
+    payment_id must already carry the provider prefix. The buyer is the account whose
+    user_id is `ref`, else the account with `email`. The payment is claimed (pending)
+    before fulfilment and marked granted after, so a retry of a claimed-but-unfulfilled
+    payment (crash, DB error, package cap) fulfils it instead of skipping it."""
+    match = _keyhole_package_in(package)
+    if match is None:
+        print(f"[{provider}] {payment_id}: no Keyhole package in '{package}', ignored")
+        return {"ok": True, "ignored": f"unknown package '{package}'"}
+
+    user = None
+    if ref:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users WHERE user_id=%s", (str(ref),))
+                user = cur.fetchone()
+        finally:
+            conn.close()
+    if user is None:
+        if not email:
+            return {"ok": True, "ignored": "no user reference or email"}
+        try:
+            user = _user_for_email(str(email))
+        except HTTPException:
+            print(f"[{provider}] {payment_id}: no account for {email}, ignored")
+            return {"ok": True, "ignored": "no account"}
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO keyhole_payments (payment_id, provider, user_id, package) "
+                        "VALUES (%s,%s,%s,%s) ON CONFLICT (payment_id) DO NOTHING",
+                        (payment_id, provider, user["user_id"], match))
+            cur.execute("SELECT granted FROM keyhole_payments WHERE payment_id=%s", (payment_id,))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if row and row["granted"]:
+        return {"ok": True, "ignored": "already granted", "user_id": user["user_id"]}
+    try:
+        granted = grant_keyhole_package(user["user_id"], match)
+    except HTTPException as e:
+        # Package cap hit or bad state: leave the claim pending, report it, and answer
+        # 200 so the provider stops retrying (its next event for it retries the grant).
+        print(f"[{provider}] {payment_id}: {match} for {user['user_id']} not granted: {e.detail}")
+        return {"ok": False, "user_id": user["user_id"], "package": match, "error": e.detail}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE keyhole_payments SET granted=TRUE WHERE payment_id=%s", (payment_id,))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "user_id": user["user_id"], "package": match, "granted": granted}
+
+
+def _nowpayments_sorted(obj):
+    if isinstance(obj, dict):
+        return {k: _nowpayments_sorted(obj[k]) for k in sorted(obj)}
+    if isinstance(obj, list):
+        return [_nowpayments_sorted(v) for v in obj]
+    return obj
+
+
+class NOWPaymentsProvider(BasePaymentProvider):
+    """NOWPayments IPN callbacks for Keyhole session packages. The x-nowpayments-sig
+    header is HMAC-SHA512 (hex) over the JSON body with its keys sorted recursively,
+    keyed by NOWPAYMENTS_IPN_SECRET. Only payment_status 'finished' grants; every
+    other status (waiting, confirming, confirmed, sending, partially_paid, failed,
+    refunded, expired) is acknowledged and ignored. The package comes from order_id /
+    order_description (e.g. order_id '<user_id>:standard' or 'keyhole-quick'); the
+    buyer from the user_id in order_id (before the ':'), else the customer email."""
+    provider_name: str = "nowpayments"
+
+    @staticmethod
+    def _signed(raw_body: bytes, event: dict, header: str) -> bool:
+        if not header:
+            return False
+        given = header.strip().lower()
+        key = NOWPAYMENTS_IPN_SECRET.encode()
+        # NOWPayments' reference: JSON.stringify(sorted body); accept the raw body too
+        candidates = [raw_body]
+        for kw in ({"separators": (",", ":"), "ensure_ascii": False},
+                   {"separators": (",", ":"), "ensure_ascii": True}):
+            candidates.append(json.dumps(_nowpayments_sorted(event), **kw).encode())
+        for body in candidates:
+            if hmac.compare_digest(hmac.new(key, body, hashlib.sha512).hexdigest(), given):
+                return True
+        return False
+
+    def process_webhook(self, raw_body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+        if not NOWPAYMENTS_IPN_SECRET:
+            raise HTTPException(status_code=503, detail="NOWPAYMENTS_IPN_SECRET must be set")
+        try:
+            event = json.loads(raw_body)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        if not isinstance(event, dict):
+            raise HTTPException(status_code=400, detail="Bad JSON")
+        sig = next((v for k, v in headers.items() if k.lower() == "x-nowpayments-sig"), "")
+        if not self._signed(raw_body, event, sig):
+            raise HTTPException(status_code=401, detail="Bad NOWPayments signature")
+
+        status = str(event.get("payment_status") or "").lower()
+        if status != "finished":
+            return {"ok": True, "ignored": f"not a paid event ({status or 'unknown'})"}
+        payment_id = event.get("payment_id") or event.get("invoice_id") or event.get("purchase_id")
+        if not payment_id:
+            return {"ok": True, "ignored": "no payment id"}
+        payment_id = f"nowpayments:{payment_id}"
+
+        order_id = str(event.get("order_id") or "")
+        ref = order_id.split(":", 1)[0].strip() if ":" in order_id else None
+        package = order_id if _keyhole_package_in(order_id) else event.get("order_description")
+        email = event.get("customer_email") or event.get("email")
+        return _fulfil_keyhole_payment(self.provider_name, payment_id, package, ref, email)
+
+    def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
+        return {"ok": True, "provider": "nowpayments", "status": "payment_link"}
 
 
 class PaymentGatewayManager:
@@ -6902,6 +6988,7 @@ class PaymentGatewayManager:
         self.register_provider(ShopifyPaymentProvider())
         self.register_provider(StripePaymentProvider())
         self.register_provider(NexaPayPaymentProvider())
+        self.register_provider(NOWPaymentsProvider())
 
     def register_provider(self, provider: BasePaymentProvider):
         self._providers[provider.provider_name] = provider
@@ -7207,6 +7294,22 @@ async def nexapay_webhook(request: Request):
     return payment_manager.get_provider("nexapay").process_webhook(raw, dict(request.headers))
 
 
+@app.post("/webhooks/nowpayments")
+async def nowpayments_webhook(request: Request):
+    """NOWPayments IPN callback for the Keyhole packages (see NOWPaymentsProvider).
+    Refuses with 503 until NOWPAYMENTS_IPN_SECRET is set."""
+    if not NOWPAYMENTS_IPN_SECRET:
+        raise HTTPException(status_code=503, detail="NOWPAYMENTS_IPN_SECRET must be set")
+    if int(request.headers.get("Content-Length") or 0) > WEBHOOK_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > WEBHOOK_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Payload too large")
+    return payment_manager.get_provider("nowpayments").process_webhook(raw, dict(request.headers))
+
+
 @app.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
     """Stripe webhook for the subscription Payment Links. invoice.paid (first charge and
@@ -7261,6 +7364,18 @@ async def stripe_webhook(request: Request):
         pi = pi if isinstance(pi, str) else (pi or {}).get("id", "") or ""
         _affitor_stamp(applied, sub, pi)
         return {"ok": True, "user_id": applied, "tier": tier}
+
+    if kind == "checkout.session.completed" and obj.get("mode") == "payment":
+        # one-time Keyhole Payment Link: the package sits in the link's metadata
+        if obj.get("payment_status") != "paid":
+            return {"ok": True, "ignored": "not paid yet"}
+        meta = obj.get("metadata") or {}
+        package = meta.get("package") or meta.get("sku") or ""
+        if not package:
+            return {"ok": True, "ignored": "no package metadata"}
+        ref = (obj.get("client_reference_id") or meta.get("user_id") or "").strip()
+        email = (obj.get("customer_details") or {}).get("email") or obj.get("customer_email")
+        return _fulfil_keyhole_payment("stripe", f"stripe:{obj.get('id')}", package, ref or None, email)
 
     if kind == "checkout.session.completed":
         ref = (obj.get("client_reference_id") or "").strip()
