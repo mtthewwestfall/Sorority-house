@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 from fastapi.exceptions import HTTPException
@@ -308,6 +309,80 @@ class TestWebcamMediaManager(unittest.TestCase):
         self.assertEqual(ext, ".webp")
         self.assertEqual(mime, "image/webp")
         self.assertTrue(len(converted_bytes) > 0)
+
+    def test_ftyp_later_in_the_header_is_video(self):
+        content = b"\x00" * 16 + b"ftypisom" + b"\x00" * 32
+        m_type, ext, mime = main._detect_and_validate_media_signature(
+            content, file_url="https://cdn.example.com/clip.mp4")
+        self.assertEqual(m_type, "video")
+        self.assertEqual(ext, ".mp4")
+        self.assertEqual(mime, "video/mp4")
+
+    @patch("main._fetch_remote_media")
+    @patch("main.db")
+    def test_remote_reference_is_cached_locally(self, mock_db, mock_fetch):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        mock_fetch.return_value = (png, ".png", "image/png", "image")
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = {
+            "id": 7, "character_id": "chloe",
+            "url": "https://cdn.example.com/chloe-skin.png",
+            "file_path": "", "media_type": "image", "tags": ["skin", "reference"],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(main, "UPLOAD_DIR", folder):
+                data = main._character_reference("chloe", 7)
+            self.assertEqual(data[0], png)
+            self.assertEqual(data[1], "image/png")
+            names = os.listdir(folder)
+        self.assertTrue(any(name.startswith("skin_chloe_") and name.endswith(".png") for name in names))
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.kwargs.get("prefer"), "image")
+
+    def test_disk_skin_satisfies_explicit_reference_without_database(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            Image.new("RGB", (4, 4), color="red").save(os.path.join(folder, "skin_chloe_saved.png"))
+            with patch.object(main, "UPLOAD_DIR", folder):
+                with patch.object(main, "db", side_effect=HTTPException(status_code=500, detail="DATABASE_URL not set")):
+                    data = main._character_reference("chloe", 44)
+        self.assertTrue(data[0].startswith(b"\x89PNG"))
+        self.assertEqual(data[1], "image/png")
+
+    @patch("main._character_reference", return_value=(b"skin", "image/png"))
+    def test_video_import_stays_video_and_marks_skin(self, _ref):
+        content, ext, mime, media_type, skinned = main._apply_character_skin_bytes(
+            "chloe", b"video-bytes", ".mp4", "video/mp4", "video")
+        self.assertEqual(content, b"video-bytes")
+        self.assertEqual(media_type, "video")
+        self.assertEqual(ext, ".mp4")
+        self.assertTrue(skinned)
+
+    @patch("main._save_generated_asset", return_value={"id": 3, "url": "/media/files/chloe_loop.mp4"})
+    @patch("main._apply_character_skin_bytes", return_value=(b"vid", ".mp4", "video/mp4", "video", True))
+    @patch("main._fetch_remote_media", return_value=(b"vid", ".mp4", "video/mp4", "video"))
+    @patch("main._validate_media_url", side_effect=lambda url: url)
+    def test_content_record_keeps_video_and_applies_skin(self, _valid, mock_fetch, mock_skin, mock_save):
+        res = client.post("/admin/keyhole/content/record", headers={"X-Admin-Secret": "test-admin-secret"}, json={
+            "character_id": "chloe",
+            "url": "https://cdn.example.com/loop.mp4",
+            "tag": "tease",
+            "loop_seconds": 120,
+        })
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["media_type"], "video")
+        self.assertTrue(body["skinned"])
+        self.assertEqual(body["loop_seconds"], 120)
+        self.assertEqual(mock_skin.call_args.args[0], "chloe")
+        saved_tags = mock_save.call_args.args[5]
+        self.assertIn("skinned", saved_tags)
+        self.assertIn("loop:120", saved_tags)
+        self.assertIn("download", saved_tags)
+
 
 if __name__ == "__main__":
     unittest.main()

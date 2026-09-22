@@ -46,9 +46,8 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
 
         # Mock current_user dependency via patch or endpoint logic testing
-        # 1. Private show creation
+        # 1. Private show creation. Chloe is a built-in character, so there is no personas lookup.
         mock_cur.fetchone.side_effect = [
-            {"girl": "chloe"}, # Persona check in _validate_character_exists
             None, # No existing active private show
             { # Show row created
                 "show_id": "priv_123", "show_type": "private", "character_id": "chloe",
@@ -141,9 +140,8 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
         mock_db.return_value = mock_conn
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
 
-        # 1. Create Public Show
+        # 1. Create Public Show. Bailey is a built-in character, so there is no personas lookup.
         mock_cur.fetchone.side_effect = [
-            {"girl": "bailey"}, # Persona check in _validate_character_exists
             None, # Insert notification announcement 1
             None, # Insert notification announcement 2
             {"show_id": "pub_456", "show_type": "public", "character_id": "bailey", "status": "SCHEDULED", "price": 4.99}
@@ -194,6 +192,96 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
         mock_cur.fetchone.return_value = None # ON CONFLICT DO NOTHING returned no inserted row
         sent = main._send_keyhole_notification(mock_cur, "pub_789", "announcement", "telegram")
         self.assertFalse(sent)
+
+    def test_vip_passcode_is_not_a_payment(self):
+        with self.assertRaises(HTTPException) as ctx:
+            main.keyhole_record_show_payment("priv_123", "usr_alice", "KEY-VIP-ROOM")
+        self.assertEqual(ctx.exception.status_code, 402)
+
+    def test_vip_room_rejects_cheat_and_unpaid(self):
+        user = {"user_id": "usr_alice"}
+        for code in ("KEY-VIP-ROOM", "KEY-VIP", "VIP", "MEMBER", "key-vip-extra"):
+            with self.assertRaises(HTTPException) as ctx:
+                main.keyhole_room_unlock(main.KeyholeRoomUnlockIn(passcode=code), user)
+            self.assertEqual(ctx.exception.status_code, 402)
+
+    @patch("main.db")
+    def test_vip_room_requires_paid_purchase(self, mock_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        user = {"user_id": "usr_alice"}
+        mock_cur.fetchone.return_value = {"paid_keyhole_purchases": 0}
+        with self.assertRaises(HTTPException) as ctx:
+            main.keyhole_room_unlock(main.KeyholeRoomUnlockIn(passcode=""), user)
+        self.assertEqual(ctx.exception.status_code, 402)
+
+        mock_cur.fetchone.return_value = {"paid_keyhole_purchases": 1}
+        opened = main.keyhole_room_unlock(main.KeyholeRoomUnlockIn(passcode=""), user)
+        self.assertTrue(opened["vip_room"])
+        self.assertEqual(opened["room"], "bedroom")
+
+    @patch("main.db")
+    def test_pay_prefix_without_ledger_is_rejected(self, mock_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.side_effect = [
+            {"show_id": "priv_123", "show_type": "private", "price": 19.99, "status": "PAYMENT_PENDING"},
+            None,  # no entitlement yet
+            None,  # payment id not consumed
+            None,  # stripe_checkouts miss
+            None,  # picture_payments miss
+            None,  # keyhole_payments miss
+        ]
+        with self.assertRaises(HTTPException) as ctx:
+            main.keyhole_record_show_payment("priv_123", "usr_alice", "pay_not_real")
+        self.assertEqual(ctx.exception.status_code, 402)
+        self.assertIn("unverified", ctx.exception.detail.lower())
+
+    @patch("main.db")
+    def test_purchase_adds_rollover_message_credits(self, mock_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchall.return_value = []
+        mock_cur.fetchone.side_effect = [
+            {"user_id": "usr_alice", "intro_bought": 0, "quick_sessions_bought_this_month": 0,
+             "text_only_bought_this_month": 0, "text_balance": 7},
+            {"text_balance": 107, "message_credits": 100, "webcam_minutes_left": 10,
+             "video_replies_left": 20, "fresh_videos_left": 0, "pic_credits": 0,
+             "paid_keyhole_purchases": 1},
+        ]
+        granted = main.grant_keyhole_package("usr_alice", "intro")
+        self.assertEqual(granted["entitlements"]["message_credits"], 100)
+        sqls = " ".join(str(c.args[0]) for c in mock_cur.execute.call_args_list)
+        self.assertIn("message_credits = message_credits +", sqls)
+        self.assertIn("preview_message_credits", sqls)
+        self.assertIn("paid_keyhole_purchases = paid_keyhole_purchases + 1", sqls)
+
+    @patch("main.get_relationship", return_value={"summary": ""})
+    @patch("main.check_keyhole_session_active")
+    @patch("main.girl_open", return_value=True)
+    @patch("main.db")
+    def test_preview_messages_spend_before_paid_credits(self, mock_db, _open, _session, _rel):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.side_effect = [
+            {"preview_message_credits": 50, "message_credits": 40, "paid_keyhole_purchases": 0,
+             "free_preview_claimed_at": "2026-01-01", "webcam_minutes_left": 10,
+             "webcam_session_started_at": None},
+            {"preview_message_credits": 49},
+        ]
+        _girl, _row, remaining = main.chat_preflight(
+            {"user_id": "usr_alice", "tier": "visitor"}, "chloe")
+        self.assertEqual(remaining, 49)
+        first_update = mock_cur.execute.call_args_list[1].args[0]
+        self.assertIn("preview_message_credits = preview_message_credits - 1", first_update)
 
 
 if __name__ == "__main__":
