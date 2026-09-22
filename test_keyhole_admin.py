@@ -9,7 +9,7 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         os.environ["ADMIN_SECRET"] = "test-admin-secret"
         self.headers = {"X-Admin-Secret": "test-admin-secret"}
         self.client = TestClient(main.app)
-        # Reset shows state
+        # Reset demo shows state
         self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "reset"}, headers=self.headers)
 
     def test_get_shows(self):
@@ -24,6 +24,19 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         # Incorrect secret
         response = self.client.get("/admin/keyhole/shows", headers={"X-Admin-Secret": "wrong-secret"})
         self.assertEqual(response.status_code, 403)
+
+    def test_state_machine_validation(self):
+        sim_resp = self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "private_request"}, headers=self.headers)
+        shows = sim_resp.json()["shows"]
+        show_id = [s for s in shows if s["show_type"] == "private"][-1]["id"]
+
+        # Attempting to END a show that is READY (not LIVE) should fail with 400
+        end_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/end", headers=self.headers)
+        self.assertEqual(end_fail.status_code, 400)
+
+        # Attempting to PUBLISH a show that is READY (not PREVIEW_READY) should fail with 400
+        pub_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/publish-preview", json={"publish_telegram": True}, headers=self.headers)
+        self.assertEqual(pub_fail.status_code, 400)
 
     def test_private_show_workflow(self):
         # 1. Trigger private show request
@@ -81,7 +94,7 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         show_id = show["id"]
         self.assertEqual(show["character"], "Bailey")
         self.assertEqual(show["status"], "SCHEDULED")
-        self.assertEqual(show["viewer_count"], 23)
+        self.assertEqual(show["viewer_count"], 0)
 
         # 2. Start Public Show
         start_resp = self.client.post(f"/admin/keyhole/shows/{show_id}/start", headers=self.headers)

@@ -1220,7 +1220,7 @@ def init_db():
                     id                 TEXT PRIMARY KEY,
                     show_type          TEXT NOT NULL, -- 'private' or 'public'
                     customer           TEXT DEFAULT '',
-                    character          TEXT NOT NULL,
+                    "character"        TEXT NOT NULL,
                     status             TEXT NOT NULL, -- 'READY', 'LIVE', 'ENDED', 'PROCESSING', 'PREVIEW_READY', 'PUBLISHED'
                     scheduled_at       TEXT DEFAULT '',
                     price              TEXT DEFAULT '',
@@ -1229,6 +1229,7 @@ def init_db():
                     preview_url        TEXT DEFAULT '',
                     published_telegram BOOLEAN DEFAULT FALSE,
                     published_website  BOOLEAN DEFAULT FALSE,
+                    is_demo            BOOLEAN DEFAULT FALSE,
                     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
@@ -2755,8 +2756,8 @@ pre{white-space:pre-wrap;margin:0}
 .kh-preview-box video { width: 100%; max-height: 280px; display: block; }
 </style></head><body>
 <header><h1>God's Greek · Admin</h1>
-<nav><button id="tabKhShow" class="on" onclick="show('khShow')">🔴 Keyhole Show Control</button>
-<button id="tabOvw" onclick="show('ovw')">Overview</button>
+<nav><button id="tabOvw" class="on" onclick="show('ovw')">Overview</button>
+<button id="tabKhShow" onclick="show('khShow')">🔴 Keyhole Show Control</button>
 <button id="tabAcc" onclick="showAccounts()">Website Accounts</button>
 <button id="tabWebcamAcc" onclick="showWebcamAccounts()">🎥 WebCam Show Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
@@ -2770,13 +2771,15 @@ pre{white-space:pre-wrap;margin:0}
 <div class="row2"><input id="secret" type="password" placeholder="ADMIN_SECRET" style="min-width:280px">
 <button class="p" onclick="login()">Unlock</button></div><div class="mut">Set ADMIN_SECRET on the server; it is required for every action here.</div></div>
 
-<section id="khShow">
+<section id="khShow" class="hid">
   <div class="kh-container">
-    <div style="display:flex; gap:8px; flex-wrap:wrap; background:#121218; padding:10px; border-radius:8px; border:1px solid var(--line);">
-      <span style="font-size:12px; color:var(--mut); width:100%">⚡ Quick Testing Simulation Controls:</span>
-      <button class="s" style="flex:1" onclick="simulateDemoAction('private_request')">+ Private Request</button>
-      <button class="s" style="flex:1" onclick="simulateDemoAction('reset')">↻ Reset Panel</button>
-    </div>
+    <details style="margin-bottom:8px; background:#121218; border:1px solid var(--line); border-radius:8px; padding:8px 12px;">
+      <summary style="cursor:pointer; font-weight:600; color:var(--mut); font-size:13px;">⚡ Testing &amp; Simulation Tools (Demo Data Only)</summary>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <button class="s" style="flex:1" onclick="simulateDemoAction('private_request')">+ Simulate Private Request</button>
+        <button class="s" style="flex:1" onclick="simulateDemoAction('reset')">↻ Reset Demo Data</button>
+      </div>
+    </details>
 
     <div id="khShowsList">
       <div style="text-align:center; padding:30px; color:var(--mut);">Loading Keyhole Show Panel...</div>
@@ -3350,8 +3353,8 @@ async function choosePreviewChoice(id, useAsPreview, btn) {
 
 async function publishPreviewShow(id, btn) {
   if (btn.disabled) return;
-  const tgBox = $('#tg-' + id);
-  const webBox = $('#web-' + id);
+  const tgBox = document.getElementById('tg-' + id);
+  const webBox = document.getElementById('web-' + id);
   btn.disabled = true;
   const oldText = btn.innerHTML;
   btn.innerHTML = '<span>⏳ Publishing...</span>';
@@ -3622,7 +3625,7 @@ async function deleteMediaAsset(id){
 async function loadDoors(){try{const r=await api('/admin/console/doors');$('#dLocked').checked=r.doors_locked;$('#dRule').classList.toggle('hid',!r.doors_locked);$('#dSet').value=r.door_set;
  $('#dStage').innerHTML=[1,2,3,4,5,6,7,8].map(s=>`<option value="${s}"${s===r.unlock_stage?' selected':''}>M${s}</option>`).join('')}catch(e){toast(e.message,true)}}
 async function saveDoors(){try{await api('/admin/console/doors',{method:'POST',body:JSON.stringify({doors_locked:$('#dLocked').checked,door_set:+$('#dSet').value,unlock_stage:+$('#dStage').value})});toast('Saved - live on the next reload');loadDoors()}catch(e){toast(e.message,true)}}
-async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('khShow');loadKeyholeShows();loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
+async function login(){SECRET=$('#secret').value;try{await api('/admin/accounts?limit=1');sessionStorage.setItem('adm',SECRET);$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}catch(e){toast(e.message,true)}}
 function logout(){SECRET='';sessionStorage.removeItem('adm');$('#login').classList.remove('hid');for(const k in TABS)$('#'+k).classList.add('hid')}
 async function loadOverview(){try{const s=await api('/admin/overview');const st=(l,v,sub)=>`<div class="card"><div class="lbl">${l}</div><div class="stat">${v}</div>${sub?`<div class="mut">${sub}</div>`:''}</div>`;
  $('#stats').innerHTML=st('Accounts',s.accounts,`+${s.accounts_7d} this week · ${s.telegram||0} on Telegram`)+st('Paying',s.tiers.sophomore+s.tiers.junior+s.tiers.senior,`${s.tiers.senior} sr · ${s.tiers.junior} jr · ${s.tiers.sophomore} so`)+st('Trial',s.tiers.freshman)+st('Comped',s.comped)
@@ -3786,7 +3789,7 @@ async function runGenerator(){
   }
 }
 
-if(SECRET){$('#login').classList.add('hid');show('khShow');loadKeyholeShows();loadAccounts();countOpen()}
+if(SECRET){$('#login').classList.add('hid');show('ovw');loadAccounts();countOpen()}
 </script></body></html>"""
 
 
@@ -7550,6 +7553,7 @@ _KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {
         "preview_url": "",
         "published_telegram": False,
         "published_website": False,
+        "is_demo": True,
         "created_at": "2025-01-01T00:00:00Z",
         "updated_at": "2025-01-01T00:00:00Z"
     }
@@ -7563,10 +7567,8 @@ def _get_all_shows_db() -> List[Dict[str, Any]]:
         conn = db()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM keyhole_shows ORDER BY created_at DESC")
+                cur.execute('SELECT * FROM keyhole_shows ORDER BY created_at DESC')
                 rows = cur.fetchall()
-                if not rows:
-                    return list(_KEYHOLE_SHOWS_CACHE.values())
                 res = []
                 for r in rows:
                     res.append({
@@ -7582,6 +7584,7 @@ def _get_all_shows_db() -> List[Dict[str, Any]]:
                         "preview_url": str(r.get("preview_url") or ""),
                         "published_telegram": bool(r.get("published_telegram")),
                         "published_website": bool(r.get("published_website")),
+                        "is_demo": bool(r.get("is_demo")),
                         "created_at": str(r.get("created_at") or ""),
                         "updated_at": str(r.get("updated_at") or "")
                     })
@@ -7602,12 +7605,12 @@ def _save_show_db(show: Dict[str, Any]) -> None:
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO keyhole_shows (
-                        id, show_type, customer, character, status, scheduled_at, price, details, viewer_count, preview_url, published_telegram, published_website, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        id, show_type, customer, "character", status, scheduled_at, price, details, viewer_count, preview_url, published_telegram, published_website, is_demo, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                     ON CONFLICT (id) DO UPDATE SET
                         show_type = EXCLUDED.show_type,
                         customer = EXCLUDED.customer,
-                        character = EXCLUDED.character,
+                        "character" = EXCLUDED."character",
                         status = EXCLUDED.status,
                         scheduled_at = EXCLUDED.scheduled_at,
                         price = EXCLUDED.price,
@@ -7616,6 +7619,7 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                         preview_url = EXCLUDED.preview_url,
                         published_telegram = EXCLUDED.published_telegram,
                         published_website = EXCLUDED.published_website,
+                        is_demo = EXCLUDED.is_demo,
                         updated_at = now()
                 """, (
                     show["id"],
@@ -7629,7 +7633,8 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                     show.get("viewer_count", 0),
                     show.get("preview_url", ""),
                     show.get("published_telegram", False),
-                    show.get("published_website", False)
+                    show.get("published_website", False),
+                    show.get("is_demo", False)
                 ))
             conn.commit()
         finally:
@@ -7665,10 +7670,11 @@ def admin_create_public_show(body: CreatePublicShowIn):
         "scheduled_at": body.scheduled_at or "Tonight — 8:00 PM",
         "price": body.price or "$4.99",
         "details": body.details or "",
-        "viewer_count": 23,
+        "viewer_count": 0,
         "preview_url": "",
-        "published_telegram": True,
-        "published_website": True,
+        "published_telegram": False,
+        "published_website": False,
+        "is_demo": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -7682,6 +7688,8 @@ def admin_start_keyhole_show(show_id: str):
     show = shows.get(show_id)
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
+    if show["status"] not in ("READY", "SCHEDULED"):
+        raise HTTPException(status_code=400, detail=f"Cannot start show in state {show['status']}")
     show["status"] = "LIVE"
     show["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_show_db(show)
@@ -7694,6 +7702,8 @@ def admin_end_keyhole_show(show_id: str):
     show = shows.get(show_id)
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
+    if show["status"] != "LIVE":
+        raise HTTPException(status_code=400, detail=f"Cannot end show in state {show['status']}")
 
     show["status"] = "PREVIEW_READY"
     show["preview_url"] = f"/assets/webcam/{show['character'].lower()}_preview.mp4"
@@ -7712,6 +7722,8 @@ def admin_preview_choice(show_id: str, body: PreviewChoiceIn):
     show = shows.get(show_id)
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
+    if show["status"] != "PREVIEW_READY":
+        raise HTTPException(status_code=400, detail=f"Cannot process preview choice in state {show['status']}")
 
     if not body.use_as_preview:
         show["status"] = "ENDED"
@@ -7733,6 +7745,8 @@ def admin_publish_preview(show_id: str, body: PublishPreviewIn):
     show = shows.get(show_id)
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
+    if show["status"] != "PREVIEW_READY":
+        raise HTTPException(status_code=400, detail=f"Cannot publish preview in state {show['status']}")
 
     show["published_telegram"] = bool(body.publish_telegram)
     show["published_website"] = bool(body.publish_website)
@@ -7764,12 +7778,17 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "preview_url": "",
             "published_telegram": False,
             "published_website": False,
+            "is_demo": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         _save_show_db(show)
     elif act == "reset":
-        _KEYHOLE_SHOWS_CACHE.clear()
+        # Only clear demo simulated items, preserving real customer booked shows
+        for k in list(_KEYHOLE_SHOWS_CACHE.keys()):
+            if _KEYHOLE_SHOWS_CACHE[k].get("is_demo"):
+                del _KEYHOLE_SHOWS_CACHE[k]
+
         _KEYHOLE_SHOWS_CACHE["demo_priv_1"] = {
             "id": "demo_priv_1",
             "show_type": "private",
@@ -7783,6 +7802,7 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "preview_url": "",
             "published_telegram": False,
             "published_website": False,
+            "is_demo": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
@@ -7791,7 +7811,7 @@ def admin_demo_simulate(body: DemoSimulateIn):
                 conn = db()
                 try:
                     with conn.cursor() as cur:
-                        cur.execute("DELETE FROM keyhole_shows")
+                        cur.execute("DELETE FROM keyhole_shows WHERE is_demo = TRUE")
                     conn.commit()
                 finally:
                     conn.close()
