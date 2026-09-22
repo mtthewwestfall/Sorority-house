@@ -181,9 +181,9 @@ Env vars (Railway -> Variables):
                     NOWPayments API key; /keyhole/nowpayments/invoice refuses with 503 until set.
   VIDEO_MODEL       Veo model behind /admin/generator/webcam
                     (default veo-3.1-fast-generate-preview; uses GEMINI_API_KEY).
-  SECONDARY_IMAGE_API_URL / SECONDARY_IMAGE_MODEL / SECONDARY_IMAGE_API_KEY
-                    OpenAI-compatible images endpoint for engine=secondary (defaults
-                    api.openai.com gpt-image-1; the key may also be sent per request).
+  SOGNI_API_KEY     Sogni key behind /admin/generator/image engine=secondary (may also be
+                    sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
+                    SOGNI_API_URL (default https://api.sogni.ai).
   KEYHOLE_MEDIA_DIR where uploaded/generated plates are stored (mount a Railway volume
                     here or generated cuts vanish on redeploy).
   NOWPAYMENTS_IPN_URL
@@ -9081,9 +9081,9 @@ def admin_import_media_url(
 KEYHOLE_CHARACTERS = ("bailey", "chloe")
 PLATE_BEATS = ("idle", "tease", "give", "stop", "presence")
 VIDEO_MODEL = os.environ.get("VIDEO_MODEL", "veo-3.1-fast-generate-preview")
-SECONDARY_IMAGE_API_URL = os.environ.get("SECONDARY_IMAGE_API_URL", "https://api.openai.com/v1/images/generations")
-SECONDARY_IMAGE_MODEL = os.environ.get("SECONDARY_IMAGE_MODEL", "gpt-image-1")
-SECONDARY_IMAGE_API_KEY = os.environ.get("SECONDARY_IMAGE_API_KEY", "")
+SOGNI_API_URL = os.environ.get("SOGNI_API_URL", "https://api.sogni.ai")
+SOGNI_IMAGE_MODEL = os.environ.get("SOGNI_IMAGE_MODEL", "krea-2-turbo")
+SOGNI_API_KEY = os.environ.get("SOGNI_API_KEY", "")
 _WEBCAM_JOBS: Dict[str, Dict[str, Any]] = {}
 _WEBCAM_JOBS_LOCK = threading.Lock()
 
@@ -9172,36 +9172,63 @@ def _character_reference(char_id: str, asset_id: Optional[int]) -> Optional[tupl
 
 
 def _secondary_image(prompt: str, api_key: str) -> tuple:
-    """Text-to-image on the secondary engine (OpenAI-compatible images API); returns (bytes, ext)."""
-    key = (api_key or SECONDARY_IMAGE_API_KEY).strip()
+    """Text-to-image on Sogni: one-step generate_image workflow, polled to completion; returns (bytes, ext)."""
+    key = (api_key or SOGNI_API_KEY).strip()
     if not key:
-        raise HTTPException(status_code=503, detail="Secondary generator needs an API key (SECONDARY_IMAGE_API_KEY or api_key)")
-    r = requests.post(SECONDARY_IMAGE_API_URL,
-                      json={"model": SECONDARY_IMAGE_MODEL, "prompt": prompt[:4000], "n": 1, "size": "1024x1024"},
-                      headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                      timeout=MODEL_TIMEOUT_S)
-    if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Secondary image engine failed ({r.status_code}): {r.text[:300]}")
+        raise HTTPException(status_code=503, detail="Secondary generator needs a Sogni key (SOGNI_API_KEY or api_key)")
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    r = requests.post(f"{SOGNI_API_URL}/v1/creative-agent/workflows", headers=headers, timeout=60, json={
+        "input": {"title": "Keyhole plate", "steps": [
+            {"id": "image1", "toolName": "generate_image",
+             "arguments": {"prompt": prompt[:4000], "model": SOGNI_IMAGE_MODEL}}]},
+        "confirm_cost": True, "app_source": "keyhole-admin"})
+    if r.status_code not in (200, 201, 202):
+        raise HTTPException(status_code=502, detail=f"Sogni failed ({r.status_code}): {r.text[:300]}")
     try:
-        item = r.json()["data"][0]
+        wf_id = r.json()["data"]["workflow"]["workflowId"]
     except Exception:
-        raise HTTPException(status_code=502, detail="Unexpected secondary engine response")
-    if item.get("b64_json"):
-        return base64.b64decode(item["b64_json"]), ".png"
-    if item.get("url"):
-        img = requests.get(item["url"], timeout=60)
-        if img.status_code != 200:
-            raise HTTPException(status_code=502, detail="Could not download secondary engine output")
-        ext = ".jpg" if "jpeg" in (img.headers.get("Content-Type") or "") else ".png"
-        return img.content, ext
-    raise HTTPException(status_code=502, detail="Secondary engine returned no image")
+        raise HTTPException(status_code=502, detail="Unexpected Sogni response")
+    deadline = time.time() + MODEL_TIMEOUT_S
+    url = ""
+    while time.time() < deadline:
+        s = requests.get(f"{SOGNI_API_URL}/v1/creative-agent/workflows/{wf_id}", headers=headers, timeout=30)
+        if s.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Sogni poll failed ({s.status_code}): {s.text[:300]}")
+        wf = ((s.json() or {}).get("data") or {}).get("workflow") or {}
+        status = str(wf.get("status") or "").lower()
+        steps = wf.get("steps") or []
+        arts = (steps[0].get("artifacts") if steps and isinstance(steps[0], dict) else None) or []
+        if arts and arts[0].get("url"):
+            url = arts[0]["url"]
+            break
+        if status in ("failed", "cancelled", "canceled", "error", "rejected"):
+            why = str(wf.get("error") or "")
+            if not why:
+                try:
+                    ev = requests.get(f"{SOGNI_API_URL}/v1/creative-agent/workflows/{wf_id}/events", headers=headers, timeout=30).json()
+                    evs = (ev.get("data") or {}).get("events") or ev.get("data") or []
+                    why = next((e.get("message", "") for e in reversed(evs) if isinstance(e, dict) and e.get("status") == "failed"), "")
+                except Exception:
+                    why = ""
+            raise HTTPException(status_code=502, detail=f"Sogni workflow {status}: {why[:300]}")
+        if status in ("completed", "succeeded", "success"):
+            break
+        time.sleep(3)
+    if not url:
+        raise HTTPException(status_code=504, detail="Sogni did not return an image in time")
+    img = requests.get(url, timeout=120)
+    if img.status_code != 200 or not img.content:
+        raise HTTPException(status_code=502, detail="Could not download Sogni output")
+    ctype = (img.headers.get("Content-Type") or "").lower()
+    ext = ".jpg" if "jpeg" in ctype else (".webp" if "webp" in ctype else ".png")
+    return img.content, ext
 
 
 class GeneratorImageIn(BaseModel):
     prompt: str
     character: str = "bailey"
     beat: Optional[str] = ""
-    engine: str = "primary"          # 'primary' (Gemini) or 'secondary' (SECONDARY_IMAGE_API_URL)
+    engine: str = "primary"          # 'primary' (Gemini) or 'secondary' (Sogni)
     reference_asset_id: Optional[int] = None
     use_reference: bool = True
     api_key: Optional[str] = None    # secondary engine only; never stored
