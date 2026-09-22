@@ -394,17 +394,13 @@ PIC_TEASE_AT = 48
 PIC_TEASE_LINE = "I usually never ask this but there might be something about you, can I send you a pic soon?"
 PICTURE_PACK_HANDLE = os.environ.get("PICTURE_PACK_HANDLE", "picture-pack")   # Shopify product handle
 
-# Fruit menu codes and action translation dictionary
-FRUIT_MENU_TRANSLATIONS = {
-    "/cherries": "bra comes off",
-    "/takeoffcherries": "bra comes off",
-    "/apples": "pants come off",
-    "/takeoffapples": "pants come off",
-    "/oranges": "shirt comes off",
-    "/takeofforanges": "shirt comes off",
-    "/banana": "she sucks a dick",
-    "o/banana": "she sucks a dick",
-    "/eatabanana": "she sucks a dick"
+# Plate beats shown in admin (real Keyhole plate engine — no fruit codes)
+PLATE_BEAT_LABELS = {
+    "idle": "Idle / waiting on cam",
+    "tease": "Tease",
+    "give": "Give",
+    "stop": "Stop",
+    "presence": "Presence",
 }
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
@@ -3353,71 +3349,62 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 
 <section id="gen" class="hid">
   <div class="card">
-    <h3 style="margin-top:0">Menu Command Translation Key</h3>
-    <div class="mut" style="margin-bottom:12px">Codes sent from the menu are automatically mapped to translated action meanings.</div>
+    <h3 style="margin-top:0">Plate beats (real)</h3>
+    <div class="mut" style="margin-bottom:12px">No fruit codes. These are the Keyhole plate-engine beats already on media assets: idle, tease, give, stop, presence. Pick a girl + beat to load what is actually tagged and enabled.</div>
     <table>
       <thead>
-        <tr><th>Fruit Code</th><th>Translated Meaning</th></tr>
+        <tr><th>Beat</th><th>Meaning</th></tr>
       </thead>
       <tbody id="genTransRows">
-        <tr><td class="mut" colspan="2">Loading translation key...</td></tr>
+        <tr><td class="mut" colspan="2">Loading beats...</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="grid">
     <div class="card">
-      <h3 style="margin-top:0">Upload & Admin Office Avatar Generator</h3>
+      <h3 style="margin-top:0">Load plates</h3>
       <div style="display:flex;flex-direction:column;gap:12px">
         <div>
-          <label style="display:block;margin-bottom:4px;color:var(--mut)">Fruit Command Code / Prompt (Type freely or click preset)</label>
-          <div class="row2" style="flex-wrap:wrap;gap:4px;margin-bottom:6px">
-            <button class="s" type="button" onclick="$('#genFruitCode').value='/oranges'">/oranges</button>
-            <button class="s" type="button" onclick="$('#genFruitCode').value='/cherries'">/cherries</button>
-            <button class="s" type="button" onclick="$('#genFruitCode').value='/apples'">/apples</button>
-            <button class="s" type="button" onclick="$('#genFruitCode').value='o/banana'">o/banana</button>
-            <button class="s" type="button" onclick="$('#genFruitCode').value='/banana'">/banana</button>
-            <button class="s" type="button" onclick="$('#genFruitCode').value='/eatabanana'">/eatabanana</button>
-          </div>
-          <input id="genFruitCode" placeholder="Type any fruit code, command, or prompt freely (e.g. /oranges, /banana, custom scene)" style="width:100%" value="/oranges">
-        </div>
-        <div>
-          <label style="display:block;margin-bottom:4px;color:var(--mut)">Output Selection</label>
-          <select id="genOutputMode" style="width:100%">
-            <option value="pictures">Pictures</option>
-            <option value="video">Video</option>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Character</label>
+          <select id="genCharacter" style="width:100%">
+            <option value="chloe">Chloe</option>
+            <option value="bailey">Bailey</option>
           </select>
         </div>
         <div>
-          <label style="display:block;margin-bottom:4px;color:var(--mut)">Media Source File (Picture or Video)</label>
-          <input id="genFile" type="file" accept="image/*,video/*" style="width:100%">
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <input id="genExpand" type="checkbox" style="width:auto">
-          <label for="genExpand">Expand Surroundings (Pretend outpainting background visuals)</label>
-        </div>
-        <div>
-          <label style="display:block;margin-bottom:4px;color:var(--mut)">Extended Delay Duration (Seconds)</label>
-          <input id="genExtDuration" type="number" value="10" min="1" max="120" style="width:100%">
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <input id="genLoop" type="checkbox" checked style="width:auto">
-          <label for="genLoop">Loop Video After Extended Duration</label>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Beat</label>
+          <div class="row2" style="flex-wrap:wrap;gap:4px;margin-bottom:6px">
+            <button class="s" type="button" onclick="$('#genBeat').value='idle'">idle</button>
+            <button class="s" type="button" onclick="$('#genBeat').value='tease'">tease</button>
+            <button class="s" type="button" onclick="$('#genBeat').value='give'">give</button>
+            <button class="s" type="button" onclick="$('#genBeat').value='stop'">stop</button>
+            <button class="s" type="button" onclick="$('#genBeat').value='presence'">presence</button>
+          </div>
+          <input id="genBeat" placeholder="idle | tease | give | stop | presence" style="width:100%" value="idle">
         </div>
         <div>
-          <button class="p" style="width:100%" onclick="runGenerator()">Generate & Translate</button>
+          <label style="display:block;margin-bottom:4px;color:var(--mut)">Show</label>
+          <select id="genOutputMode" style="width:100%">
+            <option value="all">All media for this beat</option>
+            <option value="pictures">Pictures only</option>
+            <option value="video">Video only</option>
+          </select>
+        </div>
+        <div>
+          <button class="p" style="width:100%" onclick="runGenerator()">Load plates</button>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0">Translation & Extended Display</h3>
+      <h3 style="margin-top:0">Plates on this beat</h3>
       <div id="genResultBox">
-        <div class="mut">No generation run yet. Select your options and click Generate.</div>
+        <div class="mut">Pick Chloe or Bailey, a beat, then Load plates. This reads the live plate library — it does not invent fruit translations or new faces.</div>
       </div>
     </div>
   </div>
-</section>
+</section></section>
 </main>
 <div id="toast"></div>
 <script>
@@ -4183,31 +4170,24 @@ async function saveNote(){const email=CUR;try{await api('/admin/note',{method:'P
 async function loadGenerator(){
   try{
     const r=await api('/admin/generator/translations');
-    const tr=r.translations||{};
-    const rows=Object.keys(tr).map(k=>`<tr><td><code>${esc(k)}</code></td><td>${esc(tr[k])}</td></tr>`).join('');
-    $('#genTransRows').innerHTML=rows||'<tr><td colspan="2" class="mut">No translations found</td></tr>';
+    const labels=r.beat_labels||{};
+    const beats=r.beats||Object.keys(labels);
+    const rows=beats.map(k=>`<tr><td><code>${esc(k)}</code></td><td>${esc(labels[k]||k)}</td></tr>`).join('');
+    $('#genTransRows').innerHTML=rows||'<tr><td colspan="2" class="mut">No beats found</td></tr>';
   }catch(e){toast(e.message,true);}
 }
 
 async function runGenerator(){
-  const fruitCode=$('#genFruitCode').value;
+  const character=$('#genCharacter').value;
+  const beat=($('#genBeat').value||'idle').trim().toLowerCase();
   const outputMode=$('#genOutputMode').value;
-  const expand=$('#genExpand').checked;
-  const extDur=+$('#genExtDuration').value||10;
-  const loop=$('#genLoop').checked;
-  const fileEl=$('#genFile');
 
   const fd=new FormData();
-  fd.append('fruit_code',fruitCode);
+  fd.append('character',character);
+  fd.append('beat',beat);
   fd.append('output_mode',outputMode);
-  fd.append('expand_surroundings',expand?'true':'false');
-  fd.append('extended_duration_seconds',extDur);
-  fd.append('loop_enabled',loop?'true':'false');
-  if(fileEl.files&&fileEl.files[0]){
-    fd.append('file',fileEl.files[0]);
-  }
 
-  $('#genResultBox').innerHTML='<div class="mut">Generating media and rendering translation...</div>';
+  $('#genResultBox').innerHTML='<div class="mut">Loading plates from the library...</div>';
   try{
     const r=await fetch('/admin/generator/generate',{
       method:'POST',
@@ -4215,38 +4195,32 @@ async function runGenerator(){
       body:fd
     });
     const j=await r.json();
-    if(!r.ok)throw new Error(j.detail||'Generation failed');
+    if(!r.ok)throw new Error(j.detail||'Load failed');
 
+    const plates=j.plates||[];
     let previewHtml='';
-    if(j.output_mode==='video'){
-      previewHtml=`<video id="genPreviewVideo" controls ${j.loop_enabled?'loop':''} style="max-width:100%;border-radius:8px;margin-top:10px" src="${esc(j.url)}"></video>`;
+    if(!plates.length){
+      previewHtml=`<div class="mut" style="margin-top:10px">No enabled plates tagged <code>${esc(j.beat)}</code> for <b>${esc(j.character)}</b>. Upload/tag media in Media Library — do not use fruit codes.</div>`;
     }else{
-      previewHtml=`<img src="${esc(j.url)}" style="max-width:100%;border-radius:8px;margin-top:10px" alt="Generated picture">`;
+      previewHtml='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:10px">'+
+        plates.map(p=>{
+          if((p.media_type||'')==='video'){
+            return `<video controls playsinline style="width:100%;border-radius:8px;background:#000" src="${esc(p.url)}"></video>`;
+          }
+          return `<img src="${esc(p.url)}" style="width:100%;border-radius:8px" alt="${esc(j.beat)} plate">`;
+        }).join('')+'</div>';
     }
 
     $('#genResultBox').innerHTML=`
       <div class="kv">
-        <div>Fruit Code Sent</div><div><code>${esc(j.fruit_code)}</code></div>
-        <div>Translated Meaning</div><div><b>${esc(j.translated_meaning)}</b></div>
-        <div>Output Mode</div><div>${esc(j.output_mode)}</div>
-        <div>Generator Style</div><div>Real Realistic Character (${esc(j.generator_location||'Admin Office')})</div>
-        <div>Creator Status</div><div>${esc(j.creator_status||'Listening - Review mode only')}</div>
-        <div>Clone Bot Status</div><div>${esc(j.clone_bot_status||'Listening - Review mode only')}</div>
-        <div>Surroundings Context</div><div>${esc(j.surrounding_description)}</div>
-        <div>Video Loop Config</div><div>${esc(j.loop_description)}</div>
+        <div>Character</div><div><b>${esc(j.character)}</b></div>
+        <div>Beat</div><div><code>${esc(j.beat)}</code> — ${esc(j.beat_label||'')}</div>
+        <div>Plates found</div><div>${esc(String(j.count||plates.length))}</div>
+        <div>Filter</div><div>${esc(j.output_mode)}</div>
       </div>
       ${previewHtml}
     `;
-
-    if(j.output_mode==='video'&&j.loop_enabled){
-      const v=$('#genPreviewVideo');
-      if(v){
-        setTimeout(()=>{
-          v.play().catch(()=>{});
-        },j.extended_duration_seconds*1000);
-      }
-    }
-    toast('Generator execution complete');
+    toast(plates.length?`Loaded ${plates.length} plate(s)`:'No plates on that beat');
   }catch(e){
     $('#genResultBox').innerHTML=`<div style="color:var(--warn)">Error: ${esc(e.message)}</div>`;
     toast(e.message,true);
@@ -10621,88 +10595,66 @@ def _validate_media_url(url: str):
 
 @app.get("/admin/generator/translations", dependencies=[Depends(admin_required)])
 def admin_generator_translations():
-    """Get translation mappings for fruit menu codes."""
+    """Real Keyhole plate beats (fruit codes removed)."""
     return {
-        "translations": FRUIT_MENU_TRANSLATIONS,
-        "supported_codes": list(FRUIT_MENU_TRANSLATIONS.keys())
+        "beats": list(PLATE_BEATS),
+        "characters": list(KEYHOLE_CHARACTERS),
+        "beat_labels": dict(PLATE_BEAT_LABELS),
+        # Back-compat empty map so old clients do not crash
+        "translations": {},
+        "supported_codes": [],
     }
 
 
 @app.post("/admin/generator/generate", dependencies=[Depends(admin_required)])
 async def admin_generator_generate(
-    fruit_code: str = Form(...),
-    output_mode: str = Form("pictures"),
+    character: str = Form(...),
+    beat: str = Form(...),
+    output_mode: str = Form("all"),
+    # Ignored leftovers from the old fruit form (accepted so old clients do not 422)
+    fruit_code: Optional[str] = Form(None),
     expand_surroundings: bool = Form(False),
     extended_duration_seconds: int = Form(10),
     loop_enabled: bool = Form(True),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
 ):
-    """Generate or translate menu media with expanded surroundings and extended loop options."""
-    code_clean = fruit_code.strip()
-    if not code_clean.startswith("/") and not code_clean.startswith("o/"):
-        code_clean = "/" + code_clean
+    """Load real enabled plates for a character + beat from the media library.
 
-    translated = FRUIT_MENU_TRANSLATIONS.get(code_clean) or FRUIT_MENU_TRANSLATIONS.get(code_clean.lower(), "custom scene generation")
+    Does not invent fruit translations or generate new faces. Upload/tag media
+    in the Media Library; this endpoint only reads what is already tagged.
+    """
+    if fruit_code and not (character and beat):
+        raise HTTPException(
+            status_code=400,
+            detail="Fruit codes are removed. Send character (chloe|bailey) and beat (idle|tease|give|stop|presence).",
+        )
+    char_id = _keyhole_character(character)
+    beat_clean = _plate_beat(beat) or "idle"
+    mode = (output_mode or "all").strip().lower()
 
-    url = ""
-    file_path_rel = ""
-    media_type = "image" if output_mode.lower() in ("picture", "pictures", "image") else "video"
-
-    if file and file.filename:
-        filename = file.filename
-        ext = os.path.splitext(filename)[1].lower() or (".mp4" if media_type == "video" else ".png")
-        if ext not in ALLOWED_MEDIA_EXTENSIONS:
-            raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
-
-        safe_name = f"gen_{secrets.token_hex(8)}{ext}"
-        dest_path = os.path.join(UPLOAD_DIR, safe_name)
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty")
-        if len(content) > MAX_MEDIA_UPLOAD_BYTES:
-            raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size ({MAX_MEDIA_UPLOAD_BYTES} bytes)")
-
-        with open(dest_path, "wb") as f:
-            f.write(content)
-
-        file_path_rel = safe_name
-        url = f"/uploads/media/{safe_name}"
+    plates_payload = keyhole_plates()
+    plates = list(((plates_payload.get("characters") or {}).get(char_id) or {}).get(beat_clean) or [])
+    if mode in ("picture", "pictures", "image"):
+        plates = [p for p in plates if (p.get("media_type") or "") != "video"]
+        mode_out = "pictures"
+    elif mode in ("video", "videos"):
+        plates = [p for p in plates if (p.get("media_type") or "") == "video"]
+        mode_out = "video"
     else:
-        # Route to admin office avatar image generator (real realistic character style)
-        prompt_desc = f"Fruit command {code_clean} translation: {translated}"
-        try:
-            mime, b64 = generate_avatar(prompt_desc)
-            url = f"data:{mime};base64,{b64}"
-            file_path_rel = f"gen_avatar_{secrets.token_hex(4)}.png"
-        except Exception:
-            file_path_rel = f"gen_placeholder_{secrets.token_hex(4)}.png"
-            url = f"/uploads/media/{file_path_rel}"
+        mode_out = "all"
 
-    surrounding_desc = "Outpainted surrounding environment active" if expand_surroundings else "Standard focus framing"
-    loop_desc = f"Loop enabled after {extended_duration_seconds}s extended play" if (media_type == "video" and loop_enabled) else "Standard playback"
-
-    creator_status = "Fixing code - Review mode only (Target: space thought, Permission code: Westfall13!)"
-    clone_bot_status = "Fixing code - Review mode only (Target: space thought, Permission code: Westfall13!)"
-
+    label = PLATE_BEAT_LABELS.get(beat_clean, beat_clean)
     return {
         "ok": True,
-        "fruit_code": fruit_code,
-        "code_clean": code_clean,
-        "translated_meaning": translated,
-        "output_mode": media_type,
-        "expand_surroundings": expand_surroundings,
-        "surrounding_description": surrounding_desc,
-        "extended_duration_seconds": extended_duration_seconds,
-        "loop_enabled": loop_enabled,
-        "loop_description": loop_desc,
-        "url": url,
-        "file_path": file_path_rel,
-        "generator_location": "Admin Office",
-        "style": "real realistic character",
-        "creator_status": creator_status,
-        "clone_bot_status": clone_bot_status,
-        "repo_review_target": "space thought",
-        "permission_code": "Westfall13!"
+        "character": char_id,
+        "beat": beat_clean,
+        "beat_label": label,
+        "output_mode": mode_out,
+        "count": len(plates),
+        "plates": plates,
+        # Explicit: no fruit
+        "fruit_code": None,
+        "translated_meaning": f"{char_id} / {beat_clean}: {label}",
     }
 
 

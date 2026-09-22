@@ -152,25 +152,29 @@ class TestCompanionAndStyles(unittest.TestCase):
         self.assertIn("FROM companion_chat_logs", query)
         self.assertIn("WHERE user_id=%s AND companion_id=%s", query)
 
-    @patch("main.generate_avatar")
-    def test_11_admin_generator_generate(self, mock_gen_avatar):
+    @patch("main.keyhole_plates")
+    def test_11_admin_generator_generate(self, mock_plates):
         import asyncio
-        mock_gen_avatar.return_value = ("image/png", "fake_b64")
+        mock_plates.return_value = {
+            "ok": True,
+            "characters": {
+                "chloe": {
+                    "idle": [{"url": "/media/chloe_idle.jpg", "variant": "", "media_type": "image"}],
+                    "tease": [], "give": [], "stop": [], "presence": [],
+                }
+            },
+        }
         res = asyncio.run(main.admin_generator_generate(
-            fruit_code="/cherries",
+            character="chloe",
+            beat="idle",
             output_mode="pictures",
-            expand_surroundings=False,
-            extended_duration_seconds=10,
-            loop_enabled=True,
-            file=None
         ))
         self.assertTrue(res["ok"])
-        self.assertEqual(res["fruit_code"], "/cherries")
-        self.assertEqual(res["generator_location"], "Admin Office")
-        self.assertEqual(res["style"], "real realistic character")
-        self.assertIn("Westfall13!", res["creator_status"])
-        self.assertIn("Westfall13!", res["clone_bot_status"])
-        self.assertIn("data:image/png;base64,fake_b64", res["url"])
+        self.assertEqual(res["character"], "chloe")
+        self.assertEqual(res["beat"], "idle")
+        self.assertEqual(res["count"], 1)
+        self.assertEqual(res["plates"][0]["url"], "/media/chloe_idle.jpg")
+        self.assertIsNone(res["fruit_code"])
 
 if __name__ == "__main__":
     unittest.main()
