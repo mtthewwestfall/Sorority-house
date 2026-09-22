@@ -14,5 +14,38 @@
     "model_bailey_darkhair": { "spritesheet": "image_73kTTq.png", "default_tag": "webcam" },
     "model_bailey_blonde": { "spritesheet": "image_8pRo7J.png", "default_tag": "webcam" },
     "model_bailey_redhead": { "spritesheet": "image_h_lM8P.png", "default_tag": "webcam" }
+  },
+  "equipment": {
+    "webcams": [
+      {
+        "id": "logitech_mx_brio_8k_quantum",
+        "name": "Logitech MX Brio 8K Quantum AI",
+        "category": "Ultra-Fast Multi-Monitor Array",
+        "specs": "8K @ 120fps, Quantum Phase Detection AF, Zero-Latency Low-Light Neural Sync, Ultra-Wide Glass Lens",
+        "price_usd": 399.99
+      },
+      {
+        "id": "emeet_s800_pro_holographic",
+        "name": "EMEET S800 Pro Holographic Tri-Pod Array",
+        "category": "Multi-Angle Studio Rig",
+        "specs": "Dual 4K HDR Sensors, Sub-Millimeter Depth Mesh, Variable AI Lighting Compensator",
+        "price_usd": 549.99
+      },
+      {
+        "id": "obsbot_tiny_3_ai_gimbal_max",
+        "name": "Obsbot Tiny 3 AI Motorized Gimbal Max",
+        "category": "Auto-Tracking Motorized Gimbal",
+        "specs": "3-Axis AI Gimbal Tracking, Neural Phase Autofocus, Teleprompter & Vertical Studio Mount",
+        "price_usd": 499.99
+      }
+    ],
+    "lighting": {
+      "type": "Quantum Spatial LED Studio Array",
+      "features": "Color Temperature Adaptive Sync, Dynamic Shadow-Free Diffusers"
+    },
+    "capture": {
+      "depth_sensor": "Sub-millimeter LiDAR Depth Scanner",
+      "spatial_audio": "3D Beamforming Neural Mic Matrix"
+    }
   }
 }
