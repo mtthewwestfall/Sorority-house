@@ -71,6 +71,50 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
             bot._send_chat("fake-token", "carmen", "Hello")
         self.assertIn("Only Chloe and Bailey are available", str(ctx.exception))
 
+    def test_plan_links_match_rooms_packages(self):
+        """Telegram sells the same sessions, at the same prices, through the site's Stripe links."""
+        saved = {key: os.environ.get(key) for key in (
+            "PAY_LINK_15", "PAY_LINK_30", "PAY_LINK_45", "PAY_LINK_55",
+            "PAY_LINK_60", "PAY_LINK_75", "PAY_LINK_PUBLIC", "SITE_URL",
+        )}
+        for key in saved:
+            os.environ.pop(key, None)
+        os.environ["SITE_URL"] = "https://lockeddoor.ai"
+        try:
+            links = bot.plan_links()
+        finally:
+            for key, val in saved.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+        # plan_links reads SITE_URL from the module global, which was set at import.
+        # Re-read with the module's current SITE_URL so the 45-minute fallback matches the bot.
+        rooms = bot.SITE_URL + "/rooms.html"
+        by_url = {url: label for label, url in links}
+        self.assertEqual(len(links), 7)
+        labels = [label for label, _url in links]
+        self.assertEqual(labels[0], "15 min · $7.99")
+        self.assertNotIn("100 texts", labels[0])
+        self.assertNotIn("Preview", labels[0])
+        self.assertIn("https://buy.stripe.com/00w14gav1bFddlR6jLdjO09", by_url)
+        self.assertIn("https://buy.stripe.com/bJeeV67iPdNl2Hd8rTdjO08", by_url)
+        self.assertIn("https://buy.stripe.com/4gM9AM46DbFda9F23vdjO03", by_url)
+        self.assertIn("https://buy.stripe.com/9B600c0UrcJh4Pl0ZrdjO07", by_url)
+        self.assertIn("https://buy.stripe.com/5kQ5kw0UrfVtepVaA1djO04", by_url)
+        self.assertIn("https://buy.stripe.com/6oUfZh1jradL0he4098AE00", by_url)
+        self.assertIn(("45 min · $14.99 · 100 texts", rooms), links)
+        self.assertTrue(any("30 min" in label and "$11.99" in label and "100 texts" in label for label in labels))
+        self.assertTrue(any("60 min" in label and "$19.99" in label for label in labels))
+        self.assertTrue(any("75 min" in label and "$23.99" in label for label in labels))
+        self.assertTrue(any("Public Lounge" in label and "$4.99" in label for label in labels))
+        self.assertNotIn("https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02", by_url)
+
+    def test_plan_link_env_override(self):
+        with patch.dict(os.environ, {"PAY_LINK_15": "https://buy.stripe.com/override15"}, clear=False):
+            urls = [url for _label, url in bot.plan_links()]
+        self.assertIn("https://buy.stripe.com/override15", urls)
+
     def test_send_audit_disallowed_model_raises(self):
         """Verify _send_audit rejects disallowed models."""
         with self.assertRaises(bot.BackendError) as ctx:
