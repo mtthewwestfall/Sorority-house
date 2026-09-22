@@ -749,6 +749,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if data == "menu:models":
         await cmd_models(update, context)
+    elif data.startswith("buy_show:"):
+        sid = data.split(":", 1)[1]
+        await _txt(update, f"🎟️ Redirecting to checkout for show pass ({sid})…\nUse /upgrade or click below:")
+        await cmd_upgrade(update, context)
     elif data.startswith("girl:"):
         await _open_girl(update, data.split(":", 1)[1])
 

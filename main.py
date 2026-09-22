@@ -6247,12 +6247,12 @@ def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = 
                 ) VALUES (%s, 'public', %s, %s, %s, %s, %s, 'SCHEDULED')
                 RETURNING *
             """, (show_id, char_slug, show_title, show_desc, show_price, parsed_scheduled))
-            conn.commit()
 
-            # Auto-announce public show
+            # Auto-announce public show before commit so notifications persist
             _send_keyhole_notification(cur, show_id, "announcement", "telegram")
             _send_keyhole_notification(cur, show_id, "announcement", "website")
 
+            conn.commit()
             return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
