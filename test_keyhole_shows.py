@@ -86,8 +86,7 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
             {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "PAYMENT_PENDING", "price": 19.99},
             None, # check if entitlement exists for user
             None, # check if payment_id consumed
-            None, # check stripe_checkouts
-            None, # check picture_payments
+            {"subscription_id": "pay_999"}, # check stripe_checkouts
             {"show_id": "priv_123", "show_type": "private", "character_id": "chloe", "customer_id": "usr_alice", "status": "READY"} # _fetch_show_dict
         ]):
             mock_cur.fetchall.return_value = [{"user_id": "usr_alice", "granted_at": "2025-01-01"}]
@@ -193,7 +192,7 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
 
         # Duplicate notification returns False (deduplicated)
         mock_cur.fetchone.return_value = None # ON CONFLICT DO NOTHING returned no inserted row
-        sent = main._send_keyhole_notification("pub_789", "announcement", "telegram")
+        sent = main._send_keyhole_notification(mock_cur, "pub_789", "announcement", "telegram")
         self.assertFalse(sent)
 
 

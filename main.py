@@ -1249,6 +1249,7 @@ def init_db():
                     PRIMARY KEY (show_id, user_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_keyhole_entitlements_user ON keyhole_entitlements (user_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_keyhole_entitlements_payid ON keyhole_entitlements (payment_id) WHERE payment_id <> '';
 
                 -- KEYHOLE Notifications / Reminders Deduplication Log
                 CREATE TABLE IF NOT EXISTS keyhole_notifications (
@@ -6249,8 +6250,8 @@ def keyhole_create_public_show(character_id: str, scheduled_at: Optional[str] = 
             conn.commit()
 
             # Auto-announce public show
-            _send_keyhole_notification(show_id, "announcement", "telegram")
-            _send_keyhole_notification(show_id, "announcement", "website")
+            _send_keyhole_notification(cur, show_id, "announcement", "telegram")
+            _send_keyhole_notification(cur, show_id, "announcement", "website")
 
             return _fetch_show_dict(cur, show_id)
     finally:
@@ -6262,7 +6263,7 @@ def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s FOR UPDATE", (show_id,))
             show = cur.fetchone()
             if not show:
                 raise HTTPException(status_code=404, detail="Show not found")
@@ -6276,26 +6277,25 @@ def keyhole_record_show_payment(show_id: str, user_id: str, payment_id: Optional
             p_id = (payment_id or "").strip()
 
             if show_price > 0:
-                verified = False
+                if not p_id:
+                    raise HTTPException(status_code=402, detail="Payment transaction reference required.")
 
-                if p_id:
-                    # 1. Check if p_id matches an unconsumed payment for this show_id or user
-                    # Ensure payment ID has not already been consumed by an entitlement
-                    cur.execute("SELECT 1 FROM keyhole_entitlements WHERE payment_id=%s", (p_id,))
-                    if not cur.fetchone():
-                        cur.execute("SELECT 1 FROM stripe_checkouts WHERE subscription_id=%s AND user_id=%s", (p_id, user_id))
-                        if cur.fetchone():
-                            verified = True
-                        else:
-                            cur.execute("SELECT 1 FROM picture_payments WHERE payment_id=%s AND user_id=%s", (p_id, user_id))
-                            if cur.fetchone():
-                                verified = True
-                            elif p_id.startswith("pay_") or p_id.startswith("tx_") or p_id.startswith("sub_") or p_id.startswith("pi_"):
-                                # Valid payment gateway reference format
-                                verified = True
+                # Lock and verify payment_id has not already been consumed by any entitlement
+                cur.execute("SELECT 1 FROM keyhole_entitlements WHERE payment_id=%s FOR UPDATE", (p_id,))
+                if cur.fetchone():
+                    raise HTTPException(status_code=402, detail="Payment transaction reference has already been consumed.")
+
+                verified = False
+                cur.execute("SELECT 1 FROM stripe_checkouts WHERE subscription_id=%s AND user_id=%s", (p_id, user_id))
+                if cur.fetchone():
+                    verified = True
+                else:
+                    cur.execute("SELECT 1 FROM picture_payments WHERE payment_id=%s AND user_id=%s", (p_id, user_id))
+                    if cur.fetchone():
+                        verified = True
 
                 if not verified:
-                    raise HTTPException(status_code=402, detail="Valid unconsumed payment verification or payment transaction ID required.")
+                    raise HTTPException(status_code=402, detail="Invalid or unverified payment transaction ID.")
             else:
                 p_id = f"free_grant_{uuid.uuid4().hex[:10]}"
 
@@ -6405,6 +6405,23 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
         conn.close()
 
 
+def _send_keyhole_notification(cur, show_id: str, notification_type: str, target: str) -> bool:
+    """Deduplicated dispatcher for show announcements, reminders, and previews using existing cursor."""
+    cur.execute("""
+        INSERT INTO keyhole_notifications (show_id, notification_type, target)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (show_id, notification_type, target) DO NOTHING
+        RETURNING id
+    """, (show_id, notification_type, target))
+    inserted = cur.fetchone()
+    if not inserted:
+        # Already sent; idempotent bypass
+        return False
+    # Dispatch logging
+    print(f"[KEYHOLE NOTIFICATION] Dispatched {notification_type} for show {show_id} to {target}", flush=True)
+    return True
+
+
 def keyhole_moderate_preview(show_id: str, action: str, sanitized_preview_url: Optional[str] = None) -> Dict[str, Any]:
     """Approve or reject preview media for a finalized show."""
     act = action.strip().lower()
@@ -6428,30 +6445,7 @@ def keyhole_moderate_preview(show_id: str, action: str, sanitized_preview_url: O
                 WHERE show_id=%s
             """, (new_preview_status, s_url, show_id))
             conn.commit()
-            return keyhole_get_show(show_id)
-    finally:
-        conn.close()
-
-
-def _send_keyhole_notification(show_id: str, notification_type: str, target: str) -> bool:
-    """Deduplicated dispatcher for show announcements, reminders, and previews."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO keyhole_notifications (show_id, notification_type, target)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (show_id, notification_type, target) DO NOTHING
-                RETURNING id
-            """, (show_id, notification_type, target))
-            inserted = cur.fetchone()
-            conn.commit()
-            if not inserted:
-                # Already sent; idempotent bypass
-                return False
-            # Dispatch logging
-            print(f"[KEYHOLE NOTIFICATION] Dispatched {notification_type} for show {show_id} to {target}", flush=True)
-            return True
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6475,7 +6469,7 @@ def keyhole_publish_preview(show_id: str, targets: List[str]) -> Dict[str, Any]:
             for target in targets:
                 t = target.lower().strip()
                 if t in ("telegram", "website"):
-                    _send_keyhole_notification(show_id, "preview", t)
+                    _send_keyhole_notification(cur, show_id, "preview", t)
 
             cur.execute("""
                 UPDATE keyhole_shows
@@ -6483,7 +6477,7 @@ def keyhole_publish_preview(show_id: str, targets: List[str]) -> Dict[str, Any]:
                 WHERE show_id=%s
             """, (Json(new_targets), show_id))
             conn.commit()
-            return keyhole_get_show(show_id)
+            return _fetch_show_dict(cur, show_id)
     finally:
         conn.close()
 
@@ -6507,12 +6501,8 @@ def keyhole_check_viewer_access(show_id: str, user_id: str) -> Dict[str, Any]:
                     "show": dict(show)
                 }
 
-            # Check entitlement
-            cur.execute("SELECT 1 FROM keyhole_entitlements WHERE show_id=%s AND user_id=%s", (show_id, user_id))
-            entitled = bool(cur.fetchone())
-
-            # For private shows, user must be customer_id or entitled
-            if show["show_type"] == "private" and user_id != show["customer_id"] and not entitled:
+            # For private shows, user must be the customer_id
+            if show["show_type"] == "private" and user_id != show["customer_id"]:
                 return {
                     "ok": False,
                     "access": False,
@@ -6520,6 +6510,10 @@ def keyhole_check_viewer_access(show_id: str, user_id: str) -> Dict[str, Any]:
                     "status": show["status"],
                     "show": dict(show)
                 }
+
+            # Check entitlement
+            cur.execute("SELECT 1 FROM keyhole_entitlements WHERE show_id=%s AND user_id=%s", (show_id, user_id))
+            entitled = bool(cur.fetchone())
 
             if not entitled:
                 return {
@@ -7646,8 +7640,8 @@ def admin_keyhole_trigger_reminders():
             shows = cur.fetchall()
             for s in shows:
                 sid = s["show_id"]
-                sent_tg = _send_keyhole_notification(sid, "reminder", "telegram")
-                sent_web = _send_keyhole_notification(sid, "reminder", "website")
+                sent_tg = _send_keyhole_notification(cur, sid, "reminder", "telegram")
+                sent_web = _send_keyhole_notification(cur, sid, "reminder", "website")
                 if sent_tg or sent_web:
                     triggered.append(sid)
             return {"ok": True, "triggered_shows": triggered}
