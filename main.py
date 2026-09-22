@@ -63,6 +63,16 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "free_left","paid_left"}
   POST /admin/set-tier {"email","tier","secret"}       -> link a subscription to an account
                                                             by hand (tier 'visitor' = cancelled)
+  GET  /keyhole/packages                                 -> {"packages":[{"package","price",
+                                                            "webcam_minutes","text_included"}]}
+                                                            (the prices NOWPayments invoices charge)
+  GET  /keyhole/me                      (bearer)        -> {"user_id","email","webcam_minutes_left",
+                                                            "text_balance","video_replies_left",
+                                                            "fresh_videos_left","session_active"}
+  POST /keyhole/nowpayments/invoice {"package"} (bearer) -> {"invoice_id","invoice_url"}: a
+                                                            NOWPayments invoice for that package,
+                                                            order_id '<user_id>:<package>' so the
+                                                            IPN grants it to this account
   POST /webhooks/nexapay                                 -> NexaPay webhook: a paid Payment Link
                                                             grants the Keyhole package named in its
                                                             metadata/SKU (quick, standard, extended,
@@ -153,6 +163,13 @@ Env vars (Railway -> Variables):
   NOWPAYMENTS_IPN_SECRET
                     NOWPayments IPN secret (HMAC-SHA512 of the key-sorted body in
                     x-nowpayments-sig); /webhooks/nowpayments refuses with 503 until set.
+  NOWPAYMENTS_API_KEY
+                    NOWPayments API key; /keyhole/nowpayments/invoice refuses with 503 until set.
+  NOWPAYMENTS_IPN_URL
+                    where NOWPayments posts the IPN for invoices we create
+                    (default https://keyhole.cam/webhooks/nowpayments).
+  KEYHOLE_SITE_URL  the Keyhole page the buyer returns to after paying
+                    (default https://keyhole.cam/rooms.html).
   STRIPE_API_KEY    optional restricted key (Customers: read, Subscriptions: read).
                     Cancellations are matched by the customer id remembered from
                     invoice.paid; the key covers customers that never paid through this
@@ -340,6 +357,9 @@ NEXAPAY_SIGNATURE_HEADER = os.environ.get("NEXAPAY_SIGNATURE_HEADER", "X-Nexapay
 NEXAPAY_PACKAGES = ("quick", "standard", "extended", "premium", "text_only")
 # NOWPayments (crypto) IPN callbacks land on /webhooks/nowpayments for the same packages.
 NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
+NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
+NOWPAYMENTS_IPN_URL = os.environ.get("NOWPAYMENTS_IPN_URL", "https://keyhole.cam/webhooks/nowpayments")
+KEYHOLE_SITE_URL = os.environ.get("KEYHOLE_SITE_URL", "https://keyhole.cam/rooms.html").rstrip("/")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_PRICE_TIERS = {
     os.environ.get("STRIPE_PRICE_COMMUNITY", os.environ.get("STRIPE_PRICE_SOPHOMORE", "price_1UCVd7EnizOE4dLbgygZaKqC")): "community",
@@ -6573,6 +6593,106 @@ def keyhole_session_start(user=Depends(current_user)):
             return {"ok": True, "started_at": str(row["webcam_session_started_at"]), "minutes_left": row["webcam_minutes_left"]}
     finally:
         conn.close()
+
+
+def _account_email(user_id: str) -> Optional[str]:
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT email FROM accounts WHERE user_id=%s", (user_id,))
+            row = cur.fetchone()
+            return row["email"] if row else None
+    finally:
+        conn.close()
+
+
+def _keyhole_packages(cfg) -> List[Dict[str, Any]]:
+    out = []
+    for p in NEXAPAY_PACKAGES:
+        out.append({
+            "package": p,
+            "price": float(cfg.get(f"{p}_price", 0) or 0),
+            "webcam_minutes": int(cfg.get(f"{p}_webcam_minutes", 0) or 0),
+            "text_included": int(cfg.get(f"{p}_text_included", 0) or 0),
+        })
+    return out
+
+
+@app.get("/keyhole/packages")
+def keyhole_packages():
+    """The Keyhole packages and the prices a NOWPayments invoice charges for them."""
+    return {"packages": _keyhole_packages(get_keyhole_config())}
+
+
+@app.get("/keyhole/me")
+def keyhole_me(user=Depends(current_user)):
+    """The signed-in customer's Keyhole entitlements, for the keyhole.cam page."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT webcam_minutes_left, text_balance, video_replies_left, fresh_videos_left "
+                        "FROM users WHERE user_id=%s", (uid,))
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    session = check_keyhole_session_active(uid)
+    return {
+        "user_id": uid,
+        "email": _account_email(uid),
+        "webcam_minutes_left": int(row.get("webcam_minutes_left") or 0),
+        "text_balance": int(row.get("text_balance") or 0),
+        "video_replies_left": int(row.get("video_replies_left") or 0),
+        "fresh_videos_left": int(row.get("fresh_videos_left") or 0),
+        "session_active": bool(session.get("active")),
+        "session_minutes_left": int(session.get("minutes_left") or 0),
+    }
+
+
+class KeyholeInvoiceIn(BaseModel):
+    package: str
+
+
+@app.post("/keyhole/nowpayments/invoice")
+def keyhole_nowpayments_invoice(body: KeyholeInvoiceIn, user=Depends(current_user)):
+    """Create a NOWPayments invoice for one Keyhole package, priced from the Keyhole
+    config, with order_id '<user_id>:<package>' so the IPN (/webhooks/nowpayments)
+    grants it to this account when the payment finishes."""
+    if not NOWPAYMENTS_API_KEY:
+        raise HTTPException(status_code=503, detail="NOWPAYMENTS_API_KEY must be set")
+    pkg = _keyhole_package_in(body.package)
+    if pkg is None:
+        raise HTTPException(status_code=400, detail="Unknown package")
+    cfg = get_keyhole_config()
+    price = float(cfg.get(f"{pkg}_price", 0) or 0)
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="Package has no price")
+    uid = user["user_id"]
+    payload = {
+        "price_amount": price,
+        "price_currency": "usd",
+        "order_id": f"{uid}:{pkg}",
+        "order_description": f"Keyhole {pkg} package",
+        "ipn_callback_url": NOWPAYMENTS_IPN_URL,
+        "success_url": f"{KEYHOLE_SITE_URL}?paid={pkg}",
+        "cancel_url": KEYHOLE_SITE_URL,
+    }
+    email = _account_email(uid)
+    if email:
+        payload["customer_email"] = email
+    try:
+        r = requests.post("https://api.nowpayments.io/v1/invoice", json=payload,
+                          headers={"x-api-key": NOWPAYMENTS_API_KEY}, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"NOWPayments unreachable: {e}")
+    if r.status_code >= 400:
+        print(f"[nowpayments] invoice for {uid}/{pkg} failed {r.status_code}: {r.text[:300]}")
+        raise HTTPException(status_code=502, detail="NOWPayments refused the invoice")
+    inv = r.json()
+    if not inv.get("invoice_url"):
+        raise HTTPException(status_code=502, detail="NOWPayments returned no invoice_url")
+    return {"ok": True, "invoice_id": str(inv.get("id")), "invoice_url": inv["invoice_url"],
+            "package": pkg, "price": price}
 
 
 class CharacterEngineEvaluateIn(BaseModel):
