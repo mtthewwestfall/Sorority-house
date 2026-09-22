@@ -11471,6 +11471,43 @@ class GeneratorWebcamIn(BaseModel):
     title: Optional[str] = ""
 
 
+
+def _sanitize_veo_prompt(prompt: str, char_id: str = "") -> str:
+    """Veo rejects prompts that look like real-person / celebrity name locks.
+    Chloe and Bailey are our characters, not celebrities — strip their names from
+    the text sent to Veo and pin identity to the reference image instead."""
+    text = (prompt or "").strip()
+    # Drop explicit companion/name header lines
+    cleaned_lines = []
+    for line in text.splitlines():
+        low = line.strip().lower()
+        if low.startswith("companion:") or low.startswith("character:"):
+            continue
+        if "celebrity" in low:
+            continue
+        cleaned_lines.append(line)
+    text = "\n".join(cleaned_lines)
+    # Replace given names (and Bailey bio "Potter") with neutral wording
+    replacements = [
+        (r"\bChloe\b", "the woman in the reference image"),
+        (r"\bBailey\b", "the woman in the reference image"),
+        (r"\bPotter\b", "the woman"),
+        (r"\bher face, hair, and bust\b", "the reference face, hair, and bust"),
+        (r"\bChloe's\b", "the reference woman's"),
+        (r"\bBailey's\b", "the reference woman's"),
+    ]
+    for pat, rep in replacements:
+        text = re.sub(pat, rep, text, flags=re.IGNORECASE)
+    # Collapse repeated "the woman in the reference image"
+    text = re.sub(r"(the woman in the reference image(?:'s)?)(?:\s*,\s*\1)+", r"\1", text, flags=re.IGNORECASE)
+    lead = (
+        "Original fictional webcam performer from the attached reference image only. "
+        "Not a real celebrity. Not a public figure. Match the reference face, hair, and bust. "
+        "Do not name any real person. "
+    )
+    return f"{lead}{text}".strip()
+
+
 def _veo_headers():
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
@@ -11491,7 +11528,11 @@ def admin_generator_webcam(body: GeneratorWebcamIn):
     aspect = body.aspect_ratio if body.aspect_ratio in ("16:9", "9:16") else "16:9"
     duration = body.duration_seconds if body.duration_seconds in (4, 6, 8) else 8
 
-    instance: Dict[str, Any] = {"prompt": f"Locked static webcam view, single continuous shot, no cuts, no camera movement. {prompt}"}
+    safe_prompt = _sanitize_veo_prompt(prompt, char_id)
+    instance: Dict[str, Any] = {"prompt": (
+        "Locked static webcam view, single continuous shot, no cuts, no camera movement. "
+        f"{safe_prompt}"
+    )}
     ref = _character_reference(char_id, body.reference_asset_id) if body.use_reference else None
     if ref:
         instance["image"] = {"bytesBase64Encoded": base64.b64encode(ref[0]).decode(), "mimeType": ref[1]}
