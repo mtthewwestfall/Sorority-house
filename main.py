@@ -10308,7 +10308,7 @@ def keyhole_plates():
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT character_id, url, media_type, tags FROM media_assets
+                SELECT character_id, url, media_type, tags, file_path FROM media_assets
                 WHERE is_enabled ORDER BY created_at ASC
             """)
             rows = cur.fetchall() or []
@@ -10316,6 +10316,8 @@ def keyhole_plates():
         conn.close()
     chars: Dict[str, Dict[str, list]] = {c: {b: [] for b in PLATE_BEATS} for c in KEYHOLE_CHARACTERS}
     for r in rows:
+        if r.get("file_path") and not os.path.isfile(os.path.join(UPLOAD_DIR, os.path.basename(r["file_path"]))):
+            continue
         tags = [str(t).lower() for t in (r.get("tags") or [])]
         variant = next((t.split(":", 1)[1] for t in tags if t.startswith("variant:")), "")
         folder = chars.setdefault(r["character_id"], {b: [] for b in PLATE_BEATS})
