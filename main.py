@@ -1124,8 +1124,10 @@ def init_db():
                     provider   TEXT NOT NULL,
                     user_id    TEXT NOT NULL,
                     package    TEXT NOT NULL,
+                    granted    BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                ALTER TABLE keyhole_payments ADD COLUMN IF NOT EXISTS granted BOOLEAN NOT NULL DEFAULT FALSE;
                 -- distinct days the user actually talked to her at the current stage;
                 -- existing rows are seeded from the chat log (days after the stage moved)
                 ALTER TABLE relationships ADD COLUMN IF NOT EXISTS stage_days INTEGER;
@@ -6769,6 +6771,12 @@ class NexaPayPaymentProvider(BasePaymentProvider):
 
     _PAID = {"paid", "succeeded", "success", "successful", "completed", "complete",
              "approved", "captured", "settled", "confirmed"}
+    # event names accepted only when the payload carries no payment status at all
+    _PAID_EVENTS = {"payment.paid", "payment.succeeded", "payment.completed", "payment.success",
+                    "payment_succeeded", "payment_completed", "payment.approved",
+                    "charge.succeeded", "charge.completed", "checkout.paid",
+                    "checkout.session.completed", "order.paid", "invoice.paid",
+                    "transaction.succeeded", "transaction.completed"}
 
     @staticmethod
     def _signed(raw_body: bytes, header: str) -> bool:
@@ -6799,11 +6807,28 @@ class NexaPayPaymentProvider(BasePaymentProvider):
             raise HTTPException(status_code=400, detail="Bad JSON")
 
         kind = str(_nexapay_find(event, "event", "type", "event_type") or "").lower()
-        status = str(_nexapay_find(event, "status", "payment_status", "state") or "").lower()
-        if status not in self._PAID and not any(w in kind for w in ("paid", "succe", "complet", "approved")):
-            return {"ok": True, "ignored": f"not a paid event ({kind or status or 'unknown'})"}
+        status = str(_nexapay_find(event, "payment_status", "status", "state") or "").lower()
+        if status:
+            paid = status in self._PAID
+        else:
+            paid = kind in self._PAID_EVENTS
+        if not paid:
+            return {"ok": True, "ignored": f"not a paid event ({status or kind or 'unknown'})"}
 
-        payment_id = _nexapay_find(event, "payment_id", "transaction_id", "txn_id", "charge_id", "order_id", "id")
+        # the purchase's own id, never the delivery envelope's: a generic "id" only counts
+        # when it sits on the nested payment object (or the root when there is no envelope)
+        payment_id = _nexapay_find(event, "payment_id", "transaction_id", "txn_id", "charge_id", "order_id")
+        if not payment_id:
+            for sub in ("payment", "transaction", "charge", "order", "object", "data"):
+                inner = event.get(sub)
+                if isinstance(inner, dict) and inner.get("id"):
+                    payment_id = inner["id"]
+                    break
+                if isinstance(inner, dict) and isinstance(inner.get("object"), dict) and inner["object"].get("id"):
+                    payment_id = inner["object"]["id"]
+                    break
+        if not payment_id and not kind:
+            payment_id = event.get("id")
         if not payment_id:
             return {"ok": True, "ignored": "no payment id"}
         payment_id = f"nexapay:{payment_id}"
@@ -6836,25 +6861,35 @@ class NexaPayPaymentProvider(BasePaymentProvider):
                 print(f"[nexapay] {payment_id}: no account for {email}, ignored")
                 return {"ok": True, "ignored": "no account"}
 
+        # claim the payment (pending), fulfil, then mark granted; a retry of a claimed but
+        # unfulfilled payment (crash, DB error, cap) fulfils it instead of skipping it
         conn = db()
         try:
             with conn.cursor() as cur:
                 cur.execute("INSERT INTO keyhole_payments (payment_id, provider, user_id, package) "
                             "VALUES (%s,%s,%s,%s) ON CONFLICT (payment_id) DO NOTHING",
                             (payment_id, self.provider_name, user["user_id"], match))
-                fresh = cur.rowcount == 1
+                cur.execute("SELECT granted FROM keyhole_payments WHERE payment_id=%s", (payment_id,))
+                row = cur.fetchone()
                 conn.commit()
         finally:
             conn.close()
-        if not fresh:
+        if row and row["granted"]:
             return {"ok": True, "ignored": "already granted", "user_id": user["user_id"]}
         try:
             granted = grant_keyhole_package(user["user_id"], match)
         except HTTPException as e:
-            # Package cap hit or bad state: keep the payment on record, report it, and
-            # answer 200 so NexaPay stops retrying.
+            # Package cap hit or bad state: leave the claim pending, report it, and
+            # answer 200 so NexaPay stops retrying (the next event for it retries the grant).
             print(f"[nexapay] {payment_id}: {match} for {user['user_id']} not granted: {e.detail}")
             return {"ok": False, "user_id": user["user_id"], "package": match, "error": e.detail}
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE keyhole_payments SET granted=TRUE WHERE payment_id=%s", (payment_id,))
+                conn.commit()
+        finally:
+            conn.close()
         return {"ok": True, "user_id": user["user_id"], "package": match, "granted": granted}
 
     def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
