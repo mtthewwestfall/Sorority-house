@@ -3602,9 +3602,7 @@ async function importMediaUrlAsset(){
         is_fallback:$('#mIsFallback').checked,
         is_enabled:$('#mIsEnabled').checked,
         target_format:$('#mFormat').value,
-        download_remote:true,
-        key1:'Westfall13!',
-        key2:'Saintkiller13!'
+        download_remote:true
       })
     });
     toast('Media URL imported!');
@@ -8677,38 +8675,6 @@ def _fetch_remote_media(url: str, target_format: str = "original") -> tuple[byte
     return content, ext, mime_type, m_type
 
 
-SECRET_KEY_1 = os.environ.get("LOCK_KEY_WESTFALL", "Westfall13!")
-SECRET_KEY_2 = os.environ.get("LOCK_KEY_SAINTKILLER", "Saintkiller13!")
-
-
-def _verify_dual_secret_locks(
-    key1: Optional[str] = None,
-    key2: Optional[str] = None,
-    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
-    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
-) -> bool:
-    """
-    Dual secret lock validation. Both Key 1 (Westfall13!) and Key 2 (Saintkiller13!) must be turned.
-    If valid, the green matrix shield activates. If invalid, triggers a warning log notification and HTTP 403 response.
-    """
-    provided_key1 = (key1 or x_westfall_key or "").strip()
-    provided_key2 = (key2 or x_saintkiller_key or "").strip()
-
-    valid_key1 = hmac.compare_digest(provided_key1.encode(), SECRET_KEY_1.encode())
-    valid_key2 = hmac.compare_digest(provided_key2.encode(), SECRET_KEY_2.encode())
-
-    if not (valid_key1 and valid_key2):
-        logger.warning(
-            f"SECURITY ALERT / WARNING: Dual secret lock breach attempt! Key1 valid: {valid_key1}, Key2 valid: {valid_key2}"
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="Dual lock access denied: both Westfall and Saintkiller secrets required to disarm shield."
-        )
-
-    logger.info("SECURITY MATRIX: Green matrix shield active. Dual lock authorized.")
-    return True
-
 
 class AdminMediaUrlIn(BaseModel):
     character_id: str
@@ -9015,13 +8981,8 @@ async def admin_upload_media(
 
 
 @app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
-def admin_import_media_url(
-    body: AdminMediaUrlIn,
-    x_westfall_key: Optional[str] = Header(None, alias="X-Westfall-Key"),
-    x_saintkiller_key: Optional[str] = Header(None, alias="X-Saintkiller-Key")
-):
+def admin_import_media_url(body: AdminMediaUrlIn):
     """Import an external media URL or webpage, fetching assets locally with anti-bot bypass & format options."""
-    _verify_dual_secret_locks(key1=body.key1, key2=body.key2, x_westfall_key=x_westfall_key, x_saintkiller_key=x_saintkiller_key)
     char_id = _validate_character_exists(body.character_id)
     url = _validate_media_url(body.url)
 
