@@ -529,8 +529,8 @@ def tier_rank(tier):
 # city-window room; Bailey is dark hair. Do not swap these two.
 KEYHOLE_DOOR_ORIGIN = "https://keyhole-latest-production.up.railway.app"
 KEYHOLE_DOOR_AVATARS = {
-    "chloe": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3542.jpeg",
-    "bailey": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3543.jpeg",
+    "chloe": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3543.jpeg",
+    "bailey": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3542.jpeg",
 }
 _KEYHOLE_DOOR_FILES = (
     "IMG_3542.jpeg", "IMG_3543.jpeg", "IMG_3547.jpeg", "IMG_3548.jpeg",
