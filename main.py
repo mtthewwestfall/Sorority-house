@@ -7023,8 +7023,17 @@ def grant_pictures(body: GrantPicturesIn):
 # ---------------------------------------------------------------------------
 # KEYHOLE HELPERS & ENTITLEMENT GRANTS
 # ---------------------------------------------------------------------------
+_KEYHOLE_CONFIG_CACHE: Dict[str, Any] = {}  # OPTIMIZATION (Bolt ⚡): {config_dict, timestamp}
+_KEYHOLE_CONFIG_CACHE_TTL = 60  # seconds
+
 def get_keyhole_config():
-    """Retrieve dynamic keyhole config from DB house_rules, falling back to defaults."""
+    """Retrieve dynamic keyhole config from DB house_rules with in-memory TTL caching, falling back to defaults."""
+    now = time.time()
+    if _KEYHOLE_CONFIG_CACHE and "config" in _KEYHOLE_CONFIG_CACHE:
+        cached_cfg, ts = _KEYHOLE_CONFIG_CACHE["config"], _KEYHOLE_CONFIG_CACHE.get("timestamp", 0)
+        if now - ts < _KEYHOLE_CONFIG_CACHE_TTL:
+            return dict(cached_cfg)
+
     cfg = dict(KEYHOLE_DEFAULT_CONFIG)
     conn = db()
     try:
@@ -7039,6 +7048,9 @@ def get_keyhole_config():
                         pass
     finally:
         conn.close()
+
+    _KEYHOLE_CONFIG_CACHE["config"] = dict(cfg)
+    _KEYHOLE_CONFIG_CACHE["timestamp"] = now
     return cfg
 
 
@@ -9387,6 +9399,7 @@ def admin_set_keyhole_config(body: KeyholeConfigIn):
             conn.commit()
     finally:
         conn.close()
+    _KEYHOLE_CONFIG_CACHE.clear()  # Invalidate in-memory TTL cache on update
     return {"ok": True, "config": get_keyhole_config()}
 
 
