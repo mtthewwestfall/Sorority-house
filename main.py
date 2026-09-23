@@ -3464,6 +3464,40 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 
 <section id="gen" class="hid">
   <div class="card" style="border-color:var(--acc);"><h3 style="margin-top:0">CREATE AI MEDIA</h3><div class="mut">Use this area when you want the system to create a new character picture or WebCam video. Choose the character, beat, reference, prompt, and duration.</div></div>
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Create a Picture</h3>
+      <div class="mut" style="margin-bottom:10px;">Choose the tags instead of typing them. You can still write or remove anything in the prompt.</div>
+      <div class="row2">
+        <select id="aiImgChar"><option value="chloe">Chloe</option><option value="bailey">Bailey</option></select>
+        <select id="aiImgBeat"><option value="idle">idle</option><option value="tease">tease</option><option value="give">give</option><option value="presence">presence</option><option value="stop">stop</option></select>
+        <select id="aiImgEngine"><option value="primary">Primary</option><option value="secondary">Secondary</option></select>
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px"><b>Tags</b> — select all that apply</label>
+        <div id="aiImgTags" class="row2" style="flex-wrap:wrap;gap:4px"></div>
+      </div>
+      <textarea id="aiImgPrompt" rows="5" style="width:100%;margin-top:8px" placeholder="Add or remove anything from the prompt here..."></textarea>
+      <button class="p" style="width:100%;margin-top:8px" onclick="createAiImage()">Create Picture</button>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Create a WebCam Video</h3>
+      <div class="mut" style="margin-bottom:10px;">The prompt is fully editable. Add your own action, expression, setting, or anything else you want changed.</div>
+      <div class="row2">
+        <select id="aiVidChar"><option value="chloe">Chloe</option><option value="bailey">Bailey</option></select>
+        <select id="aiVidBeat"><option value="idle">idle</option><option value="tease">tease</option><option value="give">give</option><option value="presence">presence</option><option value="stop">stop</option></select>
+        <select id="aiVidDuration"><option value="4">4 sec</option><option value="6">6 sec</option><option value="8" selected>8 sec</option></select>
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px"><b>Tags</b> — select all that apply</label>
+        <div id="aiVidTags" class="row2" style="flex-wrap:wrap;gap:4px"></div>
+      </div>
+      <textarea id="aiVidPrompt" rows="5" style="width:100%;margin-top:8px" placeholder="Add or remove anything from the video prompt..."></textarea>
+      <button class="p" style="width:100%;margin-top:8px" onclick="createAiWebcam()">Create WebCam Video</button>
+      <div id="aiVidStatus" class="mut" style="margin-top:8px"></div>
+    </div>
+  </div>
+
   <div class="card"><h3 style="margin-top:0">Plate beats (real)</h3>
     <div class="mut" style="margin-bottom:12px"><b>Beat labels:</b> idle = default, tease = playful, give = more open, presence = present, stop = firm boundary. These labels organize media; they do not change character behavior.</div>
     <table>
@@ -4304,7 +4338,67 @@ async function setTier(){const email=CUR;try{await api('/admin/console/set-tier'
 async function grantAudits(){const email=CUR;try{await api('/admin/console/grant-audits',{method:'POST',body:JSON.stringify({email,amount:+$('#gaN').value})});toast('Credits added');openAccount(email)}catch(e){toast(e.message,true)}}
 async function saveNote(){const email=CUR;try{await api('/admin/note',{method:'POST',body:JSON.stringify({email,note:$('#anote').value})});toast('Note saved')}catch(e){toast(e.message,true)}}
 
+const MEDIA_TAGS=['idle','talking','tease','give','presence','stop'];
+function renderTagChoices(id){
+  const el=$('#'+id); if(!el)return;
+  el.innerHTML=MEDIA_TAGS.map(t=>`<button type="button" class="s ai-tag" data-tag="${t}" onclick="this.classList.toggle('on');this.style.borderColor=this.classList.contains('on')?'var(--acc)':'';">${t}</button>`).join('');
+}
+function selectedTags(id){
+  return [...document.querySelectorAll('#'+id+' .ai-tag.on')].map(x=>x.dataset.tag);
+}
+function ensureBeatTag(id,beat){
+  const el=$('#'+id+' .ai-tag[data-tag="'+beat+'"]');
+  if(el&&!el.classList.contains('on')){el.classList.add('on');el.style.borderColor='var(--acc)';}
+}
+function initAiTagPickers(){
+  renderTagChoices('aiImgTags'); renderTagChoices('aiVidTags');
+  ensureBeatTag('aiImgTags',$('#aiImgBeat').value);
+  ensureBeatTag('aiVidTags',$('#aiVidBeat').value);
+  $('#aiImgBeat').onchange=()=>ensureBeatTag('aiImgTags',$('#aiImgBeat').value);
+  $('#aiVidBeat').onchange=()=>ensureBeatTag('aiVidTags',$('#aiVidBeat').value);
+}
+async function createAiImage(){
+  const character=$('#aiImgChar').value, beat=$('#aiImgBeat').value, prompt=$('#aiImgPrompt').value.trim();
+  if(!prompt){toast('Add a prompt first',true);return;}
+  try{
+    const r=await api('/admin/generator/image',{method:'POST',body:JSON.stringify({
+      prompt,character,beat,engine:$('#aiImgEngine').value,
+      use_reference:true,title:`${character} ${beat} generated`
+    })});
+    toast('Picture created');
+    if(r.url)$('#genResultBox').innerHTML=`<img src="${esc(r.url)}" style="max-width:100%;border-radius:8px"><div class="mut" style="margin-top:6px">Created with tags: ${esc(selectedTags('aiImgTags').join(', ')||beat)}</div>`;
+  }catch(e){toast(e.message,true);}
+}
+async function createAiWebcam(){
+  const character=$('#aiVidChar').value, beat=$('#aiVidBeat').value, prompt=$('#aiVidPrompt').value.trim();
+  if(!prompt){toast('Add a video prompt first',true);return;}
+  const st=$('#aiVidStatus'); st.textContent='Starting WebCam generation...';
+  try{
+    const r=await api('/admin/generator/webcam',{method:'POST',body:JSON.stringify({
+      prompt,character,beat,reference_asset_id:null,use_reference:true,
+      duration_seconds:+$('#aiVidDuration').value,aspect_ratio:'16:9',
+      title:`${character} ${beat} webcam`
+    })});
+    const id=r.job_id; st.textContent='Generating...';
+    let tries=0;
+    const poll=async()=>{
+      if(++tries>90){st.textContent='Still processing — check the media library later.';return;}
+      const j=await api('/admin/generator/webcam/'+encodeURIComponent(id));
+      const job=j.job||{};
+      if(job.status==='done'||job.asset){
+        st.innerHTML=job.asset?.url?`<video controls playsinline style="width:100%;border-radius:8px;margin-top:6px" src="${esc(job.asset.url)}"></video><div class="mut">Created with tags: ${esc(selectedTags('aiVidTags').join(', ')||beat)}</div>`:'Video finished.';
+        toast('WebCam video created'); return;
+      }
+      if(job.status==='error'){st.textContent=job.error||'Video generation failed';toast(st.textContent,true);return;}
+      st.textContent='Generating…';
+      setTimeout(poll,4000);
+    };
+    poll();
+  }catch(e){st.textContent=e.message;toast(e.message,true);}
+}
+
 async function loadGenerator(){
+  initAiTagPickers();
   try{
     const r=await api('/admin/generator/translations');
     const labels=r.beat_labels||{};
