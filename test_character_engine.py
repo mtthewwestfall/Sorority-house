@@ -33,8 +33,8 @@ class TestCharacterEngine(unittest.TestCase):
         chloe = CharacterEngine("chloe")
         bailey = CharacterEngine("bailey")
 
-        self.assertAlmostEqual(chloe.config["target_satisfaction"], 0.40)
-        self.assertAlmostEqual(bailey.config["target_satisfaction"], 0.30)
+        self.assertAlmostEqual(chloe.config["target_satisfaction"], 0.30)
+        self.assertAlmostEqual(bailey.config["target_satisfaction"], 0.15)
 
         self.assertNotEqual(chloe.config["default_mix"], bailey.config["default_mix"])
         self.assertNotEqual(chloe.config["states"], bailey.config["states"])
