@@ -3551,7 +3551,7 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='studio'){loadMediaAssets();loadGenerator();$('#med').classList.remove('hid');$('#gen').classList.remove('hid');}}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}$('#med').classList.toggle('hid',t!=='studio');$('#gen').classList.toggle('hid',t!=='studio');if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='studio'){loadMediaAssets();loadGenerator();}}
 
 let currentKhShows = [];
 
