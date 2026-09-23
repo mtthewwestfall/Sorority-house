@@ -11059,29 +11059,36 @@ def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
     return data
 
 
-def _disk_character_skin(char_id: str) -> Optional[tuple]:
-    """Owner-locked Chloe/Bailey skin first, then newest master/skin upload on disk."""
+def _uploaded_disk_skin(char_id: str) -> Optional[tuple]:
+    """Newest master/skin upload in UPLOAD_DIR."""
     cid = (char_id or "").strip().lower()
-    # Locked owner skins shipped with the repo — never invent another person's face.
+    if os.path.isdir(UPLOAD_DIR):
+        prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
+        found = []
+        for name in os.listdir(UPLOAD_DIR):
+            if not name.lower().startswith(prefixes):
+                continue
+            data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
+            if data:
+                found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
+        if found:
+            found.sort(key=lambda item: item[0])
+            return found[-1][1]
+    return None
+
+
+def _disk_character_skin(char_id: str) -> Optional[tuple]:
+    """Newest master/skin upload in UPLOAD_DIR first, then fallback to keyhole_skins/{cid}.jpg."""
+    upload = _uploaded_disk_skin(char_id)
+    if upload:
+        return upload
+    cid = (char_id or "").strip().lower()
     if cid in ("chloe", "bailey"):
         owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid}.jpg")
         data = _image_bytes_at(owner)
         if data:
             return data
-    if not os.path.isdir(UPLOAD_DIR):
-        return None
-    prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
-    found = []
-    for name in os.listdir(UPLOAD_DIR):
-        if not name.lower().startswith(prefixes):
-            continue
-        data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
-        if data:
-            found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
-    if not found:
-        return None
-    found.sort(key=lambda item: item[0])
-    return found[-1][1]
+    return None
 
 
 def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]]:
@@ -11092,16 +11099,10 @@ def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]
 
 def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool = True) -> Optional[tuple]:
     """The girl's skin: reference image bytes used to keep every generated cut looking like her.
-    Owner-locked Chloe/Bailey disk skins always win (never another person's upload).
     Otherwise an explicit asset, then tagged skins, then other disk files.
     strict=True (primary / webcam): an explicit asset_id that still cannot be loaded raises.
     strict=False (Sogni): the same miss returns None so generation can continue text-only."""
     cid0 = (char_id or "").strip().lower()
-    # Always use the owner's locked Chloe/Bailey skin — ignore other people's uploads.
-    if cid0 in ("chloe", "bailey"):
-        owner = _disk_character_skin(cid0)
-        if owner:
-            return owner
     preferred_id = asset_id
     if not preferred_id:
         raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
@@ -11109,6 +11110,7 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
         if str(raw).isdigit():
             preferred_id = int(raw)
     explicit_reason = "missing file"
+    explicit_asset_failed = False
     conn = None
     try:
         conn = db()
@@ -11128,6 +11130,7 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
                             return data
                         if asset_id and int(row.get("id") or 0) == int(asset_id):
                             explicit_reason = reason or "missing file"
+                            explicit_asset_failed = True
                 cur.execute("""
                     SELECT * FROM media_assets
                     WHERE character_id=%s AND media_type='image' AND is_enabled
@@ -11150,13 +11153,28 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
                             return data
         finally:
             conn.close()
-    data = _disk_character_skin(char_id)
-    if data:
-        return data
+
+    # Check upload directory disk skins first
+    upload = _uploaded_disk_skin(cid0)
+    if upload:
+        return upload
+
+    if explicit_asset_failed and strict:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
+
+    if cid0 in ("chloe", "bailey"):
+        owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid0}.jpg")
+        data = _image_bytes_at(owner)
+        if data:
+            return data
+
     if asset_id and strict:
         raise HTTPException(
             status_code=400,
             detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
+
     return None
 
 
