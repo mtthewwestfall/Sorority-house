@@ -103,6 +103,7 @@ _KEYHOLE_ASSET_HOSTS = frozenset({
 _ROOMS_STRIPE = {
     "15": "https://buy.stripe.com/00w14gav1bFddlR6jLdjO09",
     "30": "https://buy.stripe.com/bJeeV67iPdNl2Hd8rTdjO08",
+    "45": "https://buy.stripe.com/00w7sU0Ur8t1fhZ003",
     "55": "https://buy.stripe.com/4gM9AM46DbFda9F23vdjO03",
     "60": "https://buy.stripe.com/9B600c0UrcJh4Pl0ZrdjO07",
     "75": "https://buy.stripe.com/5kQ5kw0UrfVtepVaA1djO04",
@@ -112,11 +113,10 @@ _PUBLIC_LOUNGE_LINK = "https://buy.stripe.com/6oUfZh1jradL0he4098AE00"
 
 def plan_links():
     """Website checkout links. Env vars override a single package without forking products."""
-    rooms = SITE_URL + "/rooms.html"
     return [
         ("15 min · $7.99", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
         ("30 min · $11.99 · 100 texts", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
-        ("45 min · $14.99 · 100 texts", os.environ.get("PAY_LINK_45", rooms)),
+        ("45 min · $14.99 · 100 texts", os.environ.get("PAY_LINK_45", _ROOMS_STRIPE["45"])),
         ("55 min · $17.99 · 100 texts", os.environ.get("PAY_LINK_55", _ROOMS_STRIPE["55"])),
         ("60 min · $19.99 · 100 texts", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
         ("75 min · $23.99 · 100 texts", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
