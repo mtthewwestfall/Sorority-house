@@ -7857,6 +7857,10 @@ def _telegram_send(token: str, chat_id, text: str) -> None:
 def _telegram_public_show(text: str) -> None:
     """Best-effort DM to every linked Telegram account. Never raises."""
     token = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    if token.startswith("((") and token.endswith("))"):
+        token = token[2:-2].strip()
+    elif token.startswith("(") and token.endswith(")"):
+        token = token[1:-1].strip()
     if not token:
         print("[KEYHOLE NOTIFICATION] TELEGRAM_BOT_TOKEN unset; skipped Telegram blast", flush=True)
         return

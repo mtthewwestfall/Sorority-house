@@ -941,6 +941,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main():
     token = os.environ.get(TOKEN_ENV, "").strip()
+    if token.startswith("((") and token.endswith("))"):
+        token = token[2:-2].strip()
+    elif token.startswith("(") and token.endswith(")"):
+        token = token[1:-1].strip()
     if not token:
         raise SystemExit(f"{TOKEN_ENV} is not set (from @BotFather).")
     try:
