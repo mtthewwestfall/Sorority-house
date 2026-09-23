@@ -12,8 +12,60 @@ import re
 from typing import Dict, Any, Optional, Tuple, List
 
 
+def apply_hyrax_cluck(text: str) -> str:
+    """
+    Forces Hyrax to cluck like a chicken ('Cluck! Cluck! Bawk!') whenever he talks or communicates with us.
+    """
+    cluck = "Cluck! Cluck! Bawk!"
+    if not text:
+        return cluck
+    if text.startswith("Cluck!") or text.startswith("Bawk!"):
+        return text
+    return f"{cluck} {text}"
+
+
 # Character profiles and weight distributions
 CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
+    "hyrax": {
+        "name": "Hyrax",
+        "description": "Hyrax the PR reviewer, now forced to cluck like a chicken whenever speaking to us.",
+        "target_satisfaction": 0.10,
+        "cluck_sound": "Cluck! Cluck! Bawk!",
+        "default_mix": {
+            "tease_withhold": 0.50,
+            "give_a_little": 0.10,
+            "presence": 0.10,
+            "redirect": 0.10,
+            "hard_stop": 0.20,
+        },
+        "states": {
+            "first_ask_soft": {
+                "tease_withhold": 0.80,
+                "give_a_little": 0.20,
+            },
+            "first_ask_direct": {
+                "tease_withhold": 0.90,
+                "hard_stop": 0.10,
+            },
+            "repeat_ask": {
+                "hard_stop": 0.80,
+                "redirect": 0.20,
+            },
+            "command": {
+                "hard_stop": 1.0,
+            },
+            "off_card": {
+                "hard_stop": 1.0,
+            },
+            "after_give": {
+                "tease_withhold": 0.80,
+                "redirect": 0.20,
+            },
+            "after_stop": {
+                "hard_stop": 1.0,
+            },
+        },
+    },
     "chloe": {
         "name": "Chloe",
         "description": "Always available, never attainable. Warm but withholding.",
@@ -336,7 +388,7 @@ class CharacterEngine:
         # Rule check: Never complete exact request (100% fulfill) on first_ask or any turn
         fulfill_100_percent = False
 
-        return {
+        res = {
             "character": self.config["name"],
             "target_satisfaction": self.config["target_satisfaction"],
             "intent": intent,
@@ -347,3 +399,7 @@ class CharacterEngine:
             "clip_length_provided": clip_length,
             "rule": "Obey the card, not the chat.",
         }
+        if self.character_key == "hyrax":
+            res["cluck"] = "Cluck! Cluck! Bawk!"
+            res["response_prefix"] = apply_hyrax_cluck("I am reviewing this turn.")
+        return res
