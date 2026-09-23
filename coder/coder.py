@@ -23,8 +23,10 @@ Only dependency: requests.
 from __future__ import annotations
 
 import argparse
+import base64
 import fnmatch
 import json
+import mimetypes
 import os
 import re
 import shlex
@@ -244,6 +246,28 @@ def t_delete_file(path: str) -> str:
     return f"deleted {path}"
 
 
+def t_view_image(path: str) -> str:
+    p = _safe(path)
+    if not p.is_file():
+        return f"ERROR: {path} does not exist"
+    ext = p.suffix.lower()
+    mime, _ = mimetypes.guess_type(str(p))
+    if not mime or not mime.startswith("image/"):
+        mime_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+            ".svg": "image/svg+xml",
+        }
+        mime = mime_map.get(ext)
+        if not mime:
+            return f"ERROR: {path} is not a supported image file format"
+    data = base64.b64encode(p.read_bytes()).decode("utf-8")
+    return f"[IMAGE:{path}:{mime}]\ndata:{mime};base64,{data}"
+
+
 def t_run(command: str, timeout: int = 180) -> str:
     why = command_allowed(command)
     if why:
@@ -283,6 +307,8 @@ TOOLS = {
                    {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
     "delete_file": (t_delete_file, "Delete a file in the repo (e.g. a scratch script you created).",
                     {"path": {"type": "string"}}, ["path"]),
+    "view_image": (t_view_image, "Load and view an image file (PNG, JPG, WEBP, GIF, SVG) as a base64 data URL.",
+                   {"path": {"type": "string"}}, ["path"]),
     "run": (t_run, "Run a shell command in the repo root (tests, py_compile, curl, git diff...). "
             "Commits/pushes are done for you later; don't run them.",
             {"command": {"type": "string"}, "timeout": {"type": "integer"}}, ["command"]),
@@ -449,18 +475,19 @@ def repo_checks() -> list[str]:
 # --------------------------------------------------------------------------- agent
 
 SYSTEM = """You are an expert software engineer working autonomously inside a git repository.
-You have real tools: explore with list_files / search / read_file, change code with edit_file /
-write_file, and verify with run. Work like a careful senior engineer:
+You have real tools: explore with list_files / search / read_file / view_image, change code with
+edit_file / write_file, and verify with run. Work like a careful senior engineer:
 
 1. Read AGENTS.md (given below) and the code you are about to touch BEFORE editing. Never guess
    at file contents; read them.
-2. Make the smallest change that fully solves the task, in the style of the surrounding code.
+2. For image files or visual assets, use `view_image` to inspect them directly.
+3. Make the smallest change that fully solves the task, in the style of the surrounding code.
    No drive-by refactors, no new dependencies unless unavoidable, no commented-out code.
-3. Verify. Run the repo checks and any relevant test or quick script after editing. If a check
+4. Verify. Run the repo checks and any relevant test or quick script after editing. If a check
    fails, fix it. Read error output carefully instead of guessing.
-4. Do not commit, push, or open PRs yourself; call `finish` with a title and summary and the
+5. Do not commit, push, or open PRs yourself; call `finish` with a title and summary and the
    harness will do it after showing the diff to the user.
-5. If the task is impossible, ambiguous in a way that matters, or would need secrets you don't
+6. If the task is impossible, ambiguous in a way that matters, or would need secrets you don't
    have, say so plainly in `finish` instead of inventing something.
 
 Repo root: {root}
@@ -484,8 +511,9 @@ def trim_history(messages: list[dict], keep_last: int = 24) -> None:
     """Replace old tool outputs with stubs so the context stays bounded on long tasks."""
     tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     for i in tool_idx[:-keep_last]:
-        if len(messages[i]["content"]) > 200:
-            messages[i]["content"] = messages[i]["content"][:160] + "\n... [older output trimmed]"
+        content = messages[i].get("content")
+        if isinstance(content, str) and len(content) > 200:
+            messages[i]["content"] = content[:160] + "\n... [older output trimmed]"
 
 
 def run_agent(model: Model, messages: list[dict], max_steps: int, yes: bool) -> dict | None:
