@@ -1548,6 +1548,7 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS personality_traits TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS no_gos TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS behavior_mix JSONB;
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _apply_keyhole_door_avatars(cur)
@@ -2623,6 +2624,57 @@ def refund_message(user_id):
         conn.close()
 
 
+
+
+# Admin-controlled conversational behavior for the two Keyhole characters.
+# Safety/command states remain hard boundaries; this mix controls ordinary, engaging turns.
+def default_behavior_mix(girl: str) -> Dict[str, float]:
+    key = (girl or "").strip().lower()
+    return dict(CharacterEngine(key).config.get("default_mix", {})) if key in ("chloe", "bailey") else {}
+
+
+def behavior_mix_for(girl: str, conn=None) -> Dict[str, float]:
+    key = (girl or "").strip().lower()
+    if key not in ("chloe", "bailey"):
+        return {}
+    mix = default_behavior_mix(key)
+    close_conn = False
+    try:
+        if conn is None:
+            conn = db()
+            close_conn = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT behavior_mix FROM personas WHERE girl=%s", (key,))
+            row = cur.fetchone()
+            stored = row.get("behavior_mix") if row else None
+            if isinstance(stored, dict):
+                try:
+                    mix = CharacterEngine(key, behavior_mix=stored).behavior_mix
+                except (TypeError, ValueError):
+                    pass
+    except Exception:
+        pass
+    finally:
+        if close_conn and conn:
+            conn.close()
+    return mix
+
+
+def behavior_instruction(girl: str, conn=None) -> str:
+    mix = behavior_mix_for(girl, conn=conn)
+    if not mix:
+        return ""
+    pct = lambda k: round(float(mix.get(k, 0)) * 100)
+    return ("CONVERSATIONAL BEHAVIOR MIX — admin-controlled baseline for ordinary turns:\\n"
+            f"- Give a little / genuinely engage: {pct('give_a_little')}%\\n"
+            f"- Presence / stay in the conversation: {pct('presence')}%\\n"
+            f"- Tease / withhold: {pct('tease_withhold')}%\\n"
+            f"- Redirect: {pct('redirect')}%\\n"
+            f"- Hard stop: {pct('hard_stop')}%\\n"
+            "Use these as tendencies, not a script. Stay in character, respond to what was actually said, "
+            "and do not manufacture rejection. Hard boundaries and safety rules still override this mix.")
+
+
 def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     """The 3-layer payload. With said_so_far set, the model is asked to continue
     a reply whose opening has already been typed out to the user."""
@@ -2630,6 +2682,9 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
     system_text = f"You are {name} from {town_for(girl)}.\n\n{persona_text}\n\n{house_rules_for(girl)}"
+    behavior_block = behavior_instruction(girl)
+    if behavior_block:
+        system_text += "\n\n" + behavior_block
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
@@ -4460,6 +4515,7 @@ class AdminGirlIn(BaseModel):
     girl: str
     name: str
     persona: str
+    behavior_mix: Optional[Dict[str, float]] = None
     door_title: str = ""
     blurb: str = ""
     avatar_url: str = ""
@@ -9324,6 +9380,61 @@ def admin_console_persona(body: AdminPersonaIn):
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 
 
+
+
+class CharacterBehaviorIn(BaseModel):
+    character: str
+    behavior_mix: Dict[str, float]
+
+
+@app.get("/admin/console/character-behavior/{character}", dependencies=[Depends(admin_required)])
+def admin_get_character_behavior(character: str):
+    character = character.strip().lower()
+    if character not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="character must be chloe or bailey")
+    mix = behavior_mix_for(character)
+    return {"character": character, "behavior_mix": mix, "percentages": {k: round(v * 100) for k, v in mix.items()}}
+
+
+@app.post("/admin/console/character-behavior/{character}", dependencies=[Depends(admin_required)])
+def admin_set_character_behavior(character: str, body: CharacterBehaviorIn):
+    character = character.strip().lower()
+    if character not in ("chloe", "bailey") or body.character.strip().lower() != character:
+        raise HTTPException(status_code=400, detail="character must be chloe or bailey")
+    try:
+        mix = CharacterEngine(character, behavior_mix=body.behavior_mix).behavior_mix
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET behavior_mix=%s WHERE girl=%s", (Json(mix), character))
+            if cur.rowcount != 1:
+                raise HTTPException(status_code=404, detail="character not found")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "character": character, "behavior_mix": mix, "percentages": {k: round(v * 100) for k, v in mix.items()}}
+
+
+@app.post("/admin/console/character-behavior/{character}/reset", dependencies=[Depends(admin_required)])
+def admin_reset_character_behavior(character: str):
+    character = character.strip().lower()
+    if character not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="character must be chloe or bailey")
+    mix = default_behavior_mix(character)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET behavior_mix=NULL WHERE girl=%s", (character,))
+            if cur.rowcount != 1:
+                raise HTTPException(status_code=404, detail="character not found")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "character": character, "behavior_mix": mix, "percentages": {k: round(v * 100) for k, v in mix.items()}}
+
+
 @app.post("/admin/console/girl", dependencies=[Depends(admin_required)])
 def admin_console_girl(body: AdminGirlIn):
     """Add a neighbor or rewrite an existing one - door, art, tier gate and doc.
@@ -9340,6 +9451,14 @@ def admin_console_girl(body: AdminGirlIn):
         raise HTTPException(status_code=400,
                             detail="difficulty must be one of " + ", ".join(DIFFICULTY))
     media_lib = body.media_library if isinstance(body.media_library, list) else []
+    behavior_mix = body.behavior_mix
+    if girl in ("chloe", "bailey") and behavior_mix is not None:
+        try:
+            behavior_mix = CharacterEngine(girl, behavior_mix=behavior_mix).behavior_mix
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    elif girl in ("chloe", "bailey"):
+        behavior_mix = behavior_mix_for(girl)
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -9347,8 +9466,8 @@ def admin_console_girl(body: AdminGirlIn):
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
                                       avatar_url, min_tier, sort_order, active,
                                       difficulty, age, background_info, personality_traits,
-                                      no_gos, media_library)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                      no_gos, media_library, behavior_mix)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
@@ -9357,12 +9476,14 @@ def admin_console_girl(body: AdminGirlIn):
                     difficulty=EXCLUDED.difficulty, age=EXCLUDED.age,
                     background_info=EXCLUDED.background_info,
                     personality_traits=EXCLUDED.personality_traits,
-                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library
+                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library,
+                    behavior_mix=EXCLUDED.behavior_mix
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
                   body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
                   body.difficulty, int(body.age), body.background_info.strip(),
-                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib)))
+                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib),
+                  Json(behavior_mix) if behavior_mix is not None and girl in ("chloe", "bailey") else None))
             conn.commit()
     finally:
         conn.close()
