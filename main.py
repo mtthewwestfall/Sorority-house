@@ -3200,9 +3200,8 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabWebcamAcc" onclick="showWebcamAccounts()">🎥 WebCam Show Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
-<button id="tabMed" onclick="show('med')">Webcam Media</button>
-<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button>
-<button id="tabGen" onclick="show('gen')">Image Generator</button></nav>
+<button id="tabStudio" onclick="show('studio')">🎬 Media Studio</button>
+<button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button></nav>
 <button class="s" onclick="logout()">Lock</button></header>
 <main>
 <div id="login" class="card"><h3>Admin secret</h3>
@@ -3374,11 +3373,15 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 </section>
 
 <section id="med" class="hid">
+<div class="card" style="border-color:var(--acc);background:#14141b;">
+<h3 style="margin:0 0 6px 0;">START HERE</h3>
+<div class="mut" style="margin-bottom:12px;">Everything for character pictures and WebCam media is in this studio. Pick the path you want:</div>
+<div class="grid"><div><b>1. Create</b><div class="mut">Use <b>Create AI Media</b> to make a new picture or WebCam video.</div></div><div><b>2. Record</b><div class="mut">Use <b>Record from your WebCam</b>, click Start Camera, then Start Video Rec and stop when finished.</div></div><div><b>3. Upload</b><div class="mut">Use <b>Upload / Import Media</b> for files already on your computer or a media URL.</div></div><div><b>4. Tag it</b><div class="mut">Tags tell the site when to use a clip: <b>idle, talking, tease, give, presence, stop</b>.</div></div></div></div>
 <div class="grid">
   <div class="card">
-    <h4 style="margin-top:0">Add / Upload Media Asset</h4>
+    <h4 style="margin-top:0">Upload / Import Media</h4><div class="mut" style="margin-bottom:10px;">For existing files, imports, or live camera recording.</div>
     <div style="margin-bottom:8px">
-      <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Character / Companion Preset (or type custom below):</label>
+      <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px"><b>1. Character</b> — who this media belongs to:</label>
       <div class="row2" style="flex-wrap:wrap;gap:4px">
         <button class="s" type="button" onclick="$('#mCharId').value='companion_1'">Companion 1</button>
         <button class="s" type="button" onclick="$('#mCharId').value='companion_2'">Companion 2</button>
@@ -3401,7 +3404,7 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
       </select>
     </div>
     <div class="row2">
-      <input id="mTags" placeholder="Tags (comma separated: e.g. idle, talking, sitting-bed, desk)" style="flex:2">
+      <label style="display:flex;align-items:center;gap:8px;flex:2"><span style="font-size:12px;color:var(--mut);white-space:nowrap"><b>3. Tags</b></span><input id="mTags" placeholder="idle, talking, tease, give, presence, stop" style="flex:1"></label>
       <label><input id="mIsDefault" type="checkbox"> Default/Idle</label>
       <label><input id="mIsFallback" type="checkbox"> Fallback Image</label>
       <label><input id="mIsEnabled" type="checkbox" checked> Enabled</label>
@@ -3416,12 +3419,12 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
       </select>
     </div>
     <div class="card" style="background:#101017;margin-top:10px">
-      <h5 style="margin:0 0 8px 0">Option A: Upload File</h5>
+      <h5 style="margin:0 0 8px 0">Option A — Upload a file</h5>
       <input id="mFile" type="file" accept="video/*,image/*">
       <button class="p" style="margin-top:8px" onclick="uploadMediaAsset()">Upload Media File</button>
     </div>
     <div class="card" style="background:#101017;margin-top:10px">
-      <h5 style="margin:0 0 8px 0">Option B: Import Media URL / Webpage</h5>
+      <h5 style="margin:0 0 8px 0">Option B — Import from a URL</h5>
       <div style="margin-bottom:6px">
         <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Webcam Reference Background Presets:</label>
         <div class="row2" style="flex-wrap:wrap;gap:4px">
@@ -3436,7 +3439,7 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
       <button class="s" style="margin-top:8px" onclick="importMediaUrlAsset()">Import Media URL / Webpage</button>
     </div>
     <div class="card" style="background:#101017;margin-top:10px">
-      <h5 style="margin:0 0 8px 0">Option C: Live Webcam Capture</h5>
+      <h5 style="margin:0 0 8px 0">Option C — Record from your WebCam</h5><div class="mut" style="margin-bottom:8px;">Allow camera access, check the preview, then start and stop the recording.</div>
       <video id="camPreview" autoplay playsinline muted style="width:100%;max-height:200px;background:#000;border-radius:6px;display:none"></video>
       <div class="row2" style="margin-top:8px">
         <button class="s" id="btnCamStart" onclick="startWebcamStream()">Start Camera</button>
@@ -3460,9 +3463,9 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 </section>
 
 <section id="gen" class="hid">
-  <div class="card">
-    <h3 style="margin-top:0">Plate beats (real)</h3>
-    <div class="mut" style="margin-bottom:12px">No fruit codes. These are the Keyhole plate-engine beats already on media assets: idle, tease, give, stop, presence. Pick a girl + beat to load what is actually tagged and enabled.</div>
+  <div class="card" style="border-color:var(--acc);"><h3 style="margin-top:0">CREATE AI MEDIA</h3><div class="mut">Use this area when you want the system to create a new character picture or WebCam video. Choose the character, beat, reference, prompt, and duration.</div></div>
+  <div class="card"><h3 style="margin-top:0">Plate beats (real)</h3>
+    <div class="mut" style="margin-bottom:12px"><b>Beat labels:</b> idle = default, tease = playful, give = more open, presence = present, stop = firm boundary. These labels organize media; they do not change character behavior.</div>
     <table>
       <thead>
         <tr><th>Beat</th><th>Meaning</th></tr>
@@ -3526,7 +3529,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
+const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',studio:'tabStudio',demo:'tabDemo'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -3548,7 +3551,7 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='studio'){loadMediaAssets();loadGenerator();$('#med').classList.remove('hid');$('#gen').classList.remove('hid');}}
 
 let currentKhShows = [];
 
