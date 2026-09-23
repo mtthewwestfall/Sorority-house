@@ -1108,10 +1108,12 @@
   </div>
 
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
-    <div class="chat-panel">
+    <div class="chat-panel" style="position:relative;">
+      <div id="chat-reconnect-overlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,0.88); color:#fff; z-index:90; font-size:1.1rem; font-weight:600; text-align:center; align-items:center; justify-content:center; backdrop-filter:blur(4px);">Connecting view...</div>
       <div class="chat-head">
         <button class="chat-close" id="chat-close" type="button" aria-label="Back">&lsaquo;</button>
         <img id="chat-avatar" src="" alt="" />
+        <video id="chat-rolling-video" autoplay playsinline loop muted style="display:none; width:84px; height:84px; border-radius:50%; object-fit:cover; border:2px solid rgba(255,255,255,.2);"></video>
         <div class="who">
           <strong id="chat-name"></strong>
           <div id="chat-title"></div>
@@ -2629,6 +2631,50 @@ const PRESET_FACES = {
       }
     }
 
+    function triggerRollingTextingClip() {
+      const rollingVideo = document.getElementById('chat-rolling-video');
+      const avatar = document.getElementById('chat-avatar');
+      const targetGirl = currentGirl || 'chloe';
+      if (!rollingVideo) return;
+
+      const clipUrl = `/assets/webcam/${targetGirl}_idle.mp4`;
+      rollingVideo.src = clipUrl;
+      rollingVideo.style.display = 'block';
+      if (avatar) avatar.style.display = 'none';
+
+      rollingVideo.play().catch(() => {});
+      setTimeout(() => {
+        if (rollingVideo) {
+          rollingVideo.pause();
+          rollingVideo.style.display = 'none';
+        }
+        if (avatar) avatar.style.display = 'block';
+      }, 3500);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      const rollingVideo = document.getElementById('chat-rolling-video');
+      const avatar = document.getElementById('chat-avatar');
+      const overlay = document.getElementById('chat-reconnect-overlay');
+      const chatBackdrop = document.getElementById('chat');
+
+      if (document.hidden) {
+        if (rollingVideo) {
+          rollingVideo.pause();
+          rollingVideo.style.display = 'none';
+        }
+        if (avatar) avatar.style.display = 'block';
+      } else if (chatBackdrop && chatBackdrop.classList.contains('is-open')) {
+        if (overlay) {
+          overlay.style.display = 'flex';
+          setTimeout(() => {
+            overlay.style.display = 'none';
+            triggerRollingTextingClip();
+          }, 1000);
+        }
+      }
+    });
+
     document.getElementById('chat-send').addEventListener('click', sendChatMessage);
     async function sendChatMessage() {
       const message = chatInput.value.trim();
@@ -2641,6 +2687,7 @@ const PRESET_FACES = {
       addStamp('Today');
       addMessage('me', message);
       const typing = addMessage('typing', 'typing…');
+      triggerRollingTextingClip();
 
       if (currentCompanionId) {
         try {

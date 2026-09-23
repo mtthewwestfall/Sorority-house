@@ -457,7 +457,7 @@ KEYHOLE_DEFAULT_CONFIG = {
     "intro_price": 5.99,          # 10-minute starter, one per account for life
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
-    "intro_text_included": 100,
+    "intro_text_included": 300,
     "intro_lifetime_cap": 1,
     "quick_price": 7.99,
     "quick_webcam_minutes": 15,
@@ -1265,6 +1265,12 @@ def init_db():
                     package    TEXT NOT NULL,
                     granted    BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS keyhole_preview_views (
+                    user_id TEXT NOT NULL,
+                    show_id TEXT NOT NULL,
+                    viewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (user_id, show_id)
                 );
                 ALTER TABLE keyhole_payments ADD COLUMN IF NOT EXISTS granted BOOLEAN NOT NULL DEFAULT FALSE;
                 -- distinct days the user actually talked to her at the current stage;
@@ -7329,6 +7335,51 @@ def keyhole_preview_claim(user=Depends(current_user)):
             "webcam_minutes_left": int(row["webcam_minutes_left"]),
             "text_balance": int(row["text_balance"]),
             "message_credits": int(row["message_credits"])}
+
+
+@app.get("/keyhole/preview/status")
+def keyhole_preview_status(user=Depends(current_user)):
+    """Retrieves the active monthly 10-minute preview show and whether the user has already watched it."""
+    uid = user["user_id"]
+    shows = [s for s in _get_all_shows_db() if s.get("status") in ("PREVIEW_READY", "PUBLISHED") or s.get("published_website")]
+    active_show = shows[0] if shows else None
+    show_id = active_show.get("show_id") or active_show.get("id") if active_show else None
+
+    already_watched = False
+    if show_id:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM keyhole_preview_views WHERE user_id=%s AND show_id=%s", (uid, show_id))
+                already_watched = bool(cur.fetchone())
+        finally:
+            conn.close()
+
+    return {
+        "ok": True,
+        "show": active_show,
+        "already_watched": already_watched,
+        "preview_minutes": 10,
+        "can_watch": bool(active_show and not already_watched)
+    }
+
+
+@app.post("/keyhole/preview/watch/{show_id}")
+def keyhole_preview_watch(show_id: str, user=Depends(current_user)):
+    """Records user viewing a monthly 10-minute preview show. Each user can only watch each new preview once."""
+    uid = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM keyhole_preview_views WHERE user_id=%s AND show_id=%s", (uid, show_id))
+            if cur.fetchone():
+                raise HTTPException(status_code=400, detail="You have already watched this monthly 10-minute preview. Monthly previews can only be watched once per user.")
+            cur.execute("INSERT INTO keyhole_preview_views (user_id, show_id) VALUES (%s, %s)", (uid, show_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+    return {"ok": True, "show_id": show_id, "watched": True}
 
 
 def _is_vip_cheat(token: str) -> bool:
