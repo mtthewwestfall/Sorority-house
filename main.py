@@ -3565,7 +3565,7 @@ function renderKeyholeCards(shows) {
           </div>
           ${s.preview_url ? `
           <div class="kh-preview-box">
-            <video controls poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
+            <video controls autoplay playsinline loop muted poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
           </div>` : ''}`;
         if (!s.preview_approved) {
           html += `
@@ -3661,7 +3661,7 @@ function renderKeyholeCards(shows) {
           </div>
           ${s.preview_url ? `
           <div class="kh-preview-box">
-            <video controls poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
+            <video controls autoplay playsinline loop muted poster="/assets/webcam/${esc(s.character.toLowerCase())}_preview.jpg" src="${esc(s.preview_url)}"></video>
           </div>` : ''}`;
         if (!s.preview_approved) {
           html += `
