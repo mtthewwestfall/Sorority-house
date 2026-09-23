@@ -485,9 +485,10 @@ KEYHOLE_DEFAULT_CONFIG = {
     "marathon_text_included": 400,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
-    "text_only_price": 1.99,
-    "text_only_included": 100,
+    "text_only_price": 5.99,
+    "text_only_included": 300,
     "text_only_monthly_cap": 1,
+    "public_price": 4.99,
 }
 # Paid Keyhole purchases add this many message credits. Unused credits stay on the
 # account and stack with the next purchase. The client never reports this number.
@@ -7115,7 +7116,7 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
                 pics = int(cfg.get("premium_premade_pictures", 5))
                 cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s", (pics, user_id))
             elif pkg == "text_only":
-                add_text = int(cfg.get("text_only_included", 100))
+                add_text = int(cfg.get("text_only_included", 300))
                 cur.execute("UPDATE users SET text_only_bought_this_month = text_only_bought_this_month + 1 WHERE user_id=%s", (user_id,))
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
@@ -7768,6 +7769,15 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
                     updated_at = now()
                 WHERE show_id=%s
             """, (recording_path, sanitized_path, show_id))
+
+            # Finishing a completed paid private Keyhole show automatically grants 100 text messages to customer account
+            if show.get("show_type") == "private" and float(show.get("price") or 0.0) > 0 and show.get("customer_id"):
+                cur.execute("""
+                    UPDATE users
+                    SET text_balance = text_balance + %s
+                    WHERE user_id = %s
+                """, (KEYHOLE_MESSAGES_PER_PURCHASE, show["customer_id"]))
+
             conn.commit()
             return _fetch_show_dict(cur, show_id)
     finally:
