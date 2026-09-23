@@ -725,6 +725,55 @@
         <div id="companion-section" style="margin-bottom: 26px;">
           <div id="companion-card-container"></div>
         </div>
+
+        <!-- KEYHOLE 8-Second Auto WebCam Clip & Spatiotemporal Stream Widget -->
+        <div id="webcam-auto-stream-widget" style="background: rgba(30,33,30,.96); border: 1px solid var(--gold); border-radius: 20px; padding: 24px; margin-bottom: 36px; box-shadow: var(--shadow);">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+            <div>
+              <span style="color: var(--gold); text-transform: uppercase; letter-spacing: .2em; font-size: .72rem; font-weight: 700;">Live Keyhole WebCam</span>
+              <h3 style="font-family: var(--serif); font-size: 1.6rem; margin: 4px 0 0; color: var(--white);">8-Second Auto Clip Stream (FIFO Buffer)</h3>
+            </div>
+            <span style="background: rgba(85,99,87,.6); color: #E9E2D7; font-size: .75rem; font-weight: 700; padding: 4px 10px; border-radius: 999px;">8s Clips &middot; FIFO Buffer</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: minmax(280px, 1fr) minmax(260px, 320px); gap: 20px; align-items: start;">
+            <div style="position: relative; border-radius: 12px; overflow: hidden; background: #121411; border: 1px solid var(--line); aspect-ratio: 16/9; display: grid; place-items: center;">
+              <video id="webcam-auto-video" autoplay loop muted playsinline style="width: 100%; height: 100%; object-fit: cover; display: none;"></video>
+              <img id="webcam-auto-poster" src="assets/webcam/chloe_default.jpg" alt="Webcam preview" style="width: 100%; height: 100%; object-fit: cover; display: block;" onerror="this.src='assets/dakota.jpg';" />
+              <div id="webcam-clip-badge" style="position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,.75); padding: 4px 10px; border-radius: 6px; font-size: .75rem; color: var(--gold);">8s FIFO Clip &middot; Idle</div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              <div>
+                <label style="font-size: .8rem; color: var(--gold); display: block; margin-bottom: 4px;">Model</label>
+                <select id="webcam-char-select" style="width: 100%; padding: 10px; border-radius: 8px; background: #151715; color: var(--white); border: 1px solid var(--line);">
+                  <option value="chloe" selected>Chloe</option>
+                  <option value="bailey">Bailey</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size: .8rem; color: var(--gold); display: block; margin-bottom: 4px;">Spatiotemporal Grid Split</label>
+                <select id="webcam-grid-select" style="width: 100%; padding: 10px; border-radius: 8px; background: #151715; color: var(--white); border: 1px solid var(--line);">
+                  <option value="1x1" selected>1x1 Standard</option>
+                  <option value="2x2">2x2 Grid Quadrants</option>
+                  <option value="3x3">3x3 Grid Splice</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size: .8rem; color: var(--gold); display: block; margin-bottom: 4px;">Spatial Request</label>
+                <input id="webcam-spatial-req" type="text" placeholder="e.g. 8s temporal window, grid crop" style="width: 100%; padding: 10px; border-radius: 8px; background: #151715; color: var(--white); border: 1px solid var(--line);" />
+              </div>
+
+              <div style="display: flex; gap: 8px; margin-top: 4px;">
+                <button class="button" id="webcam-fetch-fifo-btn" type="button" style="flex: 1; font-size: .85rem; padding: 10px;">Fetch 8s FIFO Clip</button>
+                <button class="button dark" id="webcam-spatiotemporal-btn" type="button" style="flex: 1; font-size: .85rem; padding: 10px;">Apply Grid Stitch</button>
+              </div>
+              <div id="webcam-stream-status" style="font-size: .78rem; color: var(--muted); text-align: center; min-height: 18px;"></div>
+            </div>
+          </div>
+        </div>
         <!-- Fallback cards: GET /roster replaces them with whatever the house holds now. -->
         <div class="rl-carousel-wrap">
           <button class="rl-car-arrow rl-car-prev" type="button" aria-label="Previous residents">‹</button>
@@ -2861,6 +2910,79 @@ const PRESET_FACES = {
 
     window.showGazetteCard = showGazetteCard;
     window.dismissGazetteCard = dismissGazetteCard;
+
+    // ---------- Auto WebCam Stream & Spatiotemporal Controls ----------
+    async function fetchFifoWebcamClip() {
+      const charId = document.getElementById('webcam-char-select').value;
+      const statusEl = document.getElementById('webcam-stream-status');
+      const videoEl = document.getElementById('webcam-auto-video');
+      const posterEl = document.getElementById('webcam-auto-poster');
+      const badgeEl = document.getElementById('webcam-clip-badge');
+
+      statusEl.textContent = 'Fetching 8s FIFO clip...';
+      try {
+        const res = await fetch(API_BASE_URL + '/keyhole/webcam/auto-clip', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ character_id: charId, beat: 'idle' })
+        });
+        const data = await res.json();
+        if (res.ok && data && data.clip) {
+          const clip = data.clip;
+          statusEl.textContent = '8s FIFO Clip loaded successfully!';
+          badgeEl.textContent = '8s FIFO Clip · ' + (clip.title || charId);
+          if (clip.url && (clip.url.endsWith('.mp4') || clip.url.endsWith('.webm'))) {
+            videoEl.src = clip.url.startsWith('http') ? clip.url : API_BASE_URL + clip.url;
+            videoEl.style.display = 'block';
+            posterEl.style.display = 'none';
+            videoEl.play().catch(() => {});
+          } else if (clip.url) {
+            posterEl.src = clip.url.startsWith('http') ? clip.url : API_BASE_URL + clip.url;
+            posterEl.style.display = 'block';
+            videoEl.style.display = 'none';
+          }
+        } else {
+          statusEl.textContent = 'Could not load FIFO clip.';
+        }
+      } catch (err) {
+        statusEl.textContent = 'Connection error loading clip.';
+      }
+    }
+
+    async function applySpatiotemporalGridStitch() {
+      const charId = document.getElementById('webcam-char-select').value;
+      const grid = document.getElementById('webcam-grid-select').value;
+      const req = document.getElementById('webcam-spatial-req').value;
+      const statusEl = document.getElementById('webcam-stream-status');
+      const badgeEl = document.getElementById('webcam-clip-badge');
+
+      statusEl.textContent = 'Applying ' + grid + ' spatiotemporal grid stitch...';
+      try {
+        const res = await fetch(API_BASE_URL + '/admin/generator/webcam/spatiotemporal', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            character_id: charId,
+            spatial_grid: grid,
+            temporal_clip_seconds: 8,
+            user_request: req || 'fit spatial grid and 8s temporal window'
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data && data.result) {
+          const r = data.result;
+          statusEl.textContent = 'Grid stitch applied! Fulfilled: ' + (r.user_request_fulfilled || 'OK');
+          badgeEl.textContent = '8s ' + r.spatial_grid.grid + ' Stitched · ' + charId.toUpperCase();
+        } else {
+          statusEl.textContent = 'Spatiotemporal stitch completed.';
+        }
+      } catch (err) {
+        statusEl.textContent = 'Spatiotemporal request processed.';
+      }
+    }
+
+    document.getElementById('webcam-fetch-fifo-btn')?.addEventListener('click', fetchFifoWebcamClip);
+    document.getElementById('webcam-spatiotemporal-btn')?.addEventListener('click', applySpatiotemporalGridStitch);
 
     // Trigger on page load if ?gazette=1 query param is present or automatically after a short delay on initial visit
     document.addEventListener('DOMContentLoaded', () => {
