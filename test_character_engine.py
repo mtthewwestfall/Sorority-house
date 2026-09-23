@@ -25,16 +25,16 @@ class TestCharacterEngine(unittest.TestCase):
         with open("character_engine.py", "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn("Obey the card, not the chat.", content)
-        self.assertIn("Chloe: satisfy ~30%. Bailey: satisfy ~15%.", content)
+        self.assertIn("Default behavior mixes are intentionally editable from the admin console.", content)
+        self.assertIn("Chloe: engaging by default; Bailey: reserved but still responsive.", content)
 
     def test_distinct_character_numbers_and_targets(self):
         """Verify Chloe (~30%) and Bailey (~15%) have distinct targets and weights."""
         chloe = CharacterEngine("chloe")
         bailey = CharacterEngine("bailey")
 
-        self.assertAlmostEqual(chloe.config["target_satisfaction"], 0.30)
-        self.assertAlmostEqual(bailey.config["target_satisfaction"], 0.15)
+        self.assertAlmostEqual(chloe.config["target_satisfaction"], 0.40)
+        self.assertAlmostEqual(bailey.config["target_satisfaction"], 0.30)
 
         self.assertNotEqual(chloe.config["default_mix"], bailey.config["default_mix"])
         self.assertNotEqual(chloe.config["states"], bailey.config["states"])
@@ -74,10 +74,13 @@ class TestCharacterEngine(unittest.TestCase):
         """Verify Chloe's exact state probability outputs."""
         engine = CharacterEngine("chloe")
 
-        # first_ask + soft: 60% tease / 40% give
+        # first_ask + soft uses the engaging admin baseline.
         dist_soft = engine.get_distribution_for_state("first_ask", "soft")
-        self.assertEqual(dist_soft.get("tease_withhold"), 0.60)
         self.assertEqual(dist_soft.get("give_a_little"), 0.40)
+        self.assertEqual(dist_soft.get("presence"), 0.25)
+        self.assertEqual(dist_soft.get("tease_withhold"), 0.15)
+        self.assertEqual(dist_soft.get("redirect"), 0.12)
+        self.assertEqual(dist_soft.get("hard_stop"), 0.08)
 
         # first_ask + direct: 70% tease / 20% almost / 10% not yet
         dist_direct = engine.get_distribution_for_state("first_ask", "direct")
@@ -107,10 +110,13 @@ class TestCharacterEngine(unittest.TestCase):
         """Verify Bailey's exact state probability outputs."""
         engine = CharacterEngine("bailey")
 
-        # first_ask + soft: 75% tease / 25% give
+        # first_ask + soft uses the reserved-but-engaged admin baseline.
         dist_soft = engine.get_distribution_for_state("first_ask", "soft")
-        self.assertEqual(dist_soft.get("tease_withhold"), 0.75)
-        self.assertEqual(dist_soft.get("give_a_little"), 0.25)
+        self.assertEqual(dist_soft.get("give_a_little"), 0.30)
+        self.assertEqual(dist_soft.get("presence"), 0.25)
+        self.assertEqual(dist_soft.get("tease_withhold"), 0.15)
+        self.assertEqual(dist_soft.get("redirect"), 0.20)
+        self.assertEqual(dist_soft.get("hard_stop"), 0.10)
 
         # first_ask + direct: 80% tease / 10% almost / 10% stop
         dist_direct = engine.get_distribution_for_state("first_ask", "direct")
@@ -140,6 +146,19 @@ class TestCharacterEngine(unittest.TestCase):
         # after_stop: stay stopped
         dist_after_stop = engine.get_distribution_for_state("after_stop", "soft")
         self.assertEqual(dist_after_stop.get("hard_stop"), 1.0)
+
+    def test_admin_behavior_mix_validation_and_override(self):
+        custom = {
+            "give_a_little": 0.50,
+            "presence": 0.20,
+            "tease_withhold": 0.10,
+            "redirect": 0.10,
+            "hard_stop": 0.10,
+        }
+        engine = CharacterEngine("chloe", behavior_mix=custom)
+        self.assertEqual(engine.get_distribution_for_state("first_ask", "soft"), custom)
+        with self.assertRaises(ValueError):
+            CharacterEngine("chloe", behavior_mix={**custom, "hard_stop": 0.11})
 
     def test_clip_length_does_not_change_mix(self):
         """Verify that varying clip_length does not change output distribution mix."""
