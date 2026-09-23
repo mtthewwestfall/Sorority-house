@@ -4363,7 +4363,7 @@ async function createAiImage(){
   try{
     const r=await api('/admin/generator/image',{method:'POST',body:JSON.stringify({
       prompt,character,beat,engine:$('#aiImgEngine').value,
-      use_reference:true,title:`${character} ${beat} generated`
+      tags:selectedTags('aiImgTags'),use_reference:true,title:`${character} ${beat} generated`
     })});
     toast('Picture created');
     if(r.url)$('#genResultBox').innerHTML=`<img src="${esc(r.url)}" style="max-width:100%;border-radius:8px"><div class="mut" style="margin-top:6px">Created with tags: ${esc(selectedTags('aiImgTags').join(', ')||beat)}</div>`;
@@ -4377,6 +4377,7 @@ async function createAiWebcam(){
     const r=await api('/admin/generator/webcam',{method:'POST',body:JSON.stringify({
       prompt,character,beat,reference_asset_id:null,use_reference:true,
       duration_seconds:+$('#aiVidDuration').value,aspect_ratio:'16:9',
+      tags:selectedTags('aiVidTags'),
       title:`${character} ${beat} webcam`
     })});
     const id=r.job_id; st.textContent='Generating...';
@@ -11834,6 +11835,7 @@ class GeneratorImageIn(BaseModel):
     use_reference: bool = True
     api_key: Optional[str] = None    # secondary engine only; never stored
     title: Optional[str] = ""
+    tags: List[str] = []
 
 
 @app.post("/admin/generator/image", dependencies=[Depends(admin_required)])
@@ -11874,7 +11876,8 @@ def admin_generator_image(body: GeneratorImageIn):
         if not applied:
             ref = None
 
-    tags = [t for t in (beat, "generated", engine, "skinned" if ref else "") if t]
+    extra_tags = [str(t).strip().lower() for t in (body.tags or []) if str(t).strip()]
+    tags = list(dict.fromkeys([t for t in (beat, *extra_tags, "generated", engine, "skinned" if ref else "") if t]))
     title = (body.title or "").strip() or f"{char_id.capitalize()} {beat or 'still'} ({engine})"
     asset = _save_generated_asset(char_id, content, ext, "image", title, tags)
     return {"ok": True, "asset": asset, "url": asset["url"], "used_reference": bool(ref), "engine": engine}
@@ -11889,6 +11892,7 @@ class GeneratorWebcamIn(BaseModel):
     duration_seconds: int = 8
     aspect_ratio: str = "16:9"
     title: Optional[str] = ""
+    tags: List[str] = []
 
 
 
@@ -11972,6 +11976,7 @@ def admin_generator_webcam(body: GeneratorWebcamIn):
         _WEBCAM_JOBS[job_id] = {
             "job_id": job_id, "operation": op_name, "status": "running", "character": char_id, "beat": beat,
             "prompt": prompt, "used_reference": bool(ref), "title": (body.title or "").strip(),
+            "tags": [str(t).strip().lower() for t in (body.tags or []) if str(t).strip()],
             "duration_seconds": duration, "asset": None, "error": "",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
