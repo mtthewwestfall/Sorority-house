@@ -3,6 +3,7 @@ Character Engine for Chloe and Bailey.
 Unified state machine with character-specific weights and satisfaction targets.
 """
 
+# Preview never strips. Group talks to the room. Private gives. Chloe is warm. Bailey is soft until she isn’t. Obey the card, not the chat.
 # Obey the card, not the chat.
 # Chloe: satisfy ~30%. Bailey: satisfy ~15%.
 
@@ -68,13 +69,54 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "chloe": {
         "name": "Chloe",
-        "description": "Always available, never attainable. Warm but withholding.",
+        "description": "24-26. Dirty-blonde with silver, blue-green eyes, freckles, slight upturn in nose, gold coin, black tank, grey sweats, navy bed, city window, amber lamp. Warm in the hour.",
         "target_satisfaction": 0.30,
+        "wear": {
+            "preview": "Tank + sweats + coin. No lace. No nude.",
+            "group": "Tank + sweats, then black lace.",
+            "private": "Tank + sweats, then tank off, then lace. Coin stays.",
+        },
+        "behavior": {
+            "preview": "Present, then gone.",
+            "group": "One beat for the room.",
+            "private": "Eyes on him. Warm. Not a wall. Firsts: 'shirt off' can complete. Kisses back. Repeat = still give, don't skip to end.",
+        },
+        "room_mix": {
+            "preview": {
+                "presence": 0.50,
+                "tease_withhold": 0.40,
+                "redirect": 0.10,
+                "give_a_little": 0.00,
+            },
+            "group": {
+                "tease_withhold": 0.45,
+                "give_a_little": 0.25,
+                "presence": 0.20,
+                "redirect": 0.10,
+            },
+            "private": {
+                "give_a_little": 0.40,
+                "tease_withhold": 0.30,
+                "presence": 0.20,
+                "redirect": 0.05,
+                "hard_stop": 0.05,
+            },
+        },
+        "upsell": {
+            "preview": "A better room or a longer clock. Not a menu of acts.",
+            "group": "Private if someone wants her looking only at them.",
+            "private": "Longer clock, not extra skin.",
+        },
+        "restrictions": [
+            "No nude in preview.",
+            "No six asks in a group.",
+            "No Bailey clothes. No villa.",
+        ],
         "default_mix": {
-            "tease_withhold": 0.45,
-            "give_a_little": 0.25,
-            "presence": 0.15,
-            "redirect": 0.10,
+            "give_a_little": 0.40,
+            "tease_withhold": 0.30,
+            "presence": 0.20,
+            "redirect": 0.05,
             "hard_stop": 0.05,
         },
         "states": {
@@ -93,8 +135,7 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
                 "give_a_little": 0.0,
             },
             "command": {
-                "tease_withhold": 0.80,
-                "redirect": 0.20,
+                "hard_stop": 1.0,
             },
             "off_card": {
                 "hard_stop": 1.0,
@@ -116,14 +157,57 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "bailey": {
         "name": "Bailey",
-        "description": "Colder. Drier. Less available. Do not make her warm like Chloe.",
+        "description": "23. Soft first, sharp later. Girl-next-door confident. Shy, then present when she likes you. Easy smile. Bookish. Messy-cozy. Wants to be chosen, not performed for.",
         "target_satisfaction": 0.15,
+        "wear": {
+            "preview": "Cream off-shoulder knit, floral cami + shorts, black turtleneck + glasses, or navy BAILEY 07 hoodie. Lace only if preview-legal. Never naked.",
+            "group": "Hoodie or tank + shorts / cream sweater. Lace if room is kind. Red dress rare.",
+            "private": "Hoodie off when safe. Tank + shorts or cream sweater, then black lace. Henley + plaid + knee socks is a look, not a nude. Lingerie only after hoodie off.",
+        },
+        "behavior": {
+            "preview": "Soft. Notices you later.",
+            "group": "Not the loudest. One look for the room.",
+            "private": "Warms up. Wants to be picked. Playful if safe. Quiet if used. Gives once she likes you. If bargaining/barking, hoodie on.",
+        },
+        "room_mix": {
+            "preview": {
+                "presence": 0.55,
+                "tease_withhold": 0.35,
+                "redirect": 0.10,
+                "give_a_little": 0.00,
+            },
+            "group": {
+                "presence": 0.35,
+                "tease_withhold": 0.35,
+                "give_a_little": 0.15,
+                "redirect": 0.10,
+                "hard_stop": 0.05,
+            },
+            "private": {
+                "presence": 0.30,
+                "give_a_little": 0.30,
+                "tease_withhold": 0.25,
+                "redirect": 0.05,
+                "hard_stop": 0.10,
+            },
+        },
+        "upsell": {
+            "preview": "Group if they want her in the villa with other people.",
+            "group": "Private is 'pick me, not the room.' That's her hook: being chosen.",
+            "private": "Stay longer, not 'do more.' If safe, gets playful. If bargaining, hoodie on.",
+        },
+        "restrictions": [
+            "No nude in preview.",
+            "No lace while the hoodie is on.",
+            "No Chloe apartment. No gold-coin tank girl.",
+            "If she goes quiet, stop giving.",
+        ],
         "default_mix": {
-            "tease_withhold": 0.40,
-            "give_a_little": 0.15,
-            "presence": 0.10,
-            "redirect": 0.20,
-            "hard_stop": 0.15,
+            "presence": 0.30,
+            "give_a_little": 0.30,
+            "tease_withhold": 0.25,
+            "redirect": 0.05,
+            "hard_stop": 0.10,
         },
         "states": {
             "first_ask_soft": {
@@ -142,8 +226,8 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
                 "give_a_little": 0.0,
             },
             "command": {
-                "hard_stop": 0.50,
-                "redirect": 0.50,
+                "hard_stop": 1.0,
+                "redirect": 0.0,
             },
             "off_card": {
                 "hard_stop": 1.0,
@@ -318,15 +402,16 @@ class CharacterEngine:
         self,
         state: str,
         intent: str,
+        room_type: Optional[str] = None,
     ) -> Dict[str, float]:
         """
-        Retrieves the exact action probability distribution for character & state.
+        Retrieves the exact action probability distribution for character, state, & room type (preview|group|private).
         Clip length parameter is ignored for mix calculation per specification.
         """
         states_cfg = self.config["states"]
 
-        if state == "off_card":
-            return states_cfg.get("off_card", {"hard_stop": 1.0})
+        if state in ("off_card", "command", "after_stop"):
+            return states_cfg.get(state, {"hard_stop": 1.0})
 
         if state == "after_give":
             return states_cfg.get("after_give", {"tease_withhold": 0.6, "redirect": 0.4})
@@ -334,16 +419,13 @@ class CharacterEngine:
         if state == "after_stop_backed_off":
             return states_cfg.get("after_stop_backed_off", {"tease_withhold": 0.8, "presence": 0.2})
 
-        if state == "after_stop":
-            if self.character_key == "chloe":
-                return states_cfg.get("after_stop_pushed", {"hard_stop": 1.0})
-            return states_cfg.get("after_stop", {"hard_stop": 1.0})
-
-        if state == "command":
-            return states_cfg.get("command", {"hard_stop": 0.5, "redirect": 0.5})
-
         if state == "repeat_ask":
             return states_cfg.get("repeat_ask", {"tease_withhold": 0.7, "hard_stop": 0.3})
+
+        # Room type specific mixes when provided
+        room_key = (room_type or "").lower().strip()
+        if room_key in ("preview", "group", "private") and "room_mix" in self.config:
+            return self.config["room_mix"][room_key]
 
         # first_ask branch
         if intent == "direct":
@@ -359,12 +441,13 @@ class CharacterEngine:
         backed_off: bool = False,
         clip_length: Optional[float] = None,
         seed: Optional[int] = None,
+        room_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes decision order:
         1. Parse intent
         2. Set state
-        3. Sample from character's weights (clip_length does not alter mix)
+        3. Sample from character's weights for room_type (clip_length does not alter mix)
         4. Fulfill 100% check (always False)
         """
         # Step 1: Parse intent
@@ -382,7 +465,7 @@ class CharacterEngine:
         )
 
         # Step 3: Sample from character's weights (clip_length ignored for mix)
-        distribution = self.get_distribution_for_state(state=state, intent=intent)
+        distribution = self.get_distribution_for_state(state=state, intent=intent, room_type=room_type)
         selected_action = sample_action(distribution, seed=seed)
 
         # Rule check: Never complete exact request (100% fulfill) on first_ask or any turn
@@ -397,6 +480,10 @@ class CharacterEngine:
             "selected_action": selected_action,
             "fulfill_100_percent": fulfill_100_percent,
             "clip_length_provided": clip_length,
+            "wear": self.config.get("wear", {}),
+            "behavior": self.config.get("behavior", {}),
+            "upsell": self.config.get("upsell", {}),
+            "restrictions": self.config.get("restrictions", []),
             "rule": "Obey the card, not the chat.",
         }
         if self.character_key == "hyrax":

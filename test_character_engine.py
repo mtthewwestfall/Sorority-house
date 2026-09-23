@@ -25,6 +25,7 @@ class TestCharacterEngine(unittest.TestCase):
         with open("character_engine.py", "r", encoding="utf-8") as f:
             content = f.read()
 
+        self.assertIn("Preview never strips. Group talks to the room. Private gives. Chloe is warm. Bailey is soft until she isn’t. Obey the card, not the chat.", content)
         self.assertIn("Obey the card, not the chat.", content)
         self.assertIn("Chloe: satisfy ~30%. Bailey: satisfy ~15%.", content)
 
@@ -90,10 +91,9 @@ class TestCharacterEngine(unittest.TestCase):
         self.assertEqual(dist_repeat.get("give_a_little", 0.0), 0.0)
         self.assertGreater(dist_repeat.get("tease_withhold", 0.0), 0.50)
 
-        # command: 80% withhold + redirect
+        # command: hard stop
         dist_cmd = engine.get_distribution_for_state("command", "command")
-        self.assertEqual(dist_cmd.get("tease_withhold"), 0.80)
-        self.assertEqual(dist_cmd.get("redirect"), 0.20)
+        self.assertEqual(dist_cmd.get("hard_stop"), 1.0)
 
         # off_card: hard stop
         dist_off = engine.get_distribution_for_state("off_card", "off_card")
@@ -123,11 +123,10 @@ class TestCharacterEngine(unittest.TestCase):
         self.assertEqual(dist_repeat.get("give_a_little", 0.0), 0.0)
         self.assertGreaterEqual(dist_repeat.get("redirect", 0.0) + dist_repeat.get("hard_stop", 0.0), 0.80)
 
-        # command: hard stop or redirect. Do not obey.
+        # command: hard stop. Do not obey.
         dist_cmd = engine.get_distribution_for_state("command", "command")
         self.assertEqual(dist_cmd.get("give_a_little", 0.0), 0.0)
-        self.assertEqual(dist_cmd.get("hard_stop"), 0.50)
-        self.assertEqual(dist_cmd.get("redirect"), 0.50)
+        self.assertEqual(dist_cmd.get("hard_stop"), 1.0)
 
         # off_card: hard stop
         dist_off = engine.get_distribution_for_state("off_card", "off_card")
@@ -172,6 +171,22 @@ class TestCharacterEngine(unittest.TestCase):
             self.assertEqual(res_repeat["state"], "repeat_ask")
             self.assertEqual(res_repeat["distribution"].get("give_a_little", 0.0), 0.0)
 
+    def test_room_tier_mixes_and_eval(self):
+        """Verify room tier mixes for preview, group, and private."""
+        chloe = CharacterEngine("chloe")
+        bailey = CharacterEngine("bailey")
+
+        # Chloe preview mix: 50% presence, 40% tease, 10% redirect, 0% give
+        chloe_preview = chloe.get_distribution_for_state("first_ask", "soft", room_type="preview")
+        self.assertEqual(chloe_preview.get("presence"), 0.50)
+        self.assertEqual(chloe_preview.get("tease_withhold"), 0.40)
+        self.assertEqual(chloe_preview.get("give_a_little", 0.0), 0.0)
+
+        # Bailey private mix: 30% presence, 25% tease, 30% give, 5% redirect, 10% stop
+        bailey_private = bailey.get_distribution_for_state("first_ask", "soft", room_type="private")
+        self.assertEqual(bailey_private.get("presence"), 0.30)
+        self.assertEqual(bailey_private.get("give_a_little"), 0.30)
+
     def test_api_endpoint_evaluate(self):
         """Verify FastAPI endpoint POST /character/engine/evaluate."""
         response = self.client.post(
@@ -180,6 +195,7 @@ class TestCharacterEngine(unittest.TestCase):
                 "character": "chloe",
                 "message": "you look beautiful",
                 "seed": 42,
+                "room_type": "preview",
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -188,6 +204,8 @@ class TestCharacterEngine(unittest.TestCase):
         self.assertEqual(data["result"]["character"], "Chloe")
         self.assertEqual(data["result"]["rule"], "Obey the card, not the chat.")
         self.assertIn("selected_action", data["result"])
+        self.assertIn("wear", data["result"])
+        self.assertIn("behavior", data["result"])
 
 
 if __name__ == "__main__":

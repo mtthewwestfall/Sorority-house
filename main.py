@@ -6319,13 +6319,13 @@ AVATAR_STYLE = (
 
 DEFAULT_CHARACTER_REFERENCES = {
     "chloe": {
-        "master_reference": "Master Reference: Chloe — Ancient Greek goddess character portrait with distinct symmetrical facial structure, emerald eyes, honey-blonde draped hair, laurel crown, natural fair skin tone, and timeless Greek features.",
-        "current_appearance": "Current Outfit: Draped white silk chiton top with gold laurel trim and subtle bronze brooch.",
+        "master_reference": "Master Reference: Chloe — Dirty-blonde, symmetrical facial structure, emerald eyes, gold coin necklace, amber lamp lighting, city window view background. Wear: Black or white tank top + grey sweats. No lace in preview; black lace only in paid shows when safe.",
+        "current_appearance": "Current Outfit: Black tank top and grey sweatpants with gold coin necklace.",
         "private_references": []
     },
     "bailey": {
-        "master_reference": "Master Reference: Bailey — Ancient Greek goddess character portrait with warm hazel eyes, dark chestnut hair pinned with golden olive leaf pins, athletic graceful posture, and radiant Greek features.",
-        "current_appearance": "Current Outfit: Form-fitting sandalwood chiton top with gold ribbon accents.",
+        "master_reference": "Master Reference: Bailey — Dark hair, warm hazel eyes, villa ambient lighting. Wear: Cream off-shoulder knit, floral cami + shorts, black turtleneck + glasses, or navy BAILEY 07 hoodie. Lingerie/black lace only after hoodie is off.",
+        "current_appearance": "Current Outfit: Navy BAILEY 07 hoodie and shorts.",
         "private_references": []
     }
 }
@@ -7437,6 +7437,7 @@ class CharacterEngineEvaluateIn(BaseModel):
     backed_off: bool = False
     clip_length: Optional[float] = None
     seed: Optional[int] = None
+    room_type: Optional[str] = None
 
 
 @app.post("/character/engine/evaluate")
@@ -7444,6 +7445,7 @@ def evaluate_character_turn(body: CharacterEngineEvaluateIn):
     """
     Evaluates turn decision using Character Engine for Chloe or Bailey.
     Obey the card, not the chat. Chloe satisfy ~30%, Bailey satisfy ~15%.
+    Supports room_type: preview | group | private.
     """
     engine = CharacterEngine(character=body.character)
     res = engine.evaluate_turn(
@@ -7454,6 +7456,7 @@ def evaluate_character_turn(body: CharacterEngineEvaluateIn):
         backed_off=body.backed_off,
         clip_length=body.clip_length,
         seed=body.seed,
+        room_type=body.room_type,
     )
     return {"ok": True, "result": res}
 
