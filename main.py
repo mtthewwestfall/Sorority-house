@@ -3200,6 +3200,59 @@ pre{white-space:pre-wrap;margin:0}
       </div>
     </div>
 
+    <div class="kh-show-card" style="margin-top:16px; border-color: var(--ok);">
+      <h3 style="margin-top:0; margin-bottom:6px; font-size:18px; color:var(--ok);">🎮 FREE INTERACTIVE DEMO SHOW BUILDER</h3>
+      <p style="margin:0 0 14px 0; font-size:13px; color:var(--mut);">Pick whatever duration, girl, and show type (Private, Group, Preview). 100% Free on Admin End ($0.00) with Live Interactive Stream Demo.</p>
+
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:140px;">
+            <label class="kh-label" style="display:block; margin-bottom:4px;">Select Girl</label>
+            <select id="customDemoGirl" style="width:100%; height:44px; font-size:15px; background:#121218; color:#fff; border:1px solid var(--line); border-radius:8px; padding:0 8px;">
+              <option value="chloe">Chloe</option>
+              <option value="bailey">Bailey</option>
+              <option value="carmen">Carmen</option>
+              <option value="valentina">Valentina</option>
+              <option value="riley">Riley</option>
+              <option value="maya">Maya</option>
+            </select>
+          </div>
+
+          <div style="flex:1; min-width:140px;">
+            <label class="kh-label" style="display:block; margin-bottom:4px;">Show Type</label>
+            <select id="customDemoType" style="width:100%; height:44px; font-size:15px; background:#121218; color:#fff; border:1px solid var(--line); border-radius:8px; padding:0 8px;">
+              <option value="private">Private (1-on-1)</option>
+              <option value="public">Group (Public Lounge)</option>
+              <option value="preview">Free Preview</option>
+            </select>
+          </div>
+
+          <div style="flex:1; min-width:140px;">
+            <label class="kh-label" style="display:block; margin-bottom:4px;">Duration (Minutes)</label>
+            <input id="customDemoMin" type="number" value="15" min="1" max="180" style="width:100%; height:44px; font-size:15px; background:#121218; color:#fff; border:1px solid var(--line); border-radius:8px; padding:0 10px;" placeholder="e.g. 15, 30, 60">
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#121218; padding:10px 14px; border-radius:8px; border:1px solid var(--line);">
+          <span class="kh-label">Admin Price:</span>
+          <span style="color:var(--ok); font-weight:700; font-size:16px;">$0.00 (100% Free Demo)</span>
+        </div>
+
+        <button type="button" class="kh-btn kh-btn-start" onclick="launchCustomDemoShow()">
+          🚀 LAUNCH FREE CUSTOM DEMO SHOW
+        </button>
+
+        <div id="customDemoResult" style="display:none; margin-top:12px; background:#000; padding:14px; border-radius:10px; border:1px solid var(--ok);">
+          <div style="font-weight:700; color:var(--ok); margin-bottom:8px; font-size:15px;" id="demoResultTitle">LIVE DEMO ACTIVE</div>
+          <div id="demoResultDetail" style="font-size:13px; color:var(--mut); margin-bottom:10px;"></div>
+          <div class="kh-preview-box">
+            <video id="demoVideoPlayer" autoplay playsinline loop muted controls style="width:100%; max-height:260px; display:block;"></video>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;" id="demoBeatButtons"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="kh-show-card" style="margin-top:8px;">
       <h3 style="margin-top:0; margin-bottom:12px; font-size:18px; color:var(--acc);">NEW PUBLIC SHOW</h3>
       <div style="display:flex; flex-direction:column; gap:12px;">
@@ -3874,6 +3927,55 @@ async function saveMasterRefText() {
     toast(activeRefChar + ' master reference saved');
     await loadCharacterRefs();
   } catch (e) { toast(e.message, true); }
+}
+async function launchCustomDemoShow() {
+  const girl = document.getElementById('customDemoGirl').value;
+  const showType = document.getElementById('customDemoType').value;
+  const duration = parseInt(document.getElementById('customDemoMin').value || '15', 10);
+
+  try {
+    const res = await api('/admin/keyhole/shows/custom-demo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': SECRET },
+      body: JSON.stringify({
+        character_id: girl,
+        show_type: showType,
+        duration_minutes: duration
+      })
+    });
+    if (res && res.ok) {
+      toast('Free Demo Show Launched for ' + girl + ' (' + showType + ', ' + duration + ' min)');
+      const box = document.getElementById('customDemoResult');
+      box.style.display = 'block';
+      document.getElementById('demoResultTitle').innerText = '🟢 LIVE DEMO: ' + res.show.title;
+      document.getElementById('demoResultDetail').innerHTML = 'Show ID: <b>' + res.show.id + '</b> | Duration: <b>' + duration + ' mins</b> | Price: <b style="color:var(--ok)">$0.00 FREE</b>';
+
+      const vid = document.getElementById('demoVideoPlayer');
+      vid.src = '/assets/webcam/' + girl + '_idle.mp4';
+      vid.play().catch(() => {});
+
+      const beatBox = document.getElementById('demoBeatButtons');
+      beatBox.innerHTML = '';
+      ['idle', 'tease', 'give', 'stop', 'presence'].forEach(beat => {
+        const btn = document.createElement('button');
+        btn.className = 's';
+        btn.style.flex = '1';
+        btn.innerText = beat.toUpperCase();
+        btn.onclick = () => {
+          vid.src = '/assets/webcam/' + girl + '_' + beat + '.mp4';
+          vid.play().catch(() => {});
+          toast('Switched demo beat to: ' + beat);
+        };
+        beatBox.appendChild(btn);
+      });
+
+      if (typeof loadShows === 'function') loadShows();
+    } else {
+      toast('Demo launch failed: ' + ((res && res.detail) || 'Error'), true);
+    }
+  } catch (err) {
+    toast('Demo launch failed: ' + err.message, true);
+  }
 }
 async function saveAppearanceRefText() {
   const value = ($('#refAppearanceText')?.value || '').trim();
@@ -9645,6 +9747,13 @@ def _preview_plates(char_id: str) -> Dict[str, list]:
         for beat in beats:
             if beat in tags:
                 beats[beat].append({"url": r["url"], "media_type": r["media_type"]})
+
+    # Auto-fill empty beats so memory plates always have active media
+    fallback_url = _get_character_strict_fallback_url(char_id) if char_id in ("chloe", "bailey") else f"/assets/webcam/{char_id}_idle.mp4"
+    for beat in beats:
+        if not beats[beat]:
+            beats[beat].append({"url": fallback_url, "media_type": "video", "auto_filled": True})
+
     return beats
 
 
@@ -9939,6 +10048,69 @@ def admin_keyhole_moderate_preview(show_id: str, body: KeyholePreviewModerateIn)
 class PublishPreviewIn(BaseModel):
     publish_telegram: bool = True
     publish_website: bool = True
+
+
+class CustomDemoShowIn(BaseModel):
+    character_id: str = "chloe"
+    show_type: str = "private"            # 'preview', 'public', or 'private'
+    duration_minutes: int = 15           # pick whatever time you want!
+    title: Optional[str] = ""
+
+
+@app.post("/admin/keyhole/shows/custom-demo", dependencies=[Depends(admin_required)])
+def admin_custom_demo_show(body: CustomDemoShowIn):
+    """
+    Launch an interactive custom demo show: pick whatever time, girl, or show type (private, group, preview).
+    100% free ($0.00) on admin end with is_demo: True and instant LIVE status.
+    """
+    cid = _keyhole_character(body.character_id)
+    show_type = (body.show_type or "private").strip().lower()
+    if show_type not in ("preview", "public", "private"):
+        show_type = "private"
+    duration = max(1, int(body.duration_minutes or 15))
+    show_id = f"demo_{show_type}_{cid}_{secrets.token_hex(4)}"
+    title = (body.title or "").strip() or f"FREE ADMIN DEMO: {cid.capitalize()} {show_type.capitalize()} ({duration} min)"
+
+    show = {
+        "id": show_id,
+        "character": cid,
+        "character_id": cid,
+        "show_type": show_type,
+        "duration_minutes": duration,
+        "price": 0.00,
+        "currency": "USD",
+        "title": title,
+        "description": f"Custom interactive admin demo show ({duration} minutes, free on admin end).",
+        "status": "LIVE",
+        "is_demo": True,
+        "preview_approved": True,
+        "preview_status": "APPROVED",
+        "published_telegram": True,
+        "published_website": True,
+        "scheduled_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    _save_show_db(show)
+
+    plates = _preview_plates(cid)
+    stream_url = f"/keyhole/webcam/auto-clip"
+
+    return {
+        "ok": True,
+        "free_admin_demo": True,
+        "show": show,
+        "plates": plates,
+        "stream_url": stream_url,
+        "player_demo": {
+            "character": cid,
+            "show_type": show_type,
+            "duration_minutes": duration,
+            "price_usd": 0.00,
+            "status": "LIVE",
+            "interactive_controls": ["idle", "tease", "give", "stop", "presence"]
+        }
+    }
 
 
 @app.post("/admin/keyhole/shows/{show_id}/publish-preview", dependencies=[Depends(admin_required)])
@@ -11734,6 +11906,14 @@ def keyhole_plates():
         for beat in PLATE_BEATS:
             if beat in tags:
                 folder[beat].append({"url": r["url"], "variant": variant, "media_type": r["media_type"]})
+
+    # Auto-fill empty beat folders for every character
+    for c, folder in chars.items():
+        fallback_url = _get_character_strict_fallback_url(c) if c in ("chloe", "bailey") else f"/assets/webcam/{c}_idle.mp4"
+        for beat in PLATE_BEATS:
+            if not folder[beat]:
+                folder[beat].append({"url": fallback_url, "variant": "auto_filled", "media_type": "video", "auto_filled": True})
+
     return {"ok": True, "characters": chars}
 
 
