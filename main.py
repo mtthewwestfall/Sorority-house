@@ -7028,8 +7028,19 @@ def grant_pictures(body: GrantPicturesIn):
 # ---------------------------------------------------------------------------
 # KEYHOLE HELPERS & ENTITLEMENT GRANTS
 # ---------------------------------------------------------------------------
+_KEYHOLE_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_KEYHOLE_CONFIG_CACHE_TS: float = 0.0
+_KEYHOLE_CONFIG_CACHE_TTL: float = 60.0  # seconds
+
 def get_keyhole_config():
-    """Retrieve dynamic keyhole config from DB house_rules, falling back to defaults."""
+    """Retrieve dynamic keyhole config from DB house_rules, falling back to defaults.
+    OPTIMIZATION (Bolt ⚡): Caches keyhole configuration in-memory with a 60s TTL to
+    eliminate DB query roundtrips on hot keyhole routes and preflight checks."""
+    global _KEYHOLE_CONFIG_CACHE, _KEYHOLE_CONFIG_CACHE_TS
+    now = time.time()
+    if _KEYHOLE_CONFIG_CACHE is not None and (now - _KEYHOLE_CONFIG_CACHE_TS < _KEYHOLE_CONFIG_CACHE_TTL):
+        return dict(_KEYHOLE_CONFIG_CACHE)
+
     cfg = dict(KEYHOLE_DEFAULT_CONFIG)
     conn = db()
     try:
@@ -7044,6 +7055,9 @@ def get_keyhole_config():
                         pass
     finally:
         conn.close()
+
+    _KEYHOLE_CONFIG_CACHE = dict(cfg)
+    _KEYHOLE_CONFIG_CACHE_TS = now
     return cfg
 
 
@@ -9401,6 +9415,7 @@ class KeyholeConfigIn(BaseModel):
 @app.post("/admin/keyhole/config", dependencies=[Depends(admin_required)])
 def admin_set_keyhole_config(body: KeyholeConfigIn):
     """Save Keyhole pricing and session parameters into DB house_rules."""
+    global _KEYHOLE_CONFIG_CACHE
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -9412,6 +9427,9 @@ def admin_set_keyhole_config(body: KeyholeConfigIn):
             conn.commit()
     finally:
         conn.close()
+
+    # Bust in-memory keyhole config cache immediately on updates
+    _KEYHOLE_CONFIG_CACHE = None
     return {"ok": True, "config": get_keyhole_config()}
 
 
