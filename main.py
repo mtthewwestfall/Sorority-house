@@ -1960,7 +1960,7 @@ def roster(include_retired=False):
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT girl, name, door_title, blurb, avatar_url,
-                       min_tier, sort_order, active, difficulty
+                       min_tier, sort_order, active, difficulty, behavior_mix
                 FROM personas
                 WHERE active OR %s
                 ORDER BY sort_order, girl
@@ -4201,7 +4201,19 @@ const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:
 function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
 async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'visitor',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'visitor',sort_order:100,difficulty:'normal',active:true,behavior_mix:null,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function behaviorEditor(p){
+ const g=(p.girl||'').toLowerCase(); if(g!=='chloe'&&g!=='bailey')return '';
+ const d=p.behavior_mix||{}; const defaults=g==='chloe'?{give_a_little:40,presence:25,tease_withhold:15,redirect:12,hard_stop:8}:{give_a_little:30,presence:25,tease_withhold:15,redirect:20,hard_stop:10};
+ const v=k=>Math.round((d[k]??defaults[k]/100)*100);
+ return '<div class="card" style="background:#101017;margin-top:10px"><h4 style="margin:0 0 6px 0">Conversational behavior</h4><div class="mut" style="margin-bottom:10px">Baseline tendencies for ordinary turns. Total must be 100%. Safety and hard boundaries still override them.</div><div class="row2">'+
+  '<label>Give <input id="pGive" type="number" min="0" max="100" value="'+v('give_a_little')+'" style="width:70px">%</label>'+
+  '<label>Presence <input id="pPresence" type="number" min="0" max="100" value="'+v('presence')+'" style="width:70px">%</label>'+
+  '<label>Tease <input id="pTease" type="number" min="0" max="100" value="'+v('tease_withhold')+'" style="width:70px">%</label>'+
+  '<label>Redirect <input id="pRedirect" type="number" min="0" max="100" value="'+v('redirect')+'" style="width:70px">%</label>'+
+  '<label>Hard stop <input id="pStop" type="number" min="0" max="100" value="'+v('hard_stop')+'" style="width:70px">%</label>'+
+  '<span id="pMixTotal" class="pill"></span><button class="s" type="button" onclick="resetBehavior(\''+esc(g)+'\')">Reset defaults</button></div></div>';
+}
 function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
  <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
@@ -4210,6 +4222,7 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  <label>Paid tier <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
  <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label>
  <label>Difficulty <select id="pDiff">${Object.keys(DIFFS).map(d=>`<option value="${d}"${d===(p.difficulty||'normal')?' selected':''}>${DIFFS[d]}</option>`).join('')}</select></label></div>
+ ${behaviorEditor(p)}
  <div class="mut">Difficulty only stretches the real days each trust stage takes - she still has to be treated right, and remembered, to open up.</div>
  <div class="row2"><label style="flex:1">Avatar URL <input id="pAvatar" value="${esc(p.avatar_url)}" style="width:100%"></label></div>
  <label class="mut">Door blurb</label><textarea id="pBlurb" style="min-height:60px">${esc(p.blurb)}</textarea>
@@ -4219,10 +4232,19 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  ${p.isNew?'':`<button class="s" onclick="setActive('${esc(p.girl)}',${p.active?'false':'true'})">${p.active?'Retire her':'Bring her back'}</button>`}
  <span class="mut" id="pLen">${(p.persona||'').length} chars</span></div>`;
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
+function behaviorPayload(){
+ const vals={give_a_little:+$('#pGive').value/100,presence:+$('#pPresence').value/100,tease_withhold:+$('#pTease').value/100,redirect:+$('#pRedirect').value/100,hard_stop:+$('#pStop').value/100};
+ const total=Object.values(vals).reduce((a,b)=>a+b,0);
+ if(Math.abs(total-1)>0.000001)throw new Error('Behavior percentages must total 100% (currently '+Math.round(total*100)+'%)');
+ return vals;
+}
+async function resetBehavior(girl){try{await api('/admin/console/character-behavior/'+encodeURIComponent(girl)+'/reset',{method:'POST'});toast('Behavior reset to defaults');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
- try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
+ try{const body={girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
   blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
-  persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
+  persona:$('#pDoc').value,active:CURP?CURP.active:true};
+  if(['chloe','bailey'].includes(slug))body.behavior_mix=behaviorPayload();
+  await api('/admin/console/girl',{method:'POST',body:JSON.stringify(body)});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
