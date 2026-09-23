@@ -39,6 +39,9 @@ PAY_LINK_45          45 minutes has no Stripe link on the site. Defaults to
                      SITE_URL/rooms.html. Set this when a link exists.
 SITE_URL             website origin used for that 45-minute fallback
                      (default https://lockeddoor.ai).
+KEYHOLE_ASSET_ORIGIN origin that serves the Keyhole door photos
+                     (default https://keyhole-latest-production.up.railway.app).
+                     Chloe is /assets/IMG_3542.jpeg, Bailey is /assets/IMG_3543.jpeg.
 """
 
 import asyncio
@@ -76,9 +79,24 @@ TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
 SECRET_ENV = "TELEGRAM_BOT_SECRET"
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
+# Live Keyhole static origin. keyhole.lockeddoor.ai proxies here (netlify.toml).
+KEYHOLE_ASSET_ORIGIN = os.environ.get(
+    "KEYHOLE_ASSET_ORIGIN", "https://keyhole-latest-production.up.railway.app"
+).rstrip("/")
 
 # Restrict available models strictly to Chloe and Bailey
 ALLOWED_MODELS = {"chloe", "bailey"}
+
+# Same files as Keyhole rooms.html doors. Chloe is the blonde city-window room.
+# Bailey is dark hair. Do not swap.
+DOOR_PHOTOS = {
+    "chloe": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3542.jpeg",
+    "bailey": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3543.jpeg",
+}
+_KEYHOLE_ASSET_HOSTS = frozenset({
+    "keyhole-latest-production.up.railway.app",
+    "keyhole.lockeddoor.ai",
+})
 
 # Same session packages and Stripe Payment Links as Keyhole rooms.html.
 # 15 minutes is a real session (not the free preview) and does not include texts.
@@ -248,15 +266,34 @@ def _signup(email, password, display_name):
     }
 
 
+def _webcam_roster(girls):
+    """Chloe then Bailey, each with the Keyhole door photo Telegram should send.
+
+    A model missing from the house roster is still listed. Other residents are
+    dropped. Stored portraits that are not already that girl's door file are
+    replaced so a house-relative path cannot show the wrong picture.
+    """
+    by_slug = {}
+    for g in girls or []:
+        slug = (g.get("girl") or "").strip().lower()
+        if slug in ALLOWED_MODELS:
+            by_slug[slug] = g
+    out = []
+    for slug in ("chloe", "bailey"):
+        g = dict(by_slug.get(slug) or {})
+        g["girl"] = slug
+        g["name"] = g.get("name") or slug.capitalize()
+        g["avatar_url"] = _portrait_url(g)
+        out.append(g)
+    return out
+
+
 def _fetch_roster(token):
     r = _get("/roster", token=token)
     if r.status_code != 200:
         raise BackendError(f"Could not load the models (HTTP {r.status_code})")
     data = r.json()
-    girls = data.get("girls", [])
-    # Strictly filter roster to Chloe and Bailey for WebCam show
-    filtered = [g for g in girls if g.get("girl") in ALLOWED_MODELS]
-    return {"girls": filtered}
+    return {"girls": _webcam_roster(data.get("girls", []))}
 
 
 def _fetch_state(token):
@@ -445,15 +482,88 @@ PORTRAIT_DEADLINE_S = 8.0
 _portrait_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="portrait")
 
 
+def _keyhole_asset_hosts():
+    hosts = set(_KEYHOLE_ASSET_HOSTS)
+    host = (urllib.parse.urlparse(KEYHOLE_ASSET_ORIGIN).hostname or "").lower()
+    if host:
+        hosts.add(host)
+    return hosts
+
+
+def _keyhole_asset_url(url: str) -> bool:
+    """True for an image on the Keyhole static site. Redirects are not followed."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or host not in _keyhole_asset_hosts():
+        return False
+    path = parsed.path or ""
+    return path.startswith("/assets/") and ".." not in path
+
+
+def _own_origin(url: str) -> bool:
+    if url.startswith(SITE_URL + "/"):
+        return True
+    try:
+        base = _base()
+    except RuntimeError:
+        return False
+    return url.startswith(base + "/")
+
+
+def _absolute_media_url(url: str) -> str:
+    """A fetchable media URL on our site or the Keyhole asset host, else ''."""
+    url = (url or "").strip()
+    if not url or url.startswith("data:") or url.startswith("//") or ".." in url:
+        return ""
+    if url.startswith("http://") or url.startswith("https://"):
+        if _own_origin(url) or _keyhole_asset_url(url):
+            return url
+        return ""
+    return SITE_URL + "/" + url.lstrip("/")
+
+
 def _portrait_url(g) -> str:
+    girl = (g.get("girl") or "").strip().lower()
     url = (g.get("avatar_url") or "").strip()
+    if girl in DOOR_PHOTOS:
+        door = DOOR_PHOTOS[girl]
+        filename = door.rsplit("/", 1)[-1]
+        # Keep a roster URL only when it is already this girl's door file on an
+        # allowed host. Anything else (blank, SVG, house portrait) uses the door.
+        if filename in url and (_keyhole_asset_url(url) or _own_origin(url)):
+            return url
+        return door
     if not url:
         return ""
     if url.startswith("http://") or url.startswith("https://"):
-        return url if url.startswith(SITE_URL + "/") or url.startswith(_base() + "/") else ""
+        if _own_origin(url) or _keyhole_asset_url(url):
+            return url
+        return ""
     if url.startswith("//") or ".." in url:
         return ""
     return SITE_URL + "/" + url.lstrip("/")
+
+
+def _resolve_preview(slug: str, asset_url: str, media_type: str):
+    """Photo or video URL for /preview.
+
+    A real video on an allowed host is sent as video. Chloe and Bailey otherwise
+    get their Keyhole door photo, so an SVG placeholder, a missing file, or the
+    old house portrait cannot show the wrong picture.
+    """
+    sl = (slug or "").strip().lower()
+    url = _absolute_media_url(asset_url)
+    path = url.lower().split("?", 1)[0]
+    if media_type == "video" and url and path.endswith((".mp4", ".webm")):
+        return url, "video"
+    if sl in DOOR_PHOTOS:
+        return DOOR_PHOTOS[sl], "photo"
+    if url:
+        return url, "photo"
+    return "", "photo"
 
 
 def _fetch_bytes(url: str):
@@ -521,8 +631,9 @@ async def _send_preview(update, slug: str, token: str | None = None) -> None:
                     asset_url = _portrait_url(g)
                     break
         except Exception:
-            pass
+            asset_url = DOOR_PHOTOS.get(sl, "")
 
+    asset_url, media_type = _resolve_preview(sl, asset_url, media_type)
     if not asset_url:
         await _txt(update, f"Preview for {sl.capitalize()} is currently offline. Try again in a moment!")
         return
@@ -535,7 +646,7 @@ async def _send_preview(update, slug: str, token: str | None = None) -> None:
     caption = f"🎥 Live WebCam Preview — {sl.capitalize()}"
 
     try:
-        if media_type == "video" and asset_url.endswith((".mp4", ".webm")):
+        if media_type == "video":
             await update.effective_message.reply_video(asset_url, caption=caption)
             return
         elif asset_url.startswith("http://") or asset_url.startswith("https://"):
@@ -622,7 +733,6 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     try:
         roster = (await _call(update, fetch_roster))["girls"]
-        state = (await _call(update, fetch_state))["girls"]
     except (BackendError, RuntimeError, NetError) as exc:
         await _txt(update, f"Could not fetch models: {exc}")
         return
@@ -631,9 +741,9 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     for g in roster:
         slug = g["girl"]
         if slug in ALLOWED_MODELS:
-            st = state.get(slug, {})
             label = f"📹 {g.get('name', slug.title())} · Live WebCam"
             open_btns.append([InlineKeyboardButton(label, callback_data=f"girl:{slug}")])
+            await _send_portrait(update, g, f"📹 {g.get('name', slug.title())}")
 
     await update.effective_message.reply_text(
         "📹 Featured WebCam Models — Live Now:",
