@@ -7133,6 +7133,20 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
             """, (add_text, add_webcam, add_video_replies, add_fresh_videos,
                   KEYHOLE_MESSAGES_PER_PURCHASE, user_id))
             updated = cur.fetchone()
+
+            # Auto-create & activate live private show upon payment completion based on purchased minutes
+            if add_webcam > 0:
+                try:
+                    show_id = _generate_show_id("priv")
+                    cur.execute("""
+                        INSERT INTO keyhole_shows (
+                            show_id, show_type, character_id, customer_id, title, description, price, status
+                        ) VALUES (%s, 'private', 'chloe', %s, %s, %s, %s, 'READY')
+                    """, (show_id, user_id, f"1-on-1 Private Show ({add_webcam} mins)",
+                          f"Automatically started {add_webcam}-minute show upon payment completion", 19.99))
+                except Exception:
+                    pass
+
             conn.commit()
             return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
     finally:
