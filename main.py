@@ -449,6 +449,11 @@ AUDIT_PRICE_USD = 0.99
 KEYHOLE_DEFAULT_CONFIG = {
     "free_preview_minutes": 10,
     "free_preview_text_included": 50,   # verified-email preview messages (server balance)
+    "preview_max_minutes": 10,
+    "preview_max_wardrobe": "lingerie",
+    "preview_explicit_allowed": False,
+    "group_explicit_allowed": True,
+    "private_explicit_allowed": True,
     "intro_price": 5.99,          # 10-minute starter, one per account for life
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
@@ -7212,6 +7217,26 @@ def keyhole_packages():
     return {"packages": _keyhole_packages(get_keyhole_config())}
 
 
+@app.get("/keyhole/show-rules")
+def keyhole_show_rules():
+    """Retrieves show tier rules: Preview caps, wardrobe limits, and explicit content allowances."""
+    cfg = get_keyhole_config()
+    return {
+        "ok": True,
+        "preview": {
+            "max_minutes": min(int(cfg.get("free_preview_minutes", 10)), 10),
+            "max_wardrobe": str(cfg.get("preview_max_wardrobe", "lingerie")),
+            "explicit_allowed": bool(cfg.get("preview_explicit_allowed", False)),
+        },
+        "group": {
+            "explicit_allowed": bool(cfg.get("group_explicit_allowed", True)),
+        },
+        "private": {
+            "explicit_allowed": bool(cfg.get("private_explicit_allowed", True)),
+        }
+    }
+
+
 @app.get("/keyhole/scene-config")
 def keyhole_scene_config():
     """Retrieve Keyhole webcam room, model sprite, and futuristic equipment scene configuration."""
@@ -9620,31 +9645,78 @@ def admin_keyhole_get_show(show_id: str):
     return {"ok": True, "show": show}
 
 
+def _get_character_strict_fallback_url(char_id: str) -> tuple:
+    """Retrieve a strictly character-isolated fallback media URL and media_type for char_id."""
+    cid = (char_id or "").strip().lower()
+
+    # 1. Explicit door avatar
+    door_url = KEYHOLE_DOOR_AVATARS.get(cid)
+    if door_url:
+        mtype = "video" if door_url.endswith((".mp4", ".webm")) else "image"
+        return door_url, mtype
+
+    # 2. Local character file on disk
+    for rel_path in (f"assets/{cid}.jpg", f"assets/{cid}.png", f"assets/webcam/{cid}_idle.mp4", f"web/assets/{cid}.jpg"):
+        if os.path.isfile(rel_path):
+            mtype = "video" if rel_path.endswith((".mp4", ".webm")) else "image"
+            return "/" + rel_path.lstrip("/"), mtype
+
+    # 3. Default fallback per character (strictly scoped to cid)
+    return f"/assets/{cid}.jpg", "image"
+
+
 def _preview_plates(char_id: str) -> Dict[str, list]:
-    """Enabled beat plates for a character, for the pre-live preview. Empty when no database."""
+    """Enabled beat plates for a character, for the pre-live preview. Auto-fills missing beat folders."""
     beats = {b: [] for b in ("idle", "tease", "give", "stop", "presence")}
-    if not DATABASE_URL or not char_id:
+    cid = (char_id or "").strip().lower()
+    if not cid:
         return beats
-    try:
-        conn = db()
+    rows = []
+    if DATABASE_URL:
         try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT url, media_type, tags, file_path FROM media_assets
-                    WHERE character_id=%s AND is_enabled ORDER BY created_at ASC
-                """, (char_id,))
-                rows = cur.fetchall() or []
-        finally:
-            conn.close()
-    except Exception:
-        return beats
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT url, media_type, tags, file_path FROM media_assets
+                        WHERE character_id=%s AND is_enabled ORDER BY created_at ASC
+                    """, (cid,))
+                    rows = cur.fetchall() or []
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
     for r in rows:
-        if r.get("file_path") and not os.path.isfile(os.path.join(UPLOAD_DIR, os.path.basename(r["file_path"]))):
-            continue
+        file_path = r.get("file_path") or ""
+        url = r.get("url") or ""
+        if file_path:
+            filename = os.path.basename(file_path)
+            in_upload = os.path.isfile(os.path.join(UPLOAD_DIR, filename))
+            in_assets = os.path.isfile(os.path.join("assets", filename))
+            in_web_assets = os.path.isfile(os.path.join("web/assets", filename))
+            is_static_url = url.startswith("/assets/") or url.startswith("http://") or url.startswith("https://")
+            if not (in_upload or in_assets or in_web_assets or is_static_url):
+                continue
         tags = [str(t).lower() for t in (r.get("tags") or [])]
+        m_type = r.get("media_type") or "image"
         for beat in beats:
             if beat in tags:
-                beats[beat].append({"url": r["url"], "media_type": r["media_type"]})
+                beats[beat].append({"url": url, "media_type": m_type})
+
+    # Auto-fill missing beats using existing plates or character-isolated default/fallback assets
+    existing_plates = []
+    for beat in beats:
+        existing_plates.extend(beats[beat])
+
+    if not existing_plates:
+        default_url, m_type = _get_character_strict_fallback_url(cid)
+        existing_plates = [{"url": default_url, "media_type": m_type}]
+
+    for beat in beats:
+        if not beats[beat]:
+            beats[beat].append(existing_plates[0].copy())
+
     return beats
 
 
@@ -11708,27 +11780,74 @@ def admin_generator_webcam_status(job_id: str):
 @app.get("/keyhole/plates")
 def keyhole_plates():
     """Plate manifest for the plate engine: every enabled media asset tagged with a beat, grouped
-    character -> beat -> [{url, variant, media_type}]. A beat with no file is OFF on the floor."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT character_id, url, media_type, tags, file_path FROM media_assets
-                WHERE is_enabled ORDER BY created_at ASC
-            """)
-            rows = cur.fetchall() or []
-    finally:
-        conn.close()
-    chars: Dict[str, Dict[str, list]] = {c: {b: [] for b in PLATE_BEATS} for c in KEYHOLE_CHARACTERS}
+    character -> beat -> [{url, variant, media_type}]. Automatically fills missing beat folders."""
+    rows = []
+    persona_girls = []
+    if DATABASE_URL:
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT character_id, url, media_type, tags, file_path FROM media_assets
+                        WHERE is_enabled ORDER BY created_at ASC
+                    """)
+                    rows = cur.fetchall() or []
+                    cur.execute("SELECT DISTINCT girl FROM personas WHERE is_enabled=TRUE")
+                    persona_girls = [r["girl"].lower() for r in (cur.fetchall() or []) if r.get("girl")]
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    all_chars = set(KEYHOLE_CHARACTERS)
+    all_chars.update(persona_girls)
     for r in rows:
-        if r.get("file_path") and not os.path.isfile(os.path.join(UPLOAD_DIR, os.path.basename(r["file_path"]))):
+        if r.get("character_id"):
+            all_chars.add(r["character_id"].lower())
+
+    chars: Dict[str, Dict[str, list]] = {c: {b: [] for b in PLATE_BEATS} for c in all_chars}
+
+    for r in rows:
+        cid = (r.get("character_id") or "").lower()
+        if not cid:
             continue
+        file_path = r.get("file_path") or ""
+        url = r.get("url") or ""
+        if file_path:
+            filename = os.path.basename(file_path)
+            in_upload = os.path.isfile(os.path.join(UPLOAD_DIR, filename))
+            in_assets = os.path.isfile(os.path.join("assets", filename))
+            in_web_assets = os.path.isfile(os.path.join("web/assets", filename))
+            is_static_url = url.startswith("/assets/") or url.startswith("http://") or url.startswith("https://")
+            if not (in_upload or in_assets or in_web_assets or is_static_url):
+                continue
+
         tags = [str(t).lower() for t in (r.get("tags") or [])]
         variant = next((t.split(":", 1)[1] for t in tags if t.startswith("variant:")), "")
-        folder = chars.setdefault(r["character_id"], {b: [] for b in PLATE_BEATS})
+        folder = chars.setdefault(cid, {b: [] for b in PLATE_BEATS})
+        m_type = r.get("media_type") or "image"
         for beat in PLATE_BEATS:
             if beat in tags:
-                folder[beat].append({"url": r["url"], "variant": variant, "media_type": r["media_type"]})
+                folder[beat].append({"url": url, "variant": variant, "media_type": m_type})
+
+    # Auto-fill step: Ensure every beat folder in chars has character-isolated fallback plates if empty
+    for cid, folder in chars.items():
+        existing_plates = []
+        for beat in PLATE_BEATS:
+            existing_plates.extend(folder[beat])
+
+        if not existing_plates:
+            default_url, m_type = _get_character_strict_fallback_url(cid)
+            default_plate = {"url": default_url, "variant": "auto-filled", "media_type": m_type}
+            existing_plates = [default_plate]
+
+        for beat in PLATE_BEATS:
+            if not folder[beat]:
+                fallback = existing_plates[0].copy()
+                fallback["variant"] = fallback.get("variant") or "auto-filled"
+                folder[beat].append(fallback)
+
     return {"ok": True, "characters": chars}
 
 
@@ -12105,10 +12224,12 @@ def get_media_asset_detail(asset_id: int):
 class WebcamClipBufferService:
     """
     Auto WebCam clip buffer ordering video clips in FIFO sequence (older data before new)
-    and slicing clips into 8-second segments.
+    and slicing clips into 8-second segments with 30-day non-repetitive customer rotation tracking.
     """
     def __init__(self):
         self._queues: Dict[str, deque] = defaultdict(deque)
+        # Tracks customer rotation history: (customer_id, character_id) -> list of (clip_id_or_url, timestamp)
+        self._customer_history: Dict[Tuple[str, str], List[Tuple[str, float]]] = defaultdict(list)
         self._lock = threading.Lock()
 
     def push_clip(self, character_id: str, clip_data: dict) -> None:
@@ -12118,13 +12239,45 @@ class WebcamClipBufferService:
             clip_data.setdefault("timestamp", time.time())
             self._queues[cid].append(clip_data)
 
-    def pop_clip(self, character_id: str) -> Optional[dict]:
+    def pop_clip(self, character_id: str, customer_id: Optional[str] = None) -> Optional[dict]:
         cid = character_id.strip().lower()
+        now = time.time()
+        thirty_days = 30 * 86400.0
+
         with self._lock:
             q = self._queues[cid]
-            if q:
-                return q.popleft()  # FIFO: Oldest data first
-            return None
+            if not q:
+                return None
+
+            if not customer_id:
+                return q.popleft()  # Standard FIFO
+
+            key = (str(customer_id), cid)
+            # Clean up history older than 30 days
+            self._customer_history[key] = [
+                (clip_id, ts) for (clip_id, ts) in self._customer_history[key]
+                if (now - ts) < thirty_days
+            ]
+            seen_clip_ids = {clip_id for (clip_id, ts) in self._customer_history[key]}
+
+            # Search for first clip in queue that customer hasn't seen in last 30 days
+            selected_idx = None
+            for idx, clip in enumerate(q):
+                clip_identifier = str(clip.get("id") or clip.get("url"))
+                if clip_identifier not in seen_clip_ids:
+                    selected_idx = idx
+                    break
+
+            if selected_idx is not None:
+                clip = q[selected_idx]
+                del q[selected_idx]
+            else:
+                # If all clips seen within 30 days, take oldest clip from FIFO
+                clip = q.popleft()
+
+            clip_identifier = str(clip.get("id") or clip.get("url"))
+            self._customer_history[key].append((clip_identifier, now))
+            return clip
 
     def list_queue(self, character_id: str) -> List[dict]:
         cid = character_id.strip().lower()
