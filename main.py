@@ -5217,11 +5217,10 @@ def generate_picture(girl, name, avatar_url, portrait=None, scenes=None):
     ])
     prompt = (f"Create a new picture of {name}, the same person as in the reference image: "
               f"same face, hair, skin tone and overall art style. "
-              "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
-              "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-              "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-              "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-              "mountain slopes, soft golden daylight. Scene: {scene}. "
+              "Modern realistic character portrait set in today's world — a detailed photorealistic digital illustration "
+              "blending lifelike facial features with clean stylish contemporary character detail. "
+              "Subject in stylish modern clothing, medium close-up from the "
+              "chest up, looking directly at the viewer. Background: a modern aesthetic interior or city backdrop, soft golden daylight. Scene: {scene}. "
               "Fully clothed, tasteful, natural expression, phone-camera framing. "
               "No text, no watermarks.")
     parts = [{"text": prompt}]
@@ -5434,11 +5433,11 @@ _PHOTO_DESCRIBE_PROMPT = (
 )
 
 _COMPANION_PORTRAIT_STYLE = (
-    "Ancient Greek cartoon-realistic portrait — a detailed semi-realistic digital illustration "
-    "blending lifelike facial features with clean stylized cartoon art, the God's Greek house style. "
-    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. "
+    "Modern realistic character portrait set in today's world — a detailed photorealistic digital illustration "
+    "blending lifelike facial features with clean stylish contemporary character detail. "
+    "Subject in stylish modern clothing, medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a modern aesthetic interior or city backdrop, soft golden daylight. "
+    "Fully clothed, tasteful, natural expression. "
     "Use the photo ONLY as a likeness reference for the face. Never reproduce the photo itself. No text, no watermarks."
 )
 
@@ -6310,11 +6309,11 @@ def switch_hairstyle(companion_id: int, body: HairstyleIn, user=Depends(current_
 # residents never retire.
 # ---------------------------------------------------------------------------
 AVATAR_STYLE = (
-    "Ancient Greek real realistic character portrait — a detailed photorealistic digital illustration "
-    "blending lifelike facial features with authentic real realistic character detail, the God's Greek house style. "
-    "Subject in ancient Greek dress (toga or chiton with laurel accents), medium close-up from the "
-    "chest up, looking directly at the viewer. Background: a Greek temple among tall pines on rolling "
-    "mountain slopes, soft golden daylight. Fully clothed, tasteful, natural expression. No text, no watermarks. "
+    "Modern realistic character portrait set in today's world — a detailed photorealistic digital illustration "
+    "blending lifelike facial features with authentic real realistic character detail. "
+    "Subject in stylish modern clothing, medium close-up from the "
+    "chest up, looking directly at the viewer. Background: a modern aesthetic interior or city backdrop, soft golden daylight. "
+    "Fully clothed, tasteful, natural expression. No text, no watermarks. "
     "The person depicted is: "
 )
 
@@ -11319,8 +11318,8 @@ def _apply_character_skin_bytes(char_id: str, content: bytes, ext: str, mime: st
         appearance = get_character_references(char_id).get("current_appearance") or ""
     prompt = (
         "Recreate the scene image using the woman from the character skin: same face, hair, and body. "
-        "Keep the scene's pose, framing, furniture, and lighting. Fully clothed unless the scene already is. "
-        f"{appearance} No text, no watermark."
+        "Keep the scene's pose, framing, furniture, movements, and objects precise. Overlay character skin, clothing, and features accurately over all foreground movements and objects. "
+        f"{appearance} Contemporary modern world setting. No text, no watermark."
     )
     try:
         new_mime, b64 = _gemini_apply_skin(ref[0], ref[1], content, mime or "image/jpeg", prompt)
