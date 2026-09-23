@@ -101,7 +101,7 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     "chloe": {
         "name": "Chloe",
         "description": "Warm, engaging, and playful, with clear boundaries. She gives the conversation somewhere to go instead of stonewalling.",
-        "target_satisfaction": 0.40,
+        "target_satisfaction": 0.30,
         "default_mix": DEFAULT_BEHAVIOR_MIXES["chloe"],
         "states": {
             "first_ask_soft": {
@@ -143,7 +143,7 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     "bailey": {
         "name": "Bailey",
         "description": "Reserved and dryly funny, but engaged. She can be selective without making the customer feel ignored.",
-        "target_satisfaction": 0.30,
+        "target_satisfaction": 0.15,
         "default_mix": DEFAULT_BEHAVIOR_MIXES["bailey"],
         "states": {
             "first_ask_soft": {
