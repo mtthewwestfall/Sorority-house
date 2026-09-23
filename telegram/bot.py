@@ -90,8 +90,8 @@ ALLOWED_MODELS = {"chloe", "bailey"}
 # Same files as Keyhole rooms.html doors. Chloe is the blonde city-window room.
 # Bailey is dark hair. Do not swap.
 DOOR_PHOTOS = {
-    "chloe": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3543.jpeg",
-    "bailey": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3542.jpeg",
+    "chloe": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3542.jpeg",
+    "bailey": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3543.jpeg",
 }
 _KEYHOLE_ASSET_HOSTS = frozenset({
     "keyhole-latest-production.up.railway.app",
