@@ -11047,19 +11047,20 @@ def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
 def _uploaded_disk_skin(char_id: str) -> Optional[tuple]:
     """Newest master/skin upload on disk in UPLOAD_DIR."""
     cid = (char_id or "").strip().lower()
-    if os.path.isdir(UPLOAD_DIR):
-        prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
-        found = []
-        for name in os.listdir(UPLOAD_DIR):
-            if not name.lower().startswith(prefixes):
-                continue
-            data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
-            if data:
-                found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
-        if found:
-            found.sort(key=lambda item: item[0])
-            return found[-1][1]
-    return None
+    if not os.path.isdir(UPLOAD_DIR):
+        return None
+    prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
+    found = []
+    for name in os.listdir(UPLOAD_DIR):
+        if not name.lower().startswith(prefixes):
+            continue
+        data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
+        if data:
+            found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
+    if not found:
+        return None
+    found.sort(key=lambda item: item[0])
+    return found[-1][1]
 
 
 def _owner_locked_skin(char_id: str) -> Optional[tuple]:
@@ -11072,8 +11073,8 @@ def _owner_locked_skin(char_id: str) -> Optional[tuple]:
 
 
 def _disk_character_skin(char_id: str) -> Optional[tuple]:
-    """Newest upload in UPLOAD_DIR first, then repo owner locked skin."""
-    return _uploaded_disk_skin(char_id) or _owner_locked_skin(char_id)
+    """Owner-locked Chloe/Bailey skin first, then newest master/skin upload on disk."""
+    return _owner_locked_skin(char_id) or _uploaded_disk_skin(char_id)
 
 
 def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]]:
@@ -11084,89 +11085,72 @@ def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]
 
 def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool = True) -> Optional[tuple]:
     """The girl's skin: reference image bytes used to keep every generated cut looking like her.
-    When asset_id is provided, that specific asset is attempted first:
-      - If materialized successfully, returns (data, mime).
-      - If DB is unavailable or asset_id fails to materialize, checks uploaded disk skins in UPLOAD_DIR.
-      - If strict=True, raises 404 (asset missing in DB) or 400 (asset file/fetch failed).
-      - If strict=False (Sogni), returns None so generation can continue text-only.
-    When asset_id is None:
-      - Searches preferred house rule, DB tagged skins, uploaded disk skins, and owner locked skins."""
+    Owner-locked Chloe/Bailey disk skins always win (never another person's upload).
+    Otherwise an explicit asset, then tagged skins, then other disk files.
+    strict=True (primary / webcam): an explicit asset_id that still cannot be loaded raises.
+    strict=False (Sogni): the same miss returns None so generation can continue text-only."""
     cid0 = (char_id or "").strip().lower()
-
-    if asset_id:
-        explicit_reason = "missing file"
-        conn = None
-        try:
-            conn = db()
-        except Exception:
-            conn = None
-
-        if conn is not None:
-            try:
-                with conn.cursor() as cur:
-                    row = _load_asset_row(cur, int(asset_id), char_id)
-                    if not row:
-                        if strict:
-                            raise HTTPException(status_code=404, detail="Reference asset not found for this character")
-                        explicit_reason = "asset not found"
-                    else:
-                        data, reason = _materialize_reference_explained(row)
-                        if data:
-                            return data
-                        explicit_reason = reason or "missing file"
-            finally:
-                conn.close()
-
-        # Check local disk uploads if DB was unreachable or asset row failed to materialize
-        uploaded = _uploaded_disk_skin(char_id)
-        if uploaded:
-            return uploaded
-
-        if strict:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
-
-        return None
-
-    # When asset_id is None:
-    preferred_id = None
-    raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
-        (_CHARACTER_REFS_CACHE.get(char_id) or {}).get("skin_asset_id") or "")
-    if str(raw).isdigit():
-        preferred_id = int(raw)
-
+    # Always use the owner's locked Chloe/Bailey skin — ignore other people's uploads.
+    if cid0 in ("chloe", "bailey"):
+        owner = _disk_character_skin(cid0)
+        if owner:
+            return owner
+    preferred_id = asset_id
+    if not preferred_id:
+        raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
+            (_CHARACTER_REFS_CACHE.get(char_id) or {}).get("skin_asset_id") or "")
+        if str(raw).isdigit():
+            preferred_id = int(raw)
+    explicit_reason = "missing file"
     conn = None
     try:
         conn = db()
     except Exception:
         conn = None
-
     if conn is not None:
         try:
             with conn.cursor() as cur:
                 if preferred_id:
                     row = _load_asset_row(cur, int(preferred_id), char_id)
-                    if row:
-                        data, _ = _materialize_reference_explained(row)
+                    if asset_id and not row:
+                        if strict:
+                            raise HTTPException(status_code=404, detail="Reference asset not found for this character")
+                    elif row:
+                        data, reason = _materialize_reference_explained(row)
                         if data:
                             return data
-
+                        if asset_id and int(row.get("id") or 0) == int(asset_id):
+                            explicit_reason = reason or "missing file"
                 cur.execute("""
                     SELECT * FROM media_assets
                     WHERE character_id=%s AND media_type='image' AND is_enabled
                       AND (tags ? 'skin' OR tags ? 'reference')
                     ORDER BY created_at DESC
                 """, (char_id,))
-                for raw_row in cur.fetchall() or []:
-                    row = dict(raw_row)
+                for raw in cur.fetchall() or []:
+                    row = dict(raw)
+                    if asset_id and int(row.get("id") or 0) == int(asset_id):
+                        continue
                     data = _materialize_reference(row)
                     if data:
                         return data
+                if asset_id:
+                    cur.execute("SELECT * FROM media_assets WHERE id=%s AND character_id=%s", (asset_id, char_id))
+                    row = cur.fetchone()
+                    if row and (row.get("media_type") or "") != "image":
+                        data = _materialize_reference(dict(row))
+                        if data:
+                            return data
         finally:
             conn.close()
-
-    return _disk_character_skin(char_id)
+    data = _disk_character_skin(char_id)
+    if data:
+        return data
+    if asset_id and strict:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
+    return None
 
 
 def _gemini_apply_skin(skin_bytes: bytes, skin_mime: str, scene_bytes: bytes, scene_mime: str, prompt: str):

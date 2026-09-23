@@ -328,27 +328,27 @@ class TestWebcamMediaManager(unittest.TestCase):
         mock_db.return_value = mock_conn
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
         mock_cur.fetchone.return_value = {
-            "id": 7, "character_id": "chloe",
-            "url": "https://cdn.example.com/chloe-skin.png",
+            "id": 7, "character_id": "zoe",
+            "url": "https://cdn.example.com/zoe-skin.png",
             "file_path": "", "media_type": "image", "tags": ["skin", "reference"],
         }
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(main, "UPLOAD_DIR", folder):
-                data = main._character_reference("chloe", 7)
+                data = main._character_reference("zoe", 7)
             self.assertEqual(data[0], png)
             self.assertEqual(data[1], "image/png")
             names = os.listdir(folder)
-        self.assertTrue(any(name.startswith("skin_chloe_") and name.endswith(".png") for name in names))
+        self.assertTrue(any(name.startswith("skin_zoe_") and name.endswith(".png") for name in names))
         mock_fetch.assert_called_once()
         self.assertEqual(mock_fetch.call_args.kwargs.get("prefer"), "image")
 
     def test_disk_skin_satisfies_explicit_reference_without_database(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as folder:
-            Image.new("RGB", (4, 4), color="red").save(os.path.join(folder, "skin_chloe_saved.png"))
+            Image.new("RGB", (4, 4), color="red").save(os.path.join(folder, "skin_zoe_saved.png"))
             with patch.object(main, "UPLOAD_DIR", folder):
                 with patch.object(main, "db", side_effect=HTTPException(status_code=500, detail="DATABASE_URL not set")):
-                    data = main._character_reference("chloe", 44)
+                    data = main._character_reference("zoe", 44)
         self.assertTrue(data[0].startswith(b"\x89PNG"))
         self.assertEqual(data[1], "image/png")
 
@@ -678,10 +678,10 @@ class TestGeneratorReferenceLoading(unittest.TestCase):
     def test_primary_without_any_skin_still_generates(self, mock_db, _avatar, _save):
         mock_db.return_value = self._asset_db(None)
         with tempfile.TemporaryDirectory() as folder:
-            with patch.object(main, "UPLOAD_DIR", folder), patch("main._owner_locked_skin", return_value=None):
+            with patch.object(main, "UPLOAD_DIR", folder):
                 res = client.post("/admin/generator/image", headers=self.headers, json={
                     "prompt": "a portrait",
-                    "character": "bailey",
+                    "character": "zoe",
                     "engine": "primary",
                     "use_reference": True,
                 })
