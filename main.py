@@ -1548,6 +1548,7 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS personality_traits TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS no_gos TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS behavior_mix JSONB;
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _apply_keyhole_door_avatars(cur)
@@ -1959,7 +1960,7 @@ def roster(include_retired=False):
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT girl, name, door_title, blurb, avatar_url,
-                       min_tier, sort_order, active, difficulty
+                       min_tier, sort_order, active, difficulty, behavior_mix
                 FROM personas
                 WHERE active OR %s
                 ORDER BY sort_order, girl
@@ -2623,6 +2624,57 @@ def refund_message(user_id):
         conn.close()
 
 
+
+
+# Admin-controlled conversational behavior for the two Keyhole characters.
+# Safety/command states remain hard boundaries; this mix controls ordinary, engaging turns.
+def default_behavior_mix(girl: str) -> Dict[str, float]:
+    key = (girl or "").strip().lower()
+    return dict(CharacterEngine(key).config.get("default_mix", {})) if key in ("chloe", "bailey") else {}
+
+
+def behavior_mix_for(girl: str, conn=None) -> Dict[str, float]:
+    key = (girl or "").strip().lower()
+    if key not in ("chloe", "bailey"):
+        return {}
+    mix = default_behavior_mix(key)
+    close_conn = False
+    try:
+        if conn is None:
+            conn = db()
+            close_conn = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT behavior_mix FROM personas WHERE girl=%s", (key,))
+            row = cur.fetchone()
+            stored = row.get("behavior_mix") if row else None
+            if isinstance(stored, dict):
+                try:
+                    mix = CharacterEngine(key, behavior_mix=stored).behavior_mix
+                except (TypeError, ValueError):
+                    pass
+    except Exception:
+        pass
+    finally:
+        if close_conn and conn:
+            conn.close()
+    return mix
+
+
+def behavior_instruction(girl: str, conn=None) -> str:
+    mix = behavior_mix_for(girl, conn=conn)
+    if not mix:
+        return ""
+    pct = lambda k: round(float(mix.get(k, 0)) * 100)
+    return ("CONVERSATIONAL BEHAVIOR MIX — admin-controlled baseline for ordinary turns:\\n"
+            f"- Give a little / genuinely engage: {pct('give_a_little')}%\\n"
+            f"- Presence / stay in the conversation: {pct('presence')}%\\n"
+            f"- Tease / withhold: {pct('tease_withhold')}%\\n"
+            f"- Redirect: {pct('redirect')}%\\n"
+            f"- Hard stop: {pct('hard_stop')}%\\n"
+            "Use these as tendencies, not a script. Stay in character, respond to what was actually said, "
+            "and do not manufacture rejection. Hard boundaries and safety rules still override this mix.")
+
+
 def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
     """The 3-layer payload. With said_so_far set, the model is asked to continue
     a reply whose opening has already been typed out to the user."""
@@ -2630,6 +2682,9 @@ def build_chat_messages(user_id, girl, rel, user_message, said_so_far=None):
 
     # ---- LAYER 1: identical system prefix every turn (cacheable) -------------
     system_text = f"You are {name} from {town_for(girl)}.\n\n{persona_text}\n\n{house_rules_for(girl)}"
+    behavior_block = behavior_instruction(girl)
+    if behavior_block:
+        system_text += "\n\n" + behavior_block
 
     # ---- LAYER 2: small memory block + the per-girl engine state card --------
     engine_card = build_engine_card(girl, rel)
@@ -4146,7 +4201,19 @@ const DIFFS={easy:'Easy - warms up quickly',normal:'Normal - her own pace',hard:
 function renderList(sel){$('#plist').innerHTML=PERS.map((p,i)=>`<button class="s${p.girl===sel?' on':''}" data-i="${i}">${esc(p.name||'(new sister)')}${p.active?'':' <span class="mut">(retired)</span>'}${p.seeded||p.isNew?'':' <span class="mut">(fallback)</span>'}</button>`).join('')}
 async function loadPersonas(sel){try{PERS=await api('/admin/personas');renderList(sel);if(sel)editPersona(PERS.findIndex(p=>p.girl===sel))}catch(e){toast(e.message,true)}}
 $('#plist').addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b)editPersona(+b.dataset.i)});
-function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'visitor',sort_order:100,difficulty:'normal',active:true,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function newGirl(){PERS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',min_tier:'visitor',sort_order:100,difficulty:'normal',active:true,behavior_mix:null,seeded:false,isNew:true});renderList();editPersona(PERS.length-1)}
+function behaviorEditor(p){
+ const g=(p.girl||'').toLowerCase(); if(g!=='chloe'&&g!=='bailey')return '';
+ const d=p.behavior_mix||{}; const defaults=g==='chloe'?{give_a_little:40,presence:25,tease_withhold:15,redirect:12,hard_stop:8}:{give_a_little:30,presence:25,tease_withhold:15,redirect:20,hard_stop:10};
+ const v=k=>Math.round((d[k]??defaults[k]/100)*100);
+ return '<div class="card" style="background:#101017;margin-top:10px"><h4 style="margin:0 0 6px 0">Conversational behavior</h4><div class="mut" style="margin-bottom:10px">Baseline tendencies for ordinary turns. Total must be 100%. Safety and hard boundaries still override them.</div><div class="row2">'+
+  '<label>Give <input id="pGive" type="number" min="0" max="100" value="'+v('give_a_little')+'" style="width:70px">%</label>'+
+  '<label>Presence <input id="pPresence" type="number" min="0" max="100" value="'+v('presence')+'" style="width:70px">%</label>'+
+  '<label>Tease <input id="pTease" type="number" min="0" max="100" value="'+v('tease_withhold')+'" style="width:70px">%</label>'+
+  '<label>Redirect <input id="pRedirect" type="number" min="0" max="100" value="'+v('redirect')+'" style="width:70px">%</label>'+
+  '<label>Hard stop <input id="pStop" type="number" min="0" max="100" value="'+v('hard_stop')+'" style="width:70px">%</label>'+
+  '<span id="pMixTotal" class="pill"></span><button class="s" type="button" onclick="resetBehavior(\''+esc(g)+'\')">Reset defaults</button></div></div>';
+}
 function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelectorAll('#plist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#pedit');el.classList.remove('hid');
  el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(p.girl||'New sister')}</h3><span class="pill ${p.seeded?'resolved':'open'}">${p.seeded?'seeded':'fallback doc'}</span>${p.active?'':'<span class="pill open">retired</span>'}</div>
  <div class="row2">${p.isNew?`<label>Slug <input id="pSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
@@ -4155,6 +4222,7 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  <label>Paid tier <select id="pTier">${TIERS.map(t=>`<option${t===p.min_tier?' selected':''}>${t}</option>`).join('')}</select></label>
  <label>Order <input id="pOrder" type="number" min=0 max=9999 value="${p.sort_order}" style="width:90px"></label>
  <label>Difficulty <select id="pDiff">${Object.keys(DIFFS).map(d=>`<option value="${d}"${d===(p.difficulty||'normal')?' selected':''}>${DIFFS[d]}</option>`).join('')}</select></label></div>
+ ${behaviorEditor(p)}
  <div class="mut">Difficulty only stretches the real days each trust stage takes - she still has to be treated right, and remembered, to open up.</div>
  <div class="row2"><label style="flex:1">Avatar URL <input id="pAvatar" value="${esc(p.avatar_url)}" style="width:100%"></label></div>
  <label class="mut">Door blurb</label><textarea id="pBlurb" style="min-height:60px">${esc(p.blurb)}</textarea>
@@ -4164,10 +4232,19 @@ function editPersona(i){const p=PERS[i];if(!p)return;CURP=p;document.querySelect
  ${p.isNew?'':`<button class="s" onclick="setActive('${esc(p.girl)}',${p.active?'false':'true'})">${p.active?'Retire her':'Bring her back'}</button>`}
  <span class="mut" id="pLen">${(p.persona||'').length} chars</span></div>`;
  $('#pDoc').addEventListener('input',e=>$('#pLen').textContent=e.target.value.length+' chars')}
+function behaviorPayload(){
+ const vals={give_a_little:+$('#pGive').value/100,presence:+$('#pPresence').value/100,tease_withhold:+$('#pTease').value/100,redirect:+$('#pRedirect').value/100,hard_stop:+$('#pStop').value/100};
+ const total=Object.values(vals).reduce((a,b)=>a+b,0);
+ if(Math.abs(total-1)>0.000001)throw new Error('Behavior percentages must total 100% (currently '+Math.round(total*100)+'%)');
+ return vals;
+}
+async function resetBehavior(girl){try{await api('/admin/console/character-behavior/'+encodeURIComponent(girl)+'/reset',{method:'POST'});toast('Behavior reset to defaults');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).trim().toLowerCase();
- try{await api('/admin/console/girl',{method:'POST',body:JSON.stringify({girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
+ try{const body={girl:slug,name:$('#pName').value,door_title:$('#pTitle').value,
   blurb:$('#pBlurb').value,avatar_url:$('#pAvatar').value,min_tier:$('#pTier').value,sort_order:+$('#pOrder').value,difficulty:$('#pDiff').value,
-  persona:$('#pDoc').value,active:CURP?CURP.active:true})});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
+  persona:$('#pDoc').value,active:CURP?CURP.active:true};
+  if(['chloe','bailey'].includes(slug))body.behavior_mix=behaviorPayload();
+  await api('/admin/console/girl',{method:'POST',body:JSON.stringify(body)});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
@@ -4460,6 +4537,7 @@ class AdminGirlIn(BaseModel):
     girl: str
     name: str
     persona: str
+    behavior_mix: Optional[Dict[str, float]] = None
     door_title: str = ""
     blurb: str = ""
     avatar_url: str = ""
@@ -9324,6 +9402,61 @@ def admin_console_persona(body: AdminPersonaIn):
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 
 
+
+
+class CharacterBehaviorIn(BaseModel):
+    character: str
+    behavior_mix: Dict[str, float]
+
+
+@app.get("/admin/console/character-behavior/{character}", dependencies=[Depends(admin_required)])
+def admin_get_character_behavior(character: str):
+    character = character.strip().lower()
+    if character not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="character must be chloe or bailey")
+    mix = behavior_mix_for(character)
+    return {"character": character, "behavior_mix": mix, "percentages": {k: round(v * 100) for k, v in mix.items()}}
+
+
+@app.post("/admin/console/character-behavior/{character}", dependencies=[Depends(admin_required)])
+def admin_set_character_behavior(character: str, body: CharacterBehaviorIn):
+    character = character.strip().lower()
+    if character not in ("chloe", "bailey") or body.character.strip().lower() != character:
+        raise HTTPException(status_code=400, detail="character must be chloe or bailey")
+    try:
+        mix = CharacterEngine(character, behavior_mix=body.behavior_mix).behavior_mix
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET behavior_mix=%s WHERE girl=%s", (Json(mix), character))
+            if cur.rowcount != 1:
+                raise HTTPException(status_code=404, detail="character not found")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "character": character, "behavior_mix": mix, "percentages": {k: round(v * 100) for k, v in mix.items()}}
+
+
+@app.post("/admin/console/character-behavior/{character}/reset", dependencies=[Depends(admin_required)])
+def admin_reset_character_behavior(character: str):
+    character = character.strip().lower()
+    if character not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="character must be chloe or bailey")
+    mix = default_behavior_mix(character)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET behavior_mix=NULL WHERE girl=%s", (character,))
+            if cur.rowcount != 1:
+                raise HTTPException(status_code=404, detail="character not found")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "character": character, "behavior_mix": mix, "percentages": {k: round(v * 100) for k, v in mix.items()}}
+
+
 @app.post("/admin/console/girl", dependencies=[Depends(admin_required)])
 def admin_console_girl(body: AdminGirlIn):
     """Add a neighbor or rewrite an existing one - door, art, tier gate and doc.
@@ -9340,6 +9473,14 @@ def admin_console_girl(body: AdminGirlIn):
         raise HTTPException(status_code=400,
                             detail="difficulty must be one of " + ", ".join(DIFFICULTY))
     media_lib = body.media_library if isinstance(body.media_library, list) else []
+    behavior_mix = body.behavior_mix
+    if girl in ("chloe", "bailey") and behavior_mix is not None:
+        try:
+            behavior_mix = CharacterEngine(girl, behavior_mix=behavior_mix).behavior_mix
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    elif girl in ("chloe", "bailey"):
+        behavior_mix = behavior_mix_for(girl)
     conn = db()
     try:
         with conn.cursor() as cur:
@@ -9347,8 +9488,8 @@ def admin_console_girl(body: AdminGirlIn):
                 INSERT INTO personas (girl, name, door_title, persona, blurb,
                                       avatar_url, min_tier, sort_order, active,
                                       difficulty, age, background_info, personality_traits,
-                                      no_gos, media_library)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                      no_gos, media_library, behavior_mix)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (girl) DO UPDATE
                 SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
                     persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
@@ -9357,12 +9498,14 @@ def admin_console_girl(body: AdminGirlIn):
                     difficulty=EXCLUDED.difficulty, age=EXCLUDED.age,
                     background_info=EXCLUDED.background_info,
                     personality_traits=EXCLUDED.personality_traits,
-                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library
+                    no_gos=EXCLUDED.no_gos, media_library=EXCLUDED.media_library,
+                    behavior_mix=EXCLUDED.behavior_mix
             """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
                   body.blurb.strip(), body.avatar_url.strip(), body.min_tier,
                   max(0, min(9999, int(body.sort_order))), bool(body.active),
                   body.difficulty, int(body.age), body.background_info.strip(),
-                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib)))
+                  body.personality_traits.strip(), body.no_gos.strip(), Json(media_lib),
+                  Json(behavior_mix) if behavior_mix is not None and girl in ("chloe", "bailey") else None))
             conn.commit()
     finally:
         conn.close()

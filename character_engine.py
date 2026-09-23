@@ -3,8 +3,40 @@ Character Engine for Chloe and Bailey.
 Unified state machine with character-specific weights and satisfaction targets.
 """
 
-# Obey the card, not the chat.
-# Chloe: satisfy ~30%. Bailey: satisfy ~15%.
+# Default behavior mixes are intentionally editable from the admin console.
+# They are stored as proportions (0.0-1.0) and validated to total 1.0.
+# Chloe: engaging by default; Bailey: reserved but still responsive.
+
+DEFAULT_BEHAVIOR_MIXES = {
+    "chloe": {
+        "give_a_little": 0.40,
+        "presence": 0.25,
+        "tease_withhold": 0.15,
+        "redirect": 0.12,
+        "hard_stop": 0.08,
+    },
+    "bailey": {
+        "give_a_little": 0.30,
+        "presence": 0.25,
+        "tease_withhold": 0.15,
+        "redirect": 0.20,
+        "hard_stop": 0.10,
+    },
+}
+
+BEHAVIOR_ACTIONS = tuple(DEFAULT_BEHAVIOR_MIXES["chloe"].keys())
+
+def validate_behavior_mix(mix: Dict[str, float]) -> Dict[str, float]:
+    """Validate an admin-supplied behavior mix."""
+    if set(mix) != set(BEHAVIOR_ACTIONS):
+        raise ValueError("behavior mix must contain exactly: " + ", ".join(BEHAVIOR_ACTIONS))
+    clean = {k: float(mix[k]) for k in BEHAVIOR_ACTIONS}
+    if any(v < 0 or v > 1 for v in clean.values()):
+        raise ValueError("behavior percentages must be between 0 and 1")
+    if abs(sum(clean.values()) - 1.0) > 0.000001:
+        raise ValueError("behavior percentages must total 100%")
+    return clean
+
 
 import random
 import time
@@ -68,15 +100,9 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "chloe": {
         "name": "Chloe",
-        "description": "Always available, never attainable. Warm but withholding.",
+        "description": "Warm, engaging, and playful, with clear boundaries. She gives the conversation somewhere to go instead of stonewalling.",
         "target_satisfaction": 0.30,
-        "default_mix": {
-            "tease_withhold": 0.45,
-            "give_a_little": 0.25,
-            "presence": 0.15,
-            "redirect": 0.10,
-            "hard_stop": 0.05,
-        },
+        "default_mix": DEFAULT_BEHAVIOR_MIXES["chloe"],
         "states": {
             "first_ask_soft": {
                 "tease_withhold": 0.60,
@@ -116,15 +142,9 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "bailey": {
         "name": "Bailey",
-        "description": "Colder. Drier. Less available. Do not make her warm like Chloe.",
+        "description": "Reserved and dryly funny, but engaged. She can be selective without making the customer feel ignored.",
         "target_satisfaction": 0.15,
-        "default_mix": {
-            "tease_withhold": 0.40,
-            "give_a_little": 0.15,
-            "presence": 0.10,
-            "redirect": 0.20,
-            "hard_stop": 0.15,
-        },
+        "default_mix": DEFAULT_BEHAVIOR_MIXES["bailey"],
         "states": {
             "first_ask_soft": {
                 "tease_withhold": 0.75,
@@ -307,12 +327,13 @@ class CharacterEngine:
     Never fulfills 100% of request in one turn.
     """
 
-    def __init__(self, character: str = "chloe"):
+    def __init__(self, character: str = "chloe", behavior_mix: Optional[Dict[str, float]] = None):
         char_key = character.lower().strip()
         if char_key not in CHARACTER_CONFIGS:
             char_key = "chloe"
         self.character_key = char_key
         self.config = CHARACTER_CONFIGS[char_key]
+        self.behavior_mix = validate_behavior_mix(behavior_mix) if behavior_mix is not None else dict(self.config["default_mix"])
 
     def get_distribution_for_state(
         self,
@@ -344,6 +365,11 @@ class CharacterEngine:
 
         if state == "repeat_ask":
             return states_cfg.get("repeat_ask", {"tease_withhold": 0.7, "hard_stop": 0.3})
+
+        # Normal conversation uses the admin-controlled baseline mix. Safety states
+        # remain explicit so commands/off-card requests cannot bypass boundaries.
+        if state == "first_ask" and intent == "soft":
+            return dict(self.behavior_mix)
 
         # first_ask branch
         if intent == "direct":
@@ -391,6 +417,7 @@ class CharacterEngine:
         res = {
             "character": self.config["name"],
             "target_satisfaction": self.config["target_satisfaction"],
+            "behavior_mix": dict(self.behavior_mix),
             "intent": intent,
             "state": state,
             "distribution": distribution,
