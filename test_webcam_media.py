@@ -678,7 +678,7 @@ class TestGeneratorReferenceLoading(unittest.TestCase):
     def test_primary_without_any_skin_still_generates(self, mock_db, _avatar, _save):
         mock_db.return_value = self._asset_db(None)
         with tempfile.TemporaryDirectory() as folder:
-            with patch.object(main, "UPLOAD_DIR", folder):
+            with patch.object(main, "UPLOAD_DIR", folder), patch("main._owner_locked_skin", return_value=None):
                 res = client.post("/admin/generator/image", headers=self.headers, json={
                     "prompt": "a portrait",
                     "character": "bailey",
