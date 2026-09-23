@@ -11045,28 +11045,30 @@ def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
 
 
 def _disk_character_skin(char_id: str) -> Optional[tuple]:
-    """Owner-locked Chloe/Bailey skin first, then newest master/skin upload on disk."""
+    """Newest master/skin upload on disk first, then owner-locked Chloe/Bailey skin."""
     cid = (char_id or "").strip().lower()
-    # Locked owner skins shipped with the repo — never invent another person's face.
+    if os.path.isdir(UPLOAD_DIR):
+        prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
+        found = []
+        for name in os.listdir(UPLOAD_DIR):
+            if not name.lower().startswith(prefixes):
+                continue
+            data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
+            if data:
+                found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
+        if found:
+            found.sort(key=lambda item: item[0])
+            return found[-1][1]
+    return None
+
+
+def _owner_locked_skin(char_id: str) -> Optional[tuple]:
+    """Locked owner skins shipped with the repo for Chloe and Bailey."""
+    cid = (char_id or "").strip().lower()
     if cid in ("chloe", "bailey"):
         owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid}.jpg")
-        data = _image_bytes_at(owner)
-        if data:
-            return data
-    if not os.path.isdir(UPLOAD_DIR):
-        return None
-    prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
-    found = []
-    for name in os.listdir(UPLOAD_DIR):
-        if not name.lower().startswith(prefixes):
-            continue
-        data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
-        if data:
-            found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
-    if not found:
-        return None
-    found.sort(key=lambda item: item[0])
-    return found[-1][1]
+        return _image_bytes_at(owner)
+    return None
 
 
 def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]]:
@@ -11135,7 +11137,7 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
                             return data
         finally:
             conn.close()
-    data = _disk_character_skin(char_id)
+    data = _disk_character_skin(char_id) or _owner_locked_skin(char_id)
     if data:
         return data
     if asset_id and strict:
