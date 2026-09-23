@@ -3159,6 +3159,33 @@ pre{white-space:pre-wrap;margin:0}
       </div>
     </details>
 
+    <!-- Character Monitor Sections: Chloe & Bailey -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+      <div class="kh-show-card" style="margin:0;">
+        <h3 style="margin:0 0 10px 0; color:var(--gold,#d4af37); font-size:18px;">CHLOE MONITOR</h3>
+        <div id="chloe-monitor-box">
+          <div style="margin-bottom:8px; font-size:13px;"><strong style="color:#fff;">Room:</strong> City Apartment</div>
+          <div style="margin-bottom:8px; font-size:13px;"><strong style="color:#fff;">Live State:</strong> <span class="pill resolved">Active / Ready</span></div>
+          <div style="border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#000;">
+            <div style="padding:4px 8px; font-size:11px; background:#111; color:var(--mut); border-bottom:1px solid #222;">CUSTOMER VIEW PREVIEW</div>
+            <img src="/assets/webcam/IMG_4057.jpeg" style="width:100%; aspect-ratio:16/9; object-fit:cover; display:block;">
+          </div>
+        </div>
+      </div>
+
+      <div class="kh-show-card" style="margin:0;">
+        <h3 style="margin:0 0 10px 0; color:var(--gold,#d4af37); font-size:18px;">BAILEY MONITOR</h3>
+        <div id="bailey-monitor-box">
+          <div style="margin-bottom:8px; font-size:13px;"><strong style="color:#fff;">Room:</strong> Old House</div>
+          <div style="margin-bottom:8px; font-size:13px;"><strong style="color:#fff;">Live State:</strong> <span class="pill resolved">Active / Ready</span></div>
+          <div style="border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#000;">
+            <div style="padding:4px 8px; font-size:11px; background:#111; color:var(--mut); border-bottom:1px solid #222;">CUSTOMER VIEW PREVIEW</div>
+            <img src="/assets/webcam/IMG_3973.jpeg" style="width:100%; aspect-ratio:16/9; object-fit:cover; display:block;">
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="khShowsList">
       <div style="text-align:center; padding:30px; color:var(--mut);">Loading Keyhole Show Panel...</div>
     </div>
