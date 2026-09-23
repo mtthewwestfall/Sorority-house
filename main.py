@@ -448,16 +448,16 @@ AUDIT_PRICE_USD = 0.99
 # Keyhole pricing & access rules defaults
 KEYHOLE_DEFAULT_CONFIG = {
     "free_preview_minutes": 10,
-    "free_preview_text_included": 50,   # verified-email preview messages (server balance)
+    "free_preview_text_included": 0,    # FREE 10-minute preview grants 0 messages
     "preview_max_minutes": 10,
     "preview_max_wardrobe": "lingerie",
     "preview_explicit_allowed": False,
     "group_explicit_allowed": True,
     "private_explicit_allowed": True,
-    "intro_price": 5.99,          # 10-minute starter, one per account for life
+    "intro_price": 5.99,          # PAID 10-minute starter, $5.99, 100 text messages
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
-    "intro_text_included": 300,
+    "intro_text_included": 100,
     "intro_lifetime_cap": 1,
     "quick_price": 7.99,
     "quick_webcam_minutes": 15,
@@ -485,9 +485,10 @@ KEYHOLE_DEFAULT_CONFIG = {
     "marathon_text_included": 400,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
-    "text_only_price": 1.99,
-    "text_only_included": 100,
+    "text_only_price": 5.99,
+    "text_only_included": 300,
     "text_only_monthly_cap": 1,
+    "public_price": 4.99,
 }
 # Paid Keyhole purchases add this many message credits. Unused credits stay on the
 # account and stack with the next purchase. The client never reports this number.
@@ -7808,6 +7809,13 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
 
             # Generate sanitized preview URL without customer identifying details
             sanitized_path = _sanitize_recording(recording_path, show_id, char_id)
+
+            if show.get("show_type") == "private" and show.get("customer_id"):
+                cur.execute("""
+                    UPDATE users
+                    SET text_balance = text_balance + 100
+                    WHERE user_id = %s
+                """, (show["customer_id"],))
 
             cur.execute("""
                 UPDATE keyhole_shows
