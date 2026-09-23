@@ -12107,11 +12107,18 @@ def get_media_asset_detail(asset_id: int):
 
 class WebcamClipBufferService:
     """
-    Auto WebCam clip buffer ordering video clips in FIFO sequence (older data before new)
-    and slicing clips into 8-second segments.
+    Auto WebCam clip buffer ordering video clips in smart non-repetitive sequence,
+    filling requirements, shuffling playback order seamlessly, tracking monthly rotation,
+    and estimating monthly generation costs.
     """
+    COST_PER_GENERATION_USD = 0.05
+
     def __init__(self):
         self._queues: Dict[str, deque] = defaultdict(deque)
+        self._pools: Dict[str, List[dict]] = defaultdict(list)
+        self._history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=5))
+        self._monthly_counts: Dict[str, int] = defaultdict(int)
+        self._last_rotation: Dict[str, float] = defaultdict(time.time)
         self._lock = threading.Lock()
 
     def push_clip(self, character_id: str, clip_data: dict) -> None:
@@ -12120,14 +12127,81 @@ class WebcamClipBufferService:
             clip_data.setdefault("duration_seconds", 8)
             clip_data.setdefault("timestamp", time.time())
             self._queues[cid].append(clip_data)
+            if clip_data not in self._pools[cid]:
+                self._pools[cid].append(clip_data)
+            self._monthly_counts[cid] += 1
 
     def pop_clip(self, character_id: str) -> Optional[dict]:
         cid = character_id.strip().lower()
         with self._lock:
+            now = time.time()
+            if now - self._last_rotation[cid] > 30 * 86400:
+                self._last_rotation[cid] = now
+                self._monthly_counts[cid] = 0
+
             q = self._queues[cid]
             if q:
-                return q.popleft()  # FIFO: Oldest data first
+                clip = q.popleft()
+                self._history[cid].append(clip.get("id") or clip.get("url"))
+                return clip
+
+            pool = self._pools[cid]
+            if pool:
+                recent = set(self._history[cid])
+                candidates = [c for c in pool if (c.get("id") or c.get("url")) not in recent]
+                if not candidates:
+                    candidates = pool
+                selected = random.choice(candidates)
+                self._history[cid].append(selected.get("id") or selected.get("url"))
+                return selected
+
             return None
+
+    def auto_fill_requirements(self, character_id: str, count: int = 5) -> List[dict]:
+        cid = character_id.strip().lower()
+        filled = []
+        with self._lock:
+            base_urls = [
+                f"/assets/webcam/{cid}_idle.mp4",
+                f"/assets/webcam/{cid}_room_parisian.mp4",
+                f"/assets/webcam/{cid}_room_nightcity.mp4",
+                f"/assets/webcam/{cid}_room_japandi.mp4",
+                f"/assets/webcam/{cid}_room_rustic.mp4",
+            ]
+            for i in range(count):
+                clip = {
+                    "id": f"autofill_{cid}_{i+1}_{int(time.time())}",
+                    "title": f"{cid.capitalize()} Scene {i+1}",
+                    "url": base_urls[i % len(base_urls)],
+                    "duration_seconds": 8,
+                    "source": "auto_fill_generator"
+                }
+                clip_id = clip["id"]
+                if not any(c.get("id") == clip_id for c in self._pools[cid]):
+                    self._queues[cid].append(clip)
+                    self._pools[cid].append(clip)
+                    self._monthly_counts[cid] += 1
+                filled.append(clip)
+        return filled
+
+    def get_cost_and_status(self, character_id: str) -> dict:
+        cid = character_id.strip().lower()
+        with self._lock:
+            count = self._monthly_counts[cid]
+            cost = round(count * self.COST_PER_GENERATION_USD, 2)
+            pool_size = len(self._pools[cid])
+            queue_len = len(self._queues[cid])
+            last_rot_ts = self._last_rotation[cid]
+            last_rot = datetime.fromtimestamp(last_rot_ts, tz=timezone.utc).isoformat()
+            return {
+                "character_id": cid,
+                "pool_size": pool_size,
+                "queue_length": queue_len,
+                "monthly_generations": count,
+                "estimated_monthly_cost_usd": cost,
+                "last_monthly_rotation": last_rot,
+                "cost_per_clip_usd": self.COST_PER_GENERATION_USD,
+            }
 
     def list_queue(self, character_id: str) -> List[dict]:
         cid = character_id.strip().lower()
@@ -12208,31 +12282,45 @@ def spatiotemporal_split_stitch_clip(
 @app.post("/keyhole/webcam/auto-clip")
 def auto_webcam_clip_endpoint(body: AutoWebcamClipIn):
     """
-    Auto WebCam service producing 8-second clips using FIFO buffer (old data before new data).
+    Auto WebCam service producing 8-second clips using non-repetitive shuffle buffer
+    and automatic requirement fill.
     """
     cid = body.character_id.strip().lower()
 
-    # Try FIFO buffer first
-    old_clip = _WEBCAM_FIFO_BUFFER.pop_clip(cid)
-    if not old_clip:
-        # Fetch default or library media asset if FIFO buffer is empty
+    # Try popping clip or auto-filling requirement if empty
+    clip = _WEBCAM_FIFO_BUFFER.pop_clip(cid)
+    if not clip:
+        _WEBCAM_FIFO_BUFFER.auto_fill_requirements(cid, count=5)
+        clip = _WEBCAM_FIFO_BUFFER.pop_clip(cid)
+
+    if not clip:
         default_res = get_character_default_media(cid)
         asset = default_res.get("asset") or {}
-        old_clip = {
-            "id": asset.get("id"),
+        clip = {
+            "id": asset.get("id") or "fallback",
             "url": asset.get("url") or f"/assets/webcam/{cid}_idle.mp4",
             "title": asset.get("title") or f"{cid.capitalize()} Idle",
             "duration_seconds": 8,
             "source": "library_fallback"
         }
 
+    status = _WEBCAM_FIFO_BUFFER.get_cost_and_status(cid)
+
     return {
         "ok": True,
         "character_id": cid,
         "duration_seconds": 8,
-        "fifo_prioritized": True,
-        "clip": old_clip
+        "non_repetitive": True,
+        "clip": clip,
+        "buffer_status": status
     }
+
+
+@app.get("/keyhole/webcam/buffer-status/{character_id}")
+def keyhole_webcam_buffer_status(character_id: str):
+    """Retrieve webcam clip buffer pool status, monthly rotation, and estimated generation costs."""
+    cid = character_id.strip().lower()
+    return {"ok": True, "status": _WEBCAM_FIFO_BUFFER.get_cost_and_status(cid)}
 
 
 @app.post("/admin/generator/webcam/spatiotemporal", dependencies=[Depends(admin_required)])

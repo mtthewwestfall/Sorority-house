@@ -81,6 +81,26 @@ class TestPRReviewerAndWebcam(unittest.TestCase):
         self.assertEqual(data2["duration_seconds"], 8)
         self.assertEqual(data2["clip"]["id"], 102)
 
+    def test_auto_fill_buffer_and_cost_tracking(self):
+        main._WEBCAM_FIFO_BUFFER._queues["maya"].clear()
+        main._WEBCAM_FIFO_BUFFER._pools["maya"].clear()
+
+        # Fetch status for empty buffer
+        res_status = self.client.get("/keyhole/webcam/buffer-status/maya")
+        self.assertEqual(res_status.status_code, 200)
+        status_data = res_status.json()["status"]
+        self.assertEqual(status_data["pool_size"], 0)
+
+        # Calling auto-clip auto-fills buffer when empty
+        res_clip = self.client.post("/keyhole/webcam/auto-clip", json={"character_id": "maya", "beat": "idle"})
+        self.assertEqual(res_clip.status_code, 200)
+        clip_data = res_clip.json()
+        self.assertTrue(clip_data["ok"])
+        self.assertTrue(clip_data["non_repetitive"])
+        self.assertIn("buffer_status", clip_data)
+        self.assertGreater(clip_data["buffer_status"]["monthly_generations"], 0)
+        self.assertGreater(clip_data["buffer_status"]["estimated_monthly_cost_usd"], 0)
+
     def test_spatiotemporal_split_stitch_endpoint(self):
         main._WEBCAM_FIFO_BUFFER._queues["bailey"].clear()
         main._WEBCAM_FIFO_BUFFER.push_clip("bailey", {"id": 201, "url": "/media/files/bailey_cut.mp4"})
