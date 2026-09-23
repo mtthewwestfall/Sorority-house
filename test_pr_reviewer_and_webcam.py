@@ -97,6 +97,7 @@ class TestPRReviewerAndWebcam(unittest.TestCase):
         clip_data = res_clip.json()
         self.assertTrue(clip_data["ok"])
         self.assertTrue(clip_data["non_repetitive"])
+        self.assertTrue(clip_data["clip"].get("spatiotemporal_spliced"))
         self.assertIn("buffer_status", clip_data)
         self.assertGreater(clip_data["buffer_status"]["monthly_generations"], 0)
         self.assertGreater(clip_data["buffer_status"]["estimated_monthly_cost_usd"], 0)

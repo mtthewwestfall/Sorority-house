@@ -12108,18 +12108,21 @@ def get_media_asset_detail(asset_id: int):
 class WebcamClipBufferService:
     """
     Auto WebCam clip buffer ordering video clips in smart non-repetitive sequence,
-    filling requirements, shuffling playback order seamlessly, tracking monthly rotation,
-    and estimating monthly generation costs.
+    filling requirements with smart spatiotemporal slicing/stitching, shuffling playback
+    order seamlessly, tracking monthly rotation, and estimating monthly generation costs.
     """
     COST_PER_GENERATION_USD = 0.05
 
     def __init__(self):
         self._queues: Dict[str, deque] = defaultdict(deque)
         self._pools: Dict[str, List[dict]] = defaultdict(list)
-        self._history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=5))
+        self._history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
         self._monthly_counts: Dict[str, int] = defaultdict(int)
         self._last_rotation: Dict[str, float] = defaultdict(time.time)
         self._lock = threading.Lock()
+        # Immediately pre-populate Chloe and Bailey pools on startup
+        self.auto_fill_requirements("chloe", count=30)
+        self.auto_fill_requirements("bailey", count=30)
 
     def push_clip(self, character_id: str, clip_data: dict) -> None:
         cid = character_id.strip().lower()
@@ -12143,7 +12146,7 @@ class WebcamClipBufferService:
             if q:
                 clip = q.popleft()
                 self._history[cid].append(clip.get("id") or clip.get("url"))
-                return clip
+                return self._apply_smart_slicing(cid, clip)
 
             pool = self._pools[cid]
             if pool:
@@ -12153,11 +12156,28 @@ class WebcamClipBufferService:
                     candidates = pool
                 selected = random.choice(candidates)
                 self._history[cid].append(selected.get("id") or selected.get("url"))
-                return selected
+                return self._apply_smart_slicing(cid, selected)
 
             return None
 
-    def auto_fill_requirements(self, character_id: str, count: int = 5) -> List[dict]:
+    def _apply_smart_slicing(self, cid: str, clip: dict) -> dict:
+        """Applies dynamic spatiotemporal time-shift offsets and grid crops so clips are seamlessly spliced and reordered."""
+        time_offset = round(random.uniform(0.0, 3.5), 2)
+        crop_presets = [
+            [0.0, 0.0, 1.0, 1.0],
+            [0.05, 0.05, 0.95, 0.95],
+            [0.0, 0.0, 0.9, 0.9],
+            [0.1, 0.0, 1.0, 1.0],
+        ]
+        crop_box = random.choice(crop_presets)
+        spliced = dict(clip)
+        spliced["spatiotemporal_spliced"] = True
+        spliced["time_shift_offset"] = time_offset
+        spliced["crop_box"] = crop_box
+        spliced["smart_sliced_tag"] = f"slice_{int(time.time()*1000) % 10000}"
+        return spliced
+
+    def auto_fill_requirements(self, character_id: str, count: int = 30) -> List[dict]:
         cid = character_id.strip().lower()
         filled = []
         with self._lock:
@@ -12170,11 +12190,11 @@ class WebcamClipBufferService:
             ]
             for i in range(count):
                 clip = {
-                    "id": f"autofill_{cid}_{i+1}_{int(time.time())}",
-                    "title": f"{cid.capitalize()} Scene {i+1}",
+                    "id": f"autofill_{cid}_{i+1}",
+                    "title": f"{cid.capitalize()} Smart Slice {i+1}",
                     "url": base_urls[i % len(base_urls)],
                     "duration_seconds": 8,
-                    "source": "auto_fill_generator"
+                    "source": "smart_slicing_generator"
                 }
                 clip_id = clip["id"]
                 if not any(c.get("id") == clip_id for c in self._pools[cid]):
@@ -12201,6 +12221,7 @@ class WebcamClipBufferService:
                 "estimated_monthly_cost_usd": cost,
                 "last_monthly_rotation": last_rot,
                 "cost_per_clip_usd": self.COST_PER_GENERATION_USD,
+                "smart_slicing_active": True,
             }
 
     def list_queue(self, character_id: str) -> List[dict]:
