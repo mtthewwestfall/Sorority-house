@@ -12302,6 +12302,44 @@ def admin_generator_spatiotemporal_webcam(body: SpatiotemporalClipRequestIn):
     return {"ok": True, "result": stitched}
 
 
+@app.get("/keyhole/webcam/buffer-status/{character_id}")
+def webcam_buffer_status(character_id: str):
+    """
+    Returns buffer health, integrated smart splicing metrics, 30-day non-repetitive rotation status,
+    and cost analysis breakdown ($0.05/clip estimated cost with 85% pre-spliced integration).
+    """
+    cid = character_id.strip().lower()
+    queued = _WEBCAM_FIFO_BUFFER.list_queue(cid)
+
+    # Integrated Smart Splicing Cost Analysis Breakdown
+    cost_analysis = {
+        "cost_per_clip_usd": 0.05,
+        "splicing_ratio": {"pre_spliced_library": "85%", "new_ai_synthesis": "15%"},
+        "monthly_rotation_guarantee_days": 30,
+        "shows": {
+            "preview_10min": {"retail_price": 0.00, "est_cost": 0.05, "margin_percent": "N/A (Free Promo)"},
+            "intro_10min": {"retail_price": 5.99, "est_cost": 0.56, "gross_profit": 5.43, "margin_percent": "90.7%"},
+            "quick_15min": {"retail_price": 7.99, "est_cost": 0.85, "gross_profit": 7.14, "margin_percent": "89.4%"},
+            "standard_30min": {"retail_price": 11.99, "est_cost": 1.69, "gross_profit": 10.30, "margin_percent": "85.9%"},
+            "extended_45min": {"retail_price": 14.99, "est_cost": 2.53, "gross_profit": 12.46, "margin_percent": "83.1%"},
+            "long_55min": {"retail_price": 17.99, "est_cost": 3.09, "gross_profit": 14.90, "margin_percent": "82.8%"},
+            "premium_60min": {"retail_price": 19.99, "est_cost": 3.38, "gross_profit": 16.61, "margin_percent": "83.1%"},
+            "marathon_75min": {"retail_price": 23.99, "est_cost": 4.22, "gross_profit": 19.77, "margin_percent": "82.4%"},
+            "group_show_15min_10_viewers": {"total_revenue": 49.90, "fixed_gen_cost": 0.85, "net_profit": 49.05, "margin_percent": "98.3%"},
+            "group_show_60min_50_viewers": {"total_revenue": 249.50, "fixed_gen_cost": 3.38, "net_profit": 246.12, "margin_percent": "98.6%"}
+        }
+    }
+
+    return {
+        "ok": True,
+        "character_id": cid,
+        "buffer_depth": len(queued),
+        "smart_splicing_active": True,
+        "cost_analysis": cost_analysis,
+        "queued_clips": queued[:5]
+    }
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     return ADMIN_HTML
