@@ -200,7 +200,7 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         # Re-read with the module's current SITE_URL so the 45-minute fallback matches the bot.
         rooms = bot.SITE_URL + "/rooms.html"
         by_url = {url: label for label, url in links}
-        self.assertEqual(len(links), 7)
+        self.assertEqual(len(links), 8)
         labels = [label for label, _url in links]
         self.assertEqual(labels[0], "15 min · $7.99")
         self.assertNotIn("100 texts", labels[0])
@@ -217,6 +217,10 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertTrue(any("60 min" in label and "$19.99" in label for label in labels))
         self.assertTrue(any("75 min" in label and "$23.99" in label for label in labels))
         self.assertTrue(any("Public Lounge" in label and "$4.99" in label for label in labels))
+        self.assertTrue(any("300 texts" in label and "$5.99" in label for label in labels))
+        text_url = next((u for l, u in links if "300 texts" in l), "")
+        self.assertTrue(text_url.startswith("https://lockeddoorai.myshopify.com/cart/"))
+        self.assertIn(":1?channel=web", text_url)
         self.assertNotIn("https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02", by_url)
 
     def test_plan_link_env_override(self):

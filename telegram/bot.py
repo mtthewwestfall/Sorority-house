@@ -110,6 +110,35 @@ _ROOMS_STRIPE = {
 }
 _PUBLIC_LOUNGE_LINK = "https://buy.stripe.com/6oUfZh1jradL0he4098AE00"
 
+# The $5.99 Text-Only pack (300 texts, additive) rides Shopify, not Stripe.
+# The webhook (main.py) attributes the order, so the button needs no user data:
+# a plain cart permalink built from the live product JSON (variant ids change
+# whenever the variant is recreated, so resolve instead of pinning).
+_TEXT_STORE = os.environ.get("SHOPIFY_TEXT_STORE", "https://lockeddoorai.myshopify.com")
+_TEXT_HANDLE = os.environ.get("TEXT_ONLY_HANDLE", "text-only")
+_TEXT_VARIANT_FALLBACK = os.environ.get("TEXT_ONLY_VARIANT_ID", "44898187903066")
+_TEXT_CACHE = {"url": "", "at": 0.0}
+
+
+def text_pack_url() -> str:
+    """Cart permalink for the Text-Only pack, cached 5 minutes; falls back to the
+    configured variant id when the storefront cannot be reached."""
+    if _TEXT_CACHE["url"] and time.time() - _TEXT_CACHE["at"] < 300:
+        return _TEXT_CACHE["url"]
+    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1?channel=web"
+    if requests is not None:
+        try:
+            r = requests.get(f"{_TEXT_STORE.rstrip('/')}/products/{_TEXT_HANDLE}.js",
+                             timeout=5, headers={"User-Agent": "lockeddoor-telegram"})
+            if r.status_code == 200:
+                variants = [v for v in (r.json().get("variants") or []) if v.get("available", True)]
+                if variants:
+                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1?channel=web"
+        except Exception:
+            pass
+    _TEXT_CACHE.update({"url": url, "at": time.time()})
+    return url
+
 
 def plan_links():
     """Website checkout links. Env vars override a single package without forking products."""
@@ -121,6 +150,7 @@ def plan_links():
         ("60 min · $19.99 · 100 texts", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
         ("75 min · $23.99 · 100 texts", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
         ("Public Lounge · $4.99", os.environ.get("PAY_LINK_PUBLIC", _PUBLIC_LOUNGE_LINK)),
+        ("300 texts · $5.99", os.environ.get("PAY_LINK_TEXT", text_pack_url())),
     ]
 
 # ---------------------------------------------------------------------------
@@ -1079,6 +1109,12 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     logger.info("KEYHOLE WebCam Show Telegram Bot starting (backend: %s)", _base())
+    # Warm the Text-Only pack link cache now so the first out-of-messages
+    # keyboard never waits on a storefront fetch inside the event loop.
+    try:
+        logger.info("Text-Only pack link: %s", text_pack_url())
+    except Exception as exc:
+        logger.warning("Text-Only pack link warmup failed: %s", exc)
     app.run_polling()
 
 

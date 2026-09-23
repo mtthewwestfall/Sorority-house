@@ -1568,6 +1568,35 @@ const PRESET_FACES = {
 
     // iMessage-style furniture: "Today 7:09 PM" stamps and a Read receipt under
     // your latest bubble.
+    // Out of messages: offer the $5.99 Text-Only pack (300 texts, additive) as a
+    // Shopify checkout. The pack rides the same order webhook as picture packs.
+    async function showTextPackOffer(kind) {
+      let s = picStatus || {};
+      if (!s.text_url) {
+        try {
+          const r = await fetch(API_BASE_URL + '/image', { headers: authHeaders() });
+          if (r.ok) { picStatus = await r.json(); s = picStatus; }
+        } catch (_) { /* offer falls back to the plain message below */ }
+      }
+      if (!s.text_url) return false;
+      const el = document.createElement('div');
+      el.className = 'msg ' + (kind || 'note');
+      el.textContent = `You are out of messages. ${s.text_size || 300} more texts for ${s.text_price || '$5.99'}?`;
+      const buy = document.createElement('button');
+      buy.type = 'button';
+      buy.className = 'button ghost';
+      buy.textContent = `${s.text_size || 300} texts · ${s.text_price || '$5.99'}`;
+      buy.addEventListener('click', () => { window.location.href = s.text_url; });
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.marginTop = '6px';
+      row.appendChild(buy);
+      el.appendChild(row);
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return true;
+    }
+
     const timeFmt = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
     function clockNow() { return timeFmt.format(new Date()); }
     let lastStampAt = 0;
@@ -2549,6 +2578,11 @@ const PRESET_FACES = {
         return false;
       }
       if (response.status === 401) { typing.remove(); addMessage('note', 'Your session ended. Sign in to keep talking.'); handleUnauthorized(); return true; }
+      if (response.status === 402) {
+        typing.remove();
+        if (!(await showTextPackOffer('error'))) addMessage('error', 'You are out of messages. Check back soon.');
+        return true;
+      }
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => null);
         typing.remove();
@@ -2595,7 +2629,11 @@ const PRESET_FACES = {
       if (streamAbort === controller) streamAbort = null;
       if (!bubble && girl === currentGirl) {
         typing.remove();
-        addMessage('error', failed === 'she_did_not_answer' ? 'She went quiet. Try again in a moment.' : (failed || 'She did not answer. Try again in a moment.'));
+        if (failed === 'out_of_messages') {
+          if (!(await showTextPackOffer('error'))) addMessage('error', 'You are out of messages. Check back soon.');
+        } else {
+          addMessage('error', failed === 'she_did_not_answer' ? 'She went quiet. Try again in a moment.' : (failed || 'She did not answer. Try again in a moment.'));
+        }
       }
       return true;
     }
@@ -2619,6 +2657,8 @@ const PRESET_FACES = {
       if (response.status === 401) {
         addMessage('note', 'Your session ended. Sign in to keep talking.');
         handleUnauthorized();
+      } else if (response.status === 402 && errText(data, '') === 'out_of_messages') {
+        if (!(await showTextPackOffer('error'))) addMessage('error', 'You are out of messages. Check back soon.');
       } else if (!response.ok || !data || data.ok === false) {
         addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
       } else {
@@ -2658,6 +2698,8 @@ const PRESET_FACES = {
             }
             if (typeof data.remaining === 'number') showRemaining(data.remaining);
             if (data.picture_due) requestPicture();
+          } else if (res.status === 402 && errText(data, '') === 'out_of_messages') {
+            if (!(await showTextPackOffer('error'))) addMessage('error', 'You are out of messages. Check back soon.');
           } else {
             addMessage('error', data.detail || 'Companion did not answer.');
           }

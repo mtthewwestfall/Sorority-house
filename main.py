@@ -123,6 +123,16 @@ API CONTRACT implemented here (point your chat app at these):
                                                             'finished' grants the Keyhole package
                                                             named in order_id ('<user_id>:<package>')
                                                             or order_description
+  POST /webhooks/shopify/orders                          -> Shopify order webhook: picture
+                                                            packs (SKU PICPACK5) credit pictures;
+                                                            the Text-Only pack (variant/sku of
+                                                            TEXT_ONLY_HANDLE) grants the text_only
+                                                            Keyhole package once per order to the
+                                                            lockeddoor_user attribute, else the
+                                                            account with the order email; Shopify
+                                                            packs stack past the monthly cap (the
+                                                            money is already taken; api purchases
+                                                            stay capped)
   POST /webhooks/stripe                                  -> Stripe webhook: invoice.paid upgrades
                                                             the account remembered for the customer,
                                                             else the one with the customer's email,
@@ -211,6 +221,18 @@ Env vars (Railway -> Variables):
                     x-nowpayments-sig); /webhooks/nowpayments refuses with 503 until set.
   NOWPAYMENTS_API_KEY
                     NOWPayments API key; /keyhole/nowpayments/invoice refuses with 503 until set.
+  SHOPIFY_WEBHOOK_SECRET
+                    signing secret of the Shopify orders webhook; /webhooks/shopify/orders
+                    refuses with 503 until set. Also keyes the signed lockeddoor_user
+                    cart attribute.
+  SHOPIFY_TEXT_STORE / TEXT_ONLY_HANDLE / TEXT_ONLY_SKU / TEXT_ONLY_VARIANT_ID
+                    where the $5.99 Text-Only pack is sold and how the webhook
+                    recognizes it: store origin (default https://lockeddoorai.myshopify.com),
+                    product handle (text-only), its variant SKU (TEXTONLY300) and the
+                    live variant id (44898079899738). The order webhook matches either
+                    variant id or SKU; the buy button is a cart permalink built from
+                    store + variant id. TEXT_ONLY_PRICE / TEXT_ONLY_SIZE are display
+                    strings for the offer ($5.99 / 300).
   VIDEO_MODEL       Veo model behind /admin/generator/webcam
                     (default veo-3.1-fast-generate-preview; uses GEMINI_API_KEY).
   SOGNI_API_KEY     Sogni key behind /admin/generator/image engine=secondary (may also be
@@ -409,6 +431,75 @@ PLATE_BEAT_LABELS = {
 }
 PICTURE_PACK_SKU = os.environ.get("PICTURE_PACK_SKU", "PICPACK5").upper()       # its variant SKU
 SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
+
+# The $5.99 Text-Only pack (300 texts, additive) is a Shopify product on the same
+# storefront: handle 'text-only'. The /webhooks/shopify/orders webhook grants the
+# text_only Keyhole package when a paid order carries that product's variant, and
+# the buy button is a cart permalink {SHOPIFY_TEXT_STORE}/cart/{variant_id}:1.
+# Shopify changes a variant id whenever the variant is recreated, so the id is
+# resolved from the live product JSON (5-minute cache) instead of being pinned;
+# TEXT_ONLY_VARIANT_ID / TEXT_ONLY_SKU are fallbacks for when that lookup fails.
+TEXT_ONLY_STORE = os.environ.get("SHOPIFY_TEXT_STORE", "https://lockeddoorai.myshopify.com")
+TEXT_ONLY_HANDLE = os.environ.get("TEXT_ONLY_HANDLE", "text-only")
+TEXT_ONLY_SKU = os.environ.get("TEXT_ONLY_SKU", "TEXTONLY300").upper()
+TEXT_ONLY_VARIANT_ID = os.environ.get("TEXT_ONLY_VARIANT_ID", "44898187903066")
+TEXT_ONLY_PRICE = os.environ.get("TEXT_ONLY_PRICE", "$5.99")
+TEXT_ONLY_SIZE = int(os.environ.get("TEXT_ONLY_SIZE", "300"))
+TEXT_ONLY_RESOLVE_TTL_S = int(os.environ.get("TEXT_ONLY_RESOLVE_TTL_S", "300"))
+
+_TEXT_ONLY_CACHE = {"variant_id": "", "sku": "", "price": "", "resolved_at": 0.0}
+
+
+def _text_only_variant() -> Dict[str, str]:
+    """The Text-Only pack's live {variant_id, sku, price}, cached 5 minutes.
+
+    Reads the public product JSON on the storefront (no auth). Falls back to the
+    configured TEXT_ONLY_VARIANT_ID / TEXT_ONLY_SKU so the webhook and the buy
+    button keep working during a storefront outage or a handle rename."""
+    now = time.time()
+    if _TEXT_ONLY_CACHE["variant_id"] and now - _TEXT_ONLY_CACHE["resolved_at"] < TEXT_ONLY_RESOLVE_TTL_S:
+        return _TEXT_ONLY_CACHE
+    live = {}
+    try:
+        url = f"{TEXT_ONLY_STORE.rstrip('/')}/products/{TEXT_ONLY_HANDLE}.js"
+        res = requests.get(url, timeout=5, headers={"User-Agent": "lockeddoor-backend"})
+        if res.status_code == 200:
+            product = res.json()
+            variants = [v for v in product.get("variants") or [] if v.get("available", True)]
+            if not variants:
+                variants = product.get("variants") or []
+            # Prefer an in-stock variant priced like the configured pack price,
+            # else the first variant (single-variant products: the default). The
+            # storefront returns dollars on /products/*.json but cents on *.js,
+            # so normalize before comparing.
+            def _usd(price_val) -> float:
+                p = float(price_val or 0)
+                return p / 100.0 if p >= 100 else p
+
+            target = float(TEXT_ONLY_PRICE.lstrip("$")) if TEXT_ONLY_PRICE else 0.0
+            priced = [v for v in variants if target and abs(_usd(v.get("price")) - target) < 0.005]
+            v = (priced or variants)[0]
+            live = {
+                "variant_id": str(v.get("id") or ""),
+                "sku": (v.get("sku") or "").strip().upper(),
+                "price": f"{_usd(v.get('price')):.2f}",
+            }
+    except Exception as exc:
+        logger.warning("Text-Only pack resolve failed (%s); using configured ids", exc)
+    resolved = {
+        "variant_id": live.get("variant_id") or TEXT_ONLY_VARIANT_ID,
+        "sku": live.get("sku") or TEXT_ONLY_SKU,
+        "price": live.get("price") or (TEXT_ONLY_PRICE.lstrip("$") if TEXT_ONLY_PRICE else ""),
+        "resolved_at": now,
+    }
+    _TEXT_ONLY_CACHE.update(resolved)
+    return _TEXT_ONLY_CACHE
+
+
+def _text_only_cart_url() -> str:
+    """Cart permalink for the Text-Only pack, e.g.
+    https://lockeddoorai.myshopify.com/cart/44898187903066:1?channel=web"""
+    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1?channel=web"
 WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
@@ -485,9 +576,10 @@ KEYHOLE_DEFAULT_CONFIG = {
     "marathon_text_included": 400,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
-    "text_only_price": 1.99,
-    "text_only_included": 100,
+    "text_only_price": 5.99,
+    "text_only_included": 300,
     "text_only_monthly_cap": 1,
+    "public_price": 4.99,
 }
 # Paid Keyhole purchases add this many message credits. Unused credits stay on the
 # account and stack with the next purchase. The client never reports this number.
@@ -2513,6 +2605,70 @@ def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
         conn.close()
 
 
+def spend_one_message(cur, user_id: str, limit: int) -> int:
+    """Reserve one message atomically: preview balance while the free preview is
+    playing, then paid message credits (roll over), then package text_balance,
+    then the tier's monthly cap. Returns remaining AFTER this turn, or raises
+    402 out_of_messages. Refunds go through refund_message() (same pool order)."""
+    cur.execute("""
+        SELECT preview_message_credits, message_credits, paid_keyhole_purchases,
+               free_preview_claimed_at, webcam_minutes_left, webcam_session_started_at
+        FROM users WHERE user_id=%s
+    """, (user_id,))
+    pools = cur.fetchone() or {}
+    preview_playing = bool(
+        pools.get("free_preview_claimed_at")
+        and int(pools.get("paid_keyhole_purchases") or 0) <= 0
+        and (int(pools.get("webcam_minutes_left") or 0) > 0 or pools.get("webcam_session_started_at"))
+        and int(pools.get("preview_message_credits") or 0) > 0
+    )
+    remaining = None
+    if preview_playing:
+        cur.execute("""
+            UPDATE users
+            SET preview_message_credits = preview_message_credits - 1,
+                last_message_pool = 'preview'
+            WHERE user_id=%s AND preview_message_credits > 0
+            RETURNING preview_message_credits
+        """, (user_id,))
+        spent = cur.fetchone()
+        if spent:
+            remaining = int(spent["preview_message_credits"])
+    if remaining is None:
+        cur.execute("""
+            UPDATE users
+            SET message_credits = message_credits - 1,
+                last_message_pool = 'credits'
+            WHERE user_id=%s AND message_credits > 0
+            RETURNING message_credits
+        """, (user_id,))
+        spent = cur.fetchone()
+        if spent:
+            remaining = int(spent["message_credits"])
+    if remaining is None:
+        cur.execute("""
+            UPDATE users
+            SET text_balance = text_balance - 1,
+                last_message_pool = 'text'
+            WHERE user_id=%s AND text_balance > 0
+            RETURNING text_balance
+        """, (user_id,))
+        balance_used = cur.fetchone()
+        if balance_used:
+            remaining = int(balance_used["text_balance"])
+    if remaining is None:
+        cur.execute("""
+            UPDATE users SET msg_used = msg_used + 1, last_message_pool = 'tier'
+            WHERE user_id=%s AND msg_used < %s
+            RETURNING msg_used
+        """, (user_id, limit))
+        got = cur.fetchone()
+        if got is None:
+            raise HTTPException(status_code=402, detail="out_of_messages")
+        remaining = max(0, limit - int(got["msg_used"]))
+    return remaining
+
+
 def chat_preflight(user, girl_raw):
     """Tier/door/allowance checks. Reserves one message atomically (conditional
     UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
@@ -2528,67 +2684,8 @@ def chat_preflight(user, girl_raw):
     conn = db()
     try:
         with conn.cursor() as cur:
-            # Server balances only. Order: preview messages (while the free preview
-            # is playing), paid message credits (roll over), package text_balance, tier cap.
-            cur.execute("""
-                SELECT preview_message_credits, message_credits, paid_keyhole_purchases,
-                       free_preview_claimed_at, webcam_minutes_left, webcam_session_started_at
-                FROM users WHERE user_id=%s
-            """, (user["user_id"],))
-            pools = cur.fetchone() or {}
-            preview_playing = bool(
-                pools.get("free_preview_claimed_at")
-                and int(pools.get("paid_keyhole_purchases") or 0) <= 0
-                and (int(pools.get("webcam_minutes_left") or 0) > 0 or pools.get("webcam_session_started_at"))
-                and int(pools.get("preview_message_credits") or 0) > 0
-            )
-            remaining = None
-            if preview_playing:
-                cur.execute("""
-                    UPDATE users
-                    SET preview_message_credits = preview_message_credits - 1,
-                        last_message_pool = 'preview'
-                    WHERE user_id=%s AND preview_message_credits > 0
-                    RETURNING preview_message_credits
-                """, (user["user_id"],))
-                spent = cur.fetchone()
-                if spent:
-                    remaining = int(spent["preview_message_credits"])
-            if remaining is None:
-                cur.execute("""
-                    UPDATE users
-                    SET message_credits = message_credits - 1,
-                        last_message_pool = 'credits'
-                    WHERE user_id=%s AND message_credits > 0
-                    RETURNING message_credits
-                """, (user["user_id"],))
-                spent = cur.fetchone()
-                if spent:
-                    remaining = int(spent["message_credits"])
-            if remaining is None:
-                cur.execute("""
-                    UPDATE users
-                    SET text_balance = text_balance - 1,
-                        last_message_pool = 'text'
-                    WHERE user_id=%s AND text_balance > 0
-                    RETURNING text_balance
-                """, (user["user_id"],))
-                balance_used = cur.fetchone()
-                if balance_used:
-                    remaining = int(balance_used["text_balance"])
-            if remaining is None:
-                cur.execute("""
-                    UPDATE users SET msg_used = msg_used + 1, last_message_pool = 'tier'
-                    WHERE user_id=%s AND msg_used < %s
-                    RETURNING msg_used
-                """, (user["user_id"], limit))
-                got = cur.fetchone()
-                conn.commit()
-                if got is None:
-                    raise HTTPException(status_code=402, detail="out_of_messages")
-                remaining = max(0, limit - int(got["msg_used"]))
-            else:
-                conn.commit()
+            remaining = spend_one_message(cur, user["user_id"], limit)
+            conn.commit()
     finally:
         conn.close()
     try:
@@ -5136,6 +5233,9 @@ def picture_status(cur, user_id):
         "pack_sku": PICTURE_PACK_SKU,
         "pack_ready": bool(SHOPIFY_WEBHOOK_SECRET),
         "pack_ref": _pack_ref(user_id) if SHOPIFY_WEBHOOK_SECRET else None,
+        "text_size": TEXT_ONLY_SIZE,
+        "text_price": TEXT_ONLY_PRICE or None,
+        "text_url": _text_only_cart_url() if SHOPIFY_WEBHOOK_SECRET else None,
     }
 
 
@@ -5794,12 +5894,9 @@ def _companion_preflight(user, companion_id: int):
             if not comp:
                 raise HTTPException(status_code=404, detail="Companion not found")
 
-            cur.execute("""
-                UPDATE users SET msg_used = msg_used + 1
-                WHERE user_id=%s AND msg_used < %s
-                RETURNING msg_used
-            """, (uid, limit))
-            got = cur.fetchone()
+            # Same pool order as girl chat: preview, paid credits, package
+            # text_balance, then the tier cap. Raises 402 out_of_messages.
+            remaining = spend_one_message(cur, uid, limit)
 
             # Update real-days tracking on companion
             today = _today()
@@ -5822,9 +5919,6 @@ def _companion_preflight(user, companion_id: int):
     finally:
         conn.close()
 
-    if got is None:
-        raise HTTPException(status_code=402, detail="out_of_messages")
-    remaining = max(0, limit - int(got["msg_used"]))
     return comp, remaining
 
 
@@ -7125,8 +7219,14 @@ def get_keyhole_config():
     return cfg
 
 
-def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
-    """Grants Keyhole session packages with text allowance carryover and purchase cap enforcement."""
+def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") -> Dict[str, Any]:
+    """Grants Keyhole session packages with text allowance carryover and purchase cap enforcement.
+
+    source: "api" (self-serve purchase endpoints) or "shopify" (order webhook).
+    The Text-Only pack's monthly cap only applies to api purchases: a Shopify
+    order is a completed sale, and refusing it would strand the customer's money
+    (order webhooks do not retry like payment providers do), so shopify packs
+    always stack."""
     pkg = package_type.lower().strip()
     cfg = get_keyhole_config()
 
@@ -7150,7 +7250,7 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
                 if int(user.get("quick_sessions_bought_this_month", 0)) >= quick_cap:
                     raise HTTPException(status_code=400, detail=f"Monthly limit of {quick_cap} Quick Sessions reached.")
             elif pkg == "text_only":
-                if int(user.get("text_only_bought_this_month", 0)) >= text_cap:
+                if source != "shopify" and int(user.get("text_only_bought_this_month", 0)) >= text_cap:
                     raise HTTPException(status_code=400, detail=f"Monthly limit of {text_cap} Text-Only package reached.")
 
             # Calculate new entitlements with CARRYOVER for unused text messages
@@ -7193,7 +7293,7 @@ def grant_keyhole_package(user_id: str, package_type: str) -> Dict[str, Any]:
                 pics = int(cfg.get("premium_premade_pictures", 5))
                 cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s", (pics, user_id))
             elif pkg == "text_only":
-                add_text = int(cfg.get("text_only_included", 100))
+                add_text = int(cfg.get("text_only_included", 300))
                 cur.execute("UPDATE users SET text_only_bought_this_month = text_only_bought_this_month + 1 WHERE user_id=%s", (user_id,))
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
@@ -7846,6 +7946,15 @@ def keyhole_end_show(show_id: str) -> Dict[str, Any]:
                     updated_at = now()
                 WHERE show_id=%s
             """, (recording_path, sanitized_path, show_id))
+
+            # Finishing a completed paid private Keyhole show automatically grants 100 text messages to customer account
+            if show.get("show_type") == "private" and float(show.get("price") or 0.0) > 0 and show.get("customer_id"):
+                cur.execute("""
+                    UPDATE users
+                    SET text_balance = text_balance + %s
+                    WHERE user_id = %s
+                """, (KEYHOLE_MESSAGES_PER_PURCHASE, show["customer_id"]))
+
             conn.commit()
             return _fetch_show_dict(cur, show_id)
     finally:
@@ -8221,6 +8330,56 @@ class BasePaymentProvider:
         raise NotImplementedError
 
 
+def _is_text_only_line(li: dict) -> bool:
+    """True when a Shopify order line is the Text-Only pack: matched against the
+    live-resolved variant id (or its SKU once one is set on the product)."""
+    ids = _text_only_variant()
+    variant = str(li.get("variant_id") or "").strip()
+    if variant and variant == ids["variant_id"]:
+        return True
+    sku = (li.get("sku") or "").strip().upper()
+    return bool(sku) and sku == ids["sku"]
+
+
+def _process_shopify_order(order: dict) -> Dict[str, Any]:
+    """Grant whatever a paid Shopify order bought: picture packs (SKU match) and
+    the Text-Only pack (variant/SKU match -> text_only Keyhole package). Buyer is
+    the signed lockeddoor_user note attribute, else the order email. Shared by
+    /webhooks/shopify/orders and the payment provider so they cannot drift."""
+    line_items = order.get("line_items") or []
+    packs = sum(int(li.get("quantity") or 0) for li in line_items
+                if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
+    texts = sum(int(li.get("quantity") or 0) for li in line_items
+                if _is_text_only_line(li))
+    if packs <= 0 and texts <= 0:
+        return {"ok": True, "ignored": True}
+    attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
+    user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
+    if user_id:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
+                if cur.fetchone() is None:
+                    user_id = ""
+        finally:
+            conn.close()
+    if not user_id:
+        email = (order.get("email") or order.get("contact_email") or "").strip()
+        if not email:
+            raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
+        user_id = _user_for_email(email)["user_id"]
+    if texts > 0:
+        # Same fulfilment path as the other providers: claimed once per order id
+        # and granted through grant_keyhole_package. Shopify orders are completed
+        # sales, so source="shopify" lets text packs stack past the monthly cap
+        # (a refused grant here would strand the customer's money — order
+        # webhooks do not retry like payment providers do).
+        return _fulfil_keyhole_payment("shopify", f"shopify:text:{order.get('id')}",
+                                       "text_only", user_id, None)
+    return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+
+
 class ShopifyPaymentProvider(BasePaymentProvider):
     provider_name: str = "shopify"
 
@@ -8234,27 +8393,7 @@ class ShopifyPaymentProvider(BasePaymentProvider):
             order = json.loads(raw_body)
         except ValueError:
             raise HTTPException(status_code=400, detail="Bad JSON")
-        packs = sum(int(li.get("quantity") or 0) for li in order.get("line_items") or []
-                    if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
-        if packs <= 0:
-            return {"ok": True, "ignored": True}
-        attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
-        user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
-        if user_id:
-            conn = db()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
-                    if cur.fetchone() is None:
-                        user_id = ""
-            finally:
-                conn.close()
-        if not user_id:
-            email = (order.get("email") or order.get("contact_email") or "").strip()
-            if not email:
-                raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
-            user_id = _user_for_email(email)["user_id"]
-        return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+        return _process_shopify_order(order)
 
     def create_checkout_session(self, user_id: str, tier_or_pack: str) -> Dict[str, Any]:
         return {"ok": True, "provider": "shopify", "checkout_url": f"{SITE_URL}/cart", "pack_ref": _pack_ref(user_id)}
@@ -8503,7 +8642,7 @@ def _fulfil_keyhole_payment(provider: str, payment_id: str, package, ref, email)
     if row and row["granted"]:
         return {"ok": True, "ignored": "already granted", "user_id": user["user_id"]}
     try:
-        granted = grant_keyhole_package(user["user_id"], match)
+        granted = grant_keyhole_package(user["user_id"], match, source=provider)
     except HTTPException as e:
         # Package cap hit or bad state: leave the claim pending, report it, and answer
         # 200 so the provider stops retrying (its next event for it retries the grant).
@@ -8608,8 +8747,9 @@ payment_manager = PaymentGatewayManager()
 @app.post("/webhooks/shopify/orders")
 async def shopify_order_webhook(request: Request):
     """Shopify 'Order payment' webhook. Picture packs are a Shopify product (SKU
-    PICTURE_PACK_SKU); the cart carries the buyer's user_id as a note attribute,
-    falling back to the order email. Anything else in the order is ignored."""
+    PICTURE_PACK_SKU) and the Text-Only pack is product TEXT_ONLY_HANDLE: its
+    variant grants the text_only Keyhole package. The cart carries the buyer's
+    user_id as a note attribute, falling back to the order email."""
     if not SHOPIFY_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="SHOPIFY_WEBHOOK_SECRET must be set")
     if int(request.headers.get("Content-Length") or 0) > WEBHOOK_MAX_BYTES:
@@ -8626,27 +8766,7 @@ async def shopify_order_webhook(request: Request):
         order = json.loads(raw)
     except ValueError:
         raise HTTPException(status_code=400, detail="Bad JSON")
-    packs = sum(int(li.get("quantity") or 0) for li in order.get("line_items") or []
-                if (li.get("sku") or "").strip().upper() == PICTURE_PACK_SKU)
-    if packs <= 0:
-        return {"ok": True, "ignored": True}
-    attrs = {a.get("name"): a.get("value") for a in order.get("note_attributes") or []}
-    user_id = _user_from_pack_ref(attrs.get("lockeddoor_user"))
-    if user_id:
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM users WHERE user_id=%s", (user_id,))
-                if cur.fetchone() is None:
-                    user_id = ""
-        finally:
-            conn.close()
-    if not user_id:
-        email = (order.get("email") or order.get("contact_email") or "").strip()
-        if not email:
-            raise HTTPException(status_code=422, detail="Order has no lockeddoor_user attribute or email")
-        user_id = _user_for_email(email)["user_id"]
-    return _grant_picture_packs(user_id, packs, f"shopify:{order.get('id')}")
+    return _process_shopify_order(order)
 
 
 def _stripe_signed(raw: bytes, header: str) -> bool:

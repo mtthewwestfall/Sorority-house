@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile check
+        run: |
+          python -m py_compile main.py telegram/bot.py
+
+      - name: Frontend HTML parse check
+        run: |
+          python -c "import html.parser; p=html.parser.HTMLParser(); p.feed(open('web/index.html').read())"
+
+      - name: Unit tests
+        env:
+          # Tests mock the database; DATABASE_URL only needs to exist so module
+          # import does not take the "not set" path the tests do not cover.
+          DATABASE_URL: ""
+        run: |
+          python -m unittest discover -s . -p "test_*.py" -v
