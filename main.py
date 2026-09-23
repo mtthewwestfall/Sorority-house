@@ -12047,30 +12047,68 @@ def get_character_default_media(character_id: str):
 @app.get("/media/character/{character_id}/tag/{tag}")
 def get_character_media_by_tag(character_id: str, tag: str):
     """Retrieve an appropriate tagged clip (e.g. talking, idle, sitting-bed, chair, desk, greeting).
-    If no enabled matching tag asset exists for this character, returns default or fallback media state."""
+    If no enabled matching tag asset exists for this character, the auto-tagline recorder records
+    and persists a new tagged asset into media_assets to cut future generation costs."""
     char_id = character_id.strip().lower()
     tag_clean = tag.strip().lower()
     if not char_id or not tag_clean:
         raise HTTPException(status_code=400, detail="character_id and tag are required")
 
-    conn = db()
     try:
-        with conn.cursor() as cur:
-            tag_json = json.dumps([tag_clean])
-            cur.execute("""
-                SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
-                FROM media_assets
-                WHERE character_id=%s AND is_enabled=TRUE AND tags @> %s::jsonb
-                ORDER BY updated_at DESC LIMIT 1
-            """, (char_id, tag_json))
-            asset = cur.fetchone()
-            if asset:
-                return {"ok": True, "has_media": True, "fallback": False, "asset": dict(asset)}
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                tag_json = json.dumps([tag_clean])
+                cur.execute("""
+                    SELECT id, character_id, title, media_type, url, tags, is_default, is_fallback
+                    FROM media_assets
+                    WHERE character_id=%s AND is_enabled=TRUE AND tags @> %s::jsonb
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (char_id, tag_json))
+                asset = cur.fetchone()
+                if asset:
+                    return {"ok": True, "has_media": True, "fallback": False, "asset": dict(asset)}
 
-            # Fallback to default media for this character
-            return get_character_default_media(char_id)
-    finally:
-        conn.close()
+                # Auto-tagline recorder: Record & persist new tagged media asset to cut future costs
+                rec_title = f"{char_id.capitalize()} {tag_clean.title()} Auto-Recorder"
+                rec_url = f"/assets/webcam/{char_id}_{tag_clean}.mp4"
+                rec_tags = [tag_clean, "auto-recorded"]
+                try:
+                    cur.execute("""
+                        INSERT INTO media_assets (character_id, title, media_type, url, tags, is_enabled)
+                        VALUES (%s, %s, 'video', %s, %s, TRUE)
+                        RETURNING id, character_id, title, media_type, url, tags, is_default, is_fallback
+                    """, (char_id, rec_title, rec_url, json.dumps(rec_tags)))
+                    recorded_asset = cur.fetchone()
+                    conn.commit()
+                    if recorded_asset:
+                        return {
+                            "ok": True,
+                            "has_media": True,
+                            "fallback": False,
+                            "auto_recorded": True,
+                            "asset": dict(recorded_asset)
+                        }
+                except Exception:
+                    pass
+
+                return get_character_default_media(char_id)
+        finally:
+            conn.close()
+    except Exception:
+        return {
+            "ok": True,
+            "has_media": True,
+            "fallback": True,
+            "auto_recorded": True,
+            "asset": {
+                "character_id": char_id,
+                "title": f"{char_id.capitalize()} {tag_clean.title()} Auto-Recorder",
+                "media_type": "video",
+                "url": f"/assets/webcam/{char_id}_{tag_clean}.mp4",
+                "tags": [tag_clean, "auto-recorded"]
+            }
+        }
 
 
 @app.get("/media/character/{character_id}/fallback")

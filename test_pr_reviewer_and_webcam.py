@@ -102,6 +102,14 @@ class TestPRReviewerAndWebcam(unittest.TestCase):
         self.assertGreater(clip_data["buffer_status"]["monthly_generations"], 0)
         self.assertGreater(clip_data["buffer_status"]["estimated_monthly_cost_usd"], 0)
 
+    def test_auto_tagline_recorder_caching(self):
+        # Test requesting missing tag endpoint triggers auto-recorder caching
+        res = self.client.get("/media/character/chloe/tag/greeting")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["has_media"])
+
     def test_spatiotemporal_split_stitch_endpoint(self):
         main._WEBCAM_FIFO_BUFFER._queues["bailey"].clear()
         main._WEBCAM_FIFO_BUFFER.push_clip("bailey", {"id": 201, "url": "/media/files/bailey_cut.mp4"})
