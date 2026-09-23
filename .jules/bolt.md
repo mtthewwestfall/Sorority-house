@@ -9,3 +9,7 @@
 ## 2026-09-12 - N+1 Persona Difficulty DB Lookups in Roster Loops
 **Learning:** `roster()` returns persona rows containing the `difficulty` column, but calling `difficulty_for(girl)` inside `GET /roster` and `GET /state` loops opens and closes N sequential DB connections (`SELECT difficulty FROM personas WHERE girl=%s`) for N roster items. Using pre-fetched `r.get("difficulty")` or `row.get("difficulty")` in roster iterations and backing `difficulty_for()` with an in-memory TTL dictionary cache eliminates N DB queries per request (reducing DB connection opens from N+1 down to 1 for `/roster`).
 **Action:** Always check if iteration items already contain the needed attribute before calling individual lookup helpers, and add in-memory TTL caching to single-entity getter functions called in hot paths.
+
+## 2026-09-23 - Keyhole Config DB Query Churn
+**Learning:** Calling `get_keyhole_config()` opens and closes DB connections to query `house_rules WHERE key LIKE 'kh_%'` on multiple endpoints (e.g. package listing, purchases, limits). Adding an in-memory TTL dictionary cache (`_KEYHOLE_CONFIG_CACHE` with 60s TTL) and invalidating it on `admin_set_keyhole_config()` eliminates repetitive DB connections on hot pricing and limit lookup paths.
+**Action:** Always wrap global/semi-static database configuration lookups with an in-memory TTL cache and clear the cache in corresponding mutation handlers.
