@@ -11237,21 +11237,18 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
     if upload:
         return upload
 
-    if explicit_asset_failed and strict:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
+    if explicit_asset_failed or asset_id:
+        if strict:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
+        return None
 
     if cid0 in ("chloe", "bailey"):
         owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid0}.jpg")
         data = _image_bytes_at(owner)
         if data:
             return data
-
-    if asset_id and strict:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
 
     return None
 
