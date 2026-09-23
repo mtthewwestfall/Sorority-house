@@ -65,8 +65,8 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertNotIn("carmen", girl_slugs)
         self.assertNotIn("valentina", girl_slugs)
         self.assertEqual(girl_slugs, ["chloe", "bailey"])
-        self.assertTrue(girls[0]["avatar_url"].endswith("/assets/IMG_3542.jpeg"))
-        self.assertTrue(girls[1]["avatar_url"].endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(girls[0]["avatar_url"].endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(girls[1]["avatar_url"].endswith("/assets/IMG_3542.jpeg"))
 
     @patch("bot._get")
     def test_fetch_roster_injects_chloe_and_replaces_house_portrait(self, mock_get):
@@ -82,34 +82,34 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         mock_get.return_value = mock_resp
         girls = bot._fetch_roster("fake-token")["girls"]
         self.assertEqual([g["girl"] for g in girls], ["chloe", "bailey"])
-        self.assertTrue(girls[0]["avatar_url"].endswith("/assets/IMG_3542.jpeg"))
-        self.assertTrue(girls[1]["avatar_url"].endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(girls[0]["avatar_url"].endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(girls[1]["avatar_url"].endswith("/assets/IMG_3542.jpeg"))
         self.assertNotIn("dakota.jpg", girls[1]["avatar_url"])
 
     def test_portrait_url_uses_keyhole_door_files(self):
         chloe = bot._portrait_url({"girl": "chloe", "avatar_url": ""})
         bailey = bot._portrait_url({"girl": "bailey", "avatar_url": "assets/bailey.jpg"})
-        self.assertTrue(chloe.endswith("/assets/IMG_3542.jpeg"))
-        self.assertTrue(bailey.endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(chloe.endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(bailey.endswith("/assets/IMG_3542.jpeg"))
         self.assertNotEqual(chloe, bailey)
-        swapped = "https://keyhole-latest-production.up.railway.app/assets/IMG_3543.jpeg"
-        self.assertTrue(bot._portrait_url({"girl": "chloe", "avatar_url": swapped}).endswith("IMG_3542.jpeg"))
+        swapped = "https://keyhole-latest-production.up.railway.app/assets/IMG_3542.jpeg"
+        self.assertTrue(bot._portrait_url({"girl": "chloe", "avatar_url": swapped}).endswith("IMG_3543.jpeg"))
         dakota = bot._portrait_url({"girl": "dakota", "avatar_url": "assets/dakota.jpg?v=3"})
         self.assertEqual(dakota, bot.SITE_URL + "/assets/dakota.jpg?v=3")
         self.assertEqual(bot._portrait_url({"girl": "dakota", "avatar_url": "https://evil.example/a.jpg"}), "")
 
     def test_preview_uses_door_photo_unless_video(self):
         url, kind = bot._resolve_preview("chloe", "data:image/svg+xml;utf8,<svg></svg>", "image")
-        self.assertTrue(url.endswith("/assets/IMG_3542.jpeg"))
+        self.assertTrue(url.endswith("/assets/IMG_3543.jpeg"))
         self.assertEqual(kind, "photo")
         url, kind = bot._resolve_preview("bailey", "assets/bailey.jpg", "image")
-        self.assertTrue(url.endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(url.endswith("/assets/IMG_3542.jpeg"))
         self.assertEqual(kind, "photo")
         video = bot.SITE_URL + "/media/files/bailey.mp4"
         url, kind = bot._resolve_preview("bailey", "/media/files/bailey.mp4", "video")
         self.assertEqual((url, kind), (video, "video"))
         url, kind = bot._resolve_preview("bailey", "https://evil.example/clip.mp4", "video")
-        self.assertTrue(url.endswith("/assets/IMG_3543.jpeg"))
+        self.assertTrue(url.endswith("/assets/IMG_3542.jpeg"))
         self.assertEqual(kind, "photo")
 
     def test_cmd_models_sends_both_door_portraits(self):
@@ -132,8 +132,8 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertEqual(send.await_count, 2)
         self.assertEqual(send.await_args_list[0].args[1]["girl"], "chloe")
         self.assertEqual(send.await_args_list[1].args[1]["girl"], "bailey")
-        self.assertTrue(send.await_args_list[0].args[1]["avatar_url"].endswith("IMG_3542.jpeg"))
-        self.assertTrue(send.await_args_list[1].args[1]["avatar_url"].endswith("IMG_3543.jpeg"))
+        self.assertTrue(send.await_args_list[0].args[1]["avatar_url"].endswith("IMG_3543.jpeg"))
+        self.assertTrue(send.await_args_list[1].args[1]["avatar_url"].endswith("IMG_3542.jpeg"))
         update.effective_message.reply_text.assert_called()
 
     def test_keyhole_door_avatar_migration_leaves_other_girls(self):
@@ -141,13 +141,13 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
             main._keyhole_door_avatar("bailey", "assets/bailey.jpg"),
             main.KEYHOLE_DOOR_AVATARS["bailey"],
         )
-        self.assertTrue(main.KEYHOLE_DOOR_AVATARS["bailey"].endswith("/assets/IMG_3543.jpeg"))
-        self.assertTrue(main.KEYHOLE_DOOR_AVATARS["chloe"].endswith("/assets/IMG_3542.jpeg"))
+        self.assertTrue(main.KEYHOLE_DOOR_AVATARS["bailey"].endswith("/assets/IMG_3542.jpeg"))
+        self.assertTrue(main.KEYHOLE_DOOR_AVATARS["chloe"].endswith("/assets/IMG_3543.jpeg"))
         self.assertEqual(main._keyhole_door_avatar("chloe", ""), main.KEYHOLE_DOOR_AVATARS["chloe"])
         self.assertIsNone(main._keyhole_door_avatar("dakota", "assets/dakota.jpg"))
         self.assertIsNone(main._keyhole_door_avatar("bailey", "https://cdn.example.com/custom.png"))
         self.assertIsNone(main._keyhole_door_avatar("bailey", main.KEYHOLE_DOOR_AVATARS["bailey"]))
-        swapped = "https://keyhole-latest-production.up.railway.app/assets/IMG_3542.jpeg"
+        swapped = "https://keyhole-latest-production.up.railway.app/assets/IMG_3543.jpeg"
         self.assertEqual(main._keyhole_door_avatar("bailey", swapped), main.KEYHOLE_DOOR_AVATARS["bailey"])
 
         class Cur:
@@ -170,8 +170,8 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertIn("bailey", cur.selects[0])
         updated = {girl: url for url, girl in cur.updates}
         self.assertEqual(set(updated), {"chloe", "bailey"})
-        self.assertTrue(updated["chloe"].endswith("IMG_3542.jpeg"))
-        self.assertTrue(updated["bailey"].endswith("IMG_3543.jpeg"))
+        self.assertTrue(updated["chloe"].endswith("IMG_3543.jpeg"))
+        self.assertTrue(updated["bailey"].endswith("IMG_3542.jpeg"))
 
     def test_send_chat_disallowed_model_raises(self):
         """Verify _send_chat rejects disallowed models."""
