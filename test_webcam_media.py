@@ -672,11 +672,10 @@ class TestGeneratorReferenceLoading(unittest.TestCase):
         self.assertIn("missing file", detail)
         self.assertNotIn("locally stored", detail)
 
-    @patch("main._character_reference", return_value=None)
     @patch("main._save_generated_asset", return_value={"id": 1, "url": "/media/files/a.png"})
     @patch("main.generate_avatar", return_value=("image/png", "cG5n"))
     @patch("main.db")
-    def test_primary_without_any_skin_still_generates(self, mock_db, _avatar, _save, _ref):
+    def test_primary_without_any_skin_still_generates(self, mock_db, _avatar, _save):
         mock_db.return_value = self._asset_db(None)
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(main, "UPLOAD_DIR", folder):

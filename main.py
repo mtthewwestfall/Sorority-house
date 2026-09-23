@@ -306,7 +306,7 @@ import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set, Tuple
 
 import requests
 import psycopg2
@@ -1512,6 +1512,18 @@ def init_db():
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_keyhole_notifications_dedupe
                     ON keyhole_notifications (show_id, notification_type, target);
+
+                -- Persistent clip history and zero-repeat tracking
+                CREATE TABLE IF NOT EXISTS keyhole_clip_history (
+                    id            BIGSERIAL PRIMARY KEY,
+                    user_id       TEXT NOT NULL,
+                    character_id  TEXT NOT NULL,
+                    clip_id       TEXT NOT NULL,
+                    show_id       TEXT NOT NULL DEFAULT '',
+                    served_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (user_id, character_id, clip_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_keyhole_clip_history_user_char ON keyhole_clip_history (user_id, character_id);
             """)
             # Only the backend (table owner, BYPASSRLS on Supabase) touches these tables.
             # RLS with no policies shuts the door on anything else, e.g. the anon REST API.
@@ -3200,58 +3212,6 @@ pre{white-space:pre-wrap;margin:0}
       </div>
     </div>
 
-    <div class="kh-show-card" style="margin-top:16px; border-color: var(--ok);">
-      <h3 style="margin-top:0; margin-bottom:6px; font-size:18px; color:var(--ok);">🎮 FREE INTERACTIVE DEMO SHOW BUILDER</h3>
-      <p style="margin:0 0 14px 0; font-size:13px; color:var(--mut);">Pick whatever duration, girl, and show type (Private, Group, Preview). 100% Free on Admin End ($0.00) with Live Interactive Stream Demo.</p>
-
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <div style="flex:1; min-width:140px;">
-            <label class="kh-label" style="display:block; margin-bottom:4px;">Select Girl</label>
-            <select id="customDemoGirl" style="width:100%; height:44px; font-size:15px; background:#121218; color:#fff; border:1px solid var(--line); border-radius:8px; padding:0 8px;">
-              <option value="chloe">Chloe</option>
-              <option value="bailey">Bailey</option>
-              <option value="carmen">Carmen</option>
-              <option value="valentina">Valentina</option>
-              <option value="riley">Riley</option>
-              <option value="maya">Maya</option>
-            </select>
-          </div>
-
-          <div style="flex:1; min-width:140px;">
-            <label class="kh-label" style="display:block; margin-bottom:4px;">Show Type</label>
-            <select id="customDemoType" style="width:100%; height:44px; font-size:15px; background:#121218; color:#fff; border:1px solid var(--line); border-radius:8px; padding:0 8px;">
-              <option value="private">Private (1-on-1)</option>
-              <option value="public">Group (Public Lounge)</option>
-              <option value="preview">Free Preview</option>
-            </select>
-          </div>
-
-          <div style="flex:1; min-width:140px;">
-            <label class="kh-label" style="display:block; margin-bottom:4px;">Duration (Minutes)</label>
-            <input id="customDemoMin" type="number" value="15" min="1" max="180" style="width:100%; height:44px; font-size:15px; background:#121218; color:#fff; border:1px solid var(--line); border-radius:8px; padding:0 10px;" placeholder="e.g. 15, 30, 60">
-          </div>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; background:#121218; padding:10px 14px; border-radius:8px; border:1px solid var(--line);">
-          <span class="kh-label">Admin Price:</span>
-          <span style="color:var(--ok); font-weight:700; font-size:16px;">$0.00 (100% Free Demo)</span>
-        </div>
-
-        <button type="button" class="kh-btn kh-btn-start" onclick="launchCustomDemoShow()">
-          🚀 LAUNCH FREE CUSTOM DEMO SHOW
-        </button>
-
-        <div id="customDemoResult" style="display:none; margin-top:12px; background:#000; padding:14px; border-radius:10px; border:1px solid var(--ok);">
-          <div style="font-weight:700; color:var(--ok); margin-bottom:8px; font-size:15px;" id="demoResultTitle">LIVE DEMO ACTIVE</div>
-          <div id="demoResultDetail" style="font-size:13px; color:var(--mut); margin-bottom:10px;"></div>
-          <div class="kh-preview-box">
-            <video id="demoVideoPlayer" autoplay playsinline loop muted controls style="width:100%; max-height:260px; display:block;"></video>
-          </div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;" id="demoBeatButtons"></div>
-        </div>
-      </div>
-    </div>
 
     <div class="kh-show-card" style="margin-top:8px;">
       <h3 style="margin-top:0; margin-bottom:12px; font-size:18px; color:var(--acc);">NEW PUBLIC SHOW</h3>
@@ -3927,55 +3887,6 @@ async function saveMasterRefText() {
     toast(activeRefChar + ' master reference saved');
     await loadCharacterRefs();
   } catch (e) { toast(e.message, true); }
-}
-async function launchCustomDemoShow() {
-  const girl = document.getElementById('customDemoGirl').value;
-  const showType = document.getElementById('customDemoType').value;
-  const duration = parseInt(document.getElementById('customDemoMin').value || '15', 10);
-
-  try {
-    const res = await api('/admin/keyhole/shows/custom-demo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': SECRET },
-      body: JSON.stringify({
-        character_id: girl,
-        show_type: showType,
-        duration_minutes: duration
-      })
-    });
-    if (res && res.ok) {
-      toast('Free Demo Show Launched for ' + girl + ' (' + showType + ', ' + duration + ' min)');
-      const box = document.getElementById('customDemoResult');
-      box.style.display = 'block';
-      document.getElementById('demoResultTitle').innerText = '🟢 LIVE DEMO: ' + res.show.title;
-      document.getElementById('demoResultDetail').innerHTML = 'Show ID: <b>' + res.show.id + '</b> | Duration: <b>' + duration + ' mins</b> | Price: <b style="color:var(--ok)">$0.00 FREE</b>';
-
-      const vid = document.getElementById('demoVideoPlayer');
-      vid.src = '/assets/webcam/' + girl + '_idle.mp4';
-      vid.play().catch(() => {});
-
-      const beatBox = document.getElementById('demoBeatButtons');
-      beatBox.innerHTML = '';
-      ['idle', 'tease', 'give', 'stop', 'presence'].forEach(beat => {
-        const btn = document.createElement('button');
-        btn.className = 's';
-        btn.style.flex = '1';
-        btn.innerText = beat.toUpperCase();
-        btn.onclick = () => {
-          vid.src = '/assets/webcam/' + girl + '_' + beat + '.mp4';
-          vid.play().catch(() => {});
-          toast('Switched demo beat to: ' + beat);
-        };
-        beatBox.appendChild(btn);
-      });
-
-      if (typeof loadShows === 'function') loadShows();
-    } else {
-      toast('Demo launch failed: ' + ((res && res.detail) || 'Error'), true);
-    }
-  } catch (err) {
-    toast('Demo launch failed: ' + err.message, true);
-  }
 }
 async function saveAppearanceRefText() {
   const value = ($('#refAppearanceText')?.value || '').trim();
@@ -10050,67 +9961,6 @@ class PublishPreviewIn(BaseModel):
     publish_website: bool = True
 
 
-class CustomDemoShowIn(BaseModel):
-    character_id: str = "chloe"
-    show_type: str = "private"            # 'preview', 'public', or 'private'
-    duration_minutes: int = 15           # pick whatever time you want!
-    title: Optional[str] = ""
-
-
-@app.post("/admin/keyhole/shows/custom-demo", dependencies=[Depends(admin_required)])
-def admin_custom_demo_show(body: CustomDemoShowIn):
-    """
-    Launch an interactive custom demo show: pick whatever time, girl, or show type (private, group, preview).
-    100% free ($0.00) on admin end with is_demo: True and instant LIVE status.
-    """
-    cid = _keyhole_character(body.character_id)
-    show_type = (body.show_type or "private").strip().lower()
-    if show_type not in ("preview", "public", "private"):
-        show_type = "private"
-    duration = max(1, int(body.duration_minutes or 15))
-    show_id = f"demo_{show_type}_{cid}_{secrets.token_hex(4)}"
-    title = (body.title or "").strip() or f"FREE ADMIN DEMO: {cid.capitalize()} {show_type.capitalize()} ({duration} min)"
-
-    show = {
-        "id": show_id,
-        "character": cid,
-        "character_id": cid,
-        "show_type": show_type,
-        "duration_minutes": duration,
-        "price": 0.00,
-        "currency": "USD",
-        "title": title,
-        "description": f"Custom interactive admin demo show ({duration} minutes, free on admin end).",
-        "status": "LIVE",
-        "is_demo": True,
-        "preview_approved": True,
-        "preview_status": "APPROVED",
-        "published_telegram": True,
-        "published_website": True,
-        "scheduled_at": datetime.now(timezone.utc).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }
-    _save_show_db(show)
-
-    plates = _preview_plates(cid)
-    stream_url = f"/keyhole/webcam/auto-clip"
-
-    return {
-        "ok": True,
-        "free_admin_demo": True,
-        "show": show,
-        "plates": plates,
-        "stream_url": stream_url,
-        "player_demo": {
-            "character": cid,
-            "show_type": show_type,
-            "duration_minutes": duration,
-            "price_usd": 0.00,
-            "status": "LIVE",
-            "interactive_controls": ["idle", "tease", "give", "stop", "presence"]
-        }
-    }
 
 
 @app.post("/admin/keyhole/shows/{show_id}/publish-preview", dependencies=[Depends(admin_required)])
@@ -11417,10 +11267,15 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
         return None
 
     if cid0 in ("chloe", "bailey"):
-        owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid0}.jpg")
-        data = _image_bytes_at(owner)
+        upload_skins = os.path.join(UPLOAD_DIR, "keyhole_skins")
+        repo_skins = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins")
+        data = _image_bytes_at(os.path.join(upload_skins, f"{cid0}.jpg"))
         if data:
             return data
+        if os.path.basename(os.path.normpath(UPLOAD_DIR)) == "uploads" or os.path.exists(upload_skins):
+            data = _image_bytes_at(os.path.join(repo_skins, f"{cid0}.jpg"))
+            if data:
+                return data
 
     if asset_id and strict:
         raise HTTPException(
@@ -12281,6 +12136,199 @@ def get_media_asset_detail(asset_id: int):
             return {"ok": True, "asset": dict(asset)}
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# PERSISTENT CLIP HISTORY, ZERO-REPEAT, & 85/15 PLAYLIST ASSEMBLY
+# ---------------------------------------------------------------------------
+
+BANKED_CLIP_RATIO = 0.85
+NEW_CLIP_RATIO = 0.15
+
+_IN_MEMORY_CLIP_HISTORY: Set[Tuple[str, str, str]] = set()
+
+def record_clip_history(user_id: str, character_id: str, clip_id: str, show_id: str = "") -> bool:
+    """Record that a clip was served to a specific user and character."""
+    uid = (user_id or "").strip()
+    cid = (character_id or "").strip().lower()
+    clip = (clip_id or "").strip()
+    if not uid or not cid or not clip:
+        return False
+
+    _IN_MEMORY_CLIP_HISTORY.add((uid, cid, clip))
+
+    if DATABASE_URL:
+        try:
+            conn = db()
+            if conn is not None:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO keyhole_clip_history (user_id, character_id, clip_id, show_id)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (user_id, character_id, clip_id) DO UPDATE SET served_at = now()
+                        """, (uid, cid, clip, show_id or ""))
+                        conn.commit()
+                finally:
+                    conn.close()
+        except Exception as exc:
+            logger.warning("Failed to record clip history to DB: %s", exc)
+    return True
+
+
+def get_served_clip_ids(user_id: str, character_id: str) -> Set[str]:
+    """Get the set of clip_ids previously served to this specific user + character."""
+    uid = (user_id or "").strip()
+    cid = (character_id or "").strip().lower()
+    if not uid or not cid:
+        return set()
+
+    served = {clip for (u, c, clip) in _IN_MEMORY_CLIP_HISTORY if u == uid and c == cid}
+
+    if DATABASE_URL:
+        try:
+            conn = db()
+            if conn is not None:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT clip_id FROM keyhole_clip_history
+                            WHERE user_id = %s AND character_id = %s
+                        """, (uid, cid))
+                        rows = cur.fetchall() or []
+                        for r in rows:
+                            if isinstance(r, dict):
+                                served.add(str(r.get("clip_id", "")))
+                            elif isinstance(r, (list, tuple)) and len(r) > 0:
+                                served.add(str(r[0]))
+                finally:
+                    conn.close()
+        except Exception as exc:
+            logger.warning("Failed to fetch clip history from DB: %s", exc)
+
+    return served
+
+
+def calculate_85_15_counts(total_clips: int) -> Tuple[int, int]:
+    """
+    Calculate (banked_count, new_count) split for a given total playlist size using 85/15 ratio.
+    Deterministic rounding for small sizes:
+      0 -> (0, 0)
+      1 -> (1, 0)
+      2 -> (2, 0)
+      3 -> (3, 0)
+      5 -> (4, 1)  (5 * 0.85 = 4.25 -> 4 banked, 1 new)
+      10 -> (9, 1) (10 * 0.85 = 8.5 -> 9 banked, 1 new)
+    """
+    if total_clips <= 0:
+        return (0, 0)
+    if total_clips == 1:
+        return (1, 0)
+
+    banked = int(round(total_clips * BANKED_CLIP_RATIO + 1e-5))
+    if banked > total_clips:
+        banked = total_clips
+    if banked < 1:
+        banked = 1
+    new_clips = total_clips - banked
+    return (banked, new_clips)
+
+
+def assemble_clip_playlist(
+    user_id: str,
+    character_id: str,
+    total_clips: int,
+    banked_pool: List[Dict[str, Any]],
+    new_generator_fn: Optional[Any] = None,
+    show_id: str = "",
+    is_preview: bool = False
+) -> Dict[str, Any]:
+    """
+    Assemble an 85% banked / 15% new clip playlist respecting zero-repeat history.
+    1. Filters banked_pool to exclude clips previously served to (user_id, character_id).
+    2. Calculates target banked vs new clip counts using 85/15 split.
+    3. If banked pool is exhausted, safely fills remaining slots with new clips or available pool items without infinite loops.
+    4. Records served clips into persistent history.
+    """
+    uid = (user_id or "").strip()
+    cid = (character_id or "").strip().lower()
+    total = max(0, int(total_clips))
+
+    if total == 0:
+        return {
+            "ok": True,
+            "user_id": uid,
+            "character_id": cid,
+            "total_clips": 0,
+            "banked_served": 0,
+            "new_served": 0,
+            "playlist": [],
+            "exhausted_banked": False
+        }
+
+    target_banked, target_new = calculate_85_15_counts(total)
+
+    served_ids = get_served_clip_ids(uid, cid) if uid else set()
+
+    # Filter banked_pool for zero-repeat
+    eligible_banked = []
+    seen_in_batch = set()
+    for clip in (banked_pool or []):
+        clip_id = str(clip.get("id") or clip.get("url") or clip.get("clip_id") or "").strip()
+        if not clip_id:
+            continue
+        if clip_id not in served_ids and clip_id not in seen_in_batch:
+            seen_in_batch.add(clip_id)
+            eligible_banked.append(clip)
+
+    exhausted_banked = len(eligible_banked) < target_banked
+
+    selected_banked = eligible_banked[:target_banked]
+    needed_new = target_new + (target_banked - len(selected_banked))
+
+    selected_new = []
+    if needed_new > 0 and new_generator_fn is not None:
+        for i in range(needed_new):
+            try:
+                new_clip = new_generator_fn(cid, i)
+                if new_clip and isinstance(new_clip, dict):
+                    new_clip.setdefault("is_new_synthesis", True)
+                    selected_new.append(new_clip)
+            except Exception as exc:
+                logger.warning("New clip generation failed during playlist assembly: %s", exc)
+                break
+
+    # If remaining slots needed due to exhausted banked or missing generator, fill safely from available pool without infinite loop
+    remaining_needed = total - (len(selected_banked) + len(selected_new))
+    fallback_clips = []
+    if remaining_needed > 0:
+        for clip in (banked_pool or []):
+            if len(fallback_clips) >= remaining_needed:
+                break
+            fallback_clips.append(clip)
+
+    playlist = selected_banked + selected_new + fallback_clips
+    playlist = playlist[:total]
+
+    # Record served clips to history
+    for clip in playlist:
+        clip_id = str(clip.get("id") or clip.get("url") or clip.get("clip_id") or "").strip()
+        if uid and clip_id:
+            record_clip_history(uid, cid, clip_id, show_id=show_id)
+
+    return {
+        "ok": True,
+        "user_id": uid,
+        "character_id": cid,
+        "total_clips": len(playlist),
+        "target_banked": target_banked,
+        "target_new": target_new,
+        "banked_served": len(selected_banked),
+        "new_served": len(selected_new),
+        "fallback_served": len(fallback_clips),
+        "exhausted_banked": exhausted_banked,
+        "playlist": playlist
+    }
 
 
 # ---------------------------------------------------------------------------
