@@ -161,8 +161,8 @@ API CONTRACT implemented here (point your chat app at these):
                                                             art only, never the persona doc.
                                                             Chloe and Bailey avatar_url values
                                                             are the Keyhole door photos
-                                                            (IMG_3542.jpeg blonde, IMG_3543.jpeg
-                                                            dark hair) unless an admin saved a
+                                                            (chloe-1.jpg, bailey-1.jpg)
+                                                            unless an admin saved a
                                                             different https portrait.
   POST /admin/console/girl {girl,name,door_title,blurb,avatar_url,min_tier,sort_order,
                             active,difficulty,persona}     -> add or rewrite a sister; the
@@ -622,15 +622,20 @@ DOOR_RULE_DEFAULTS = {"doors_locked": False, "door_set": DOOR_PAIR, "unlock_stag
 def tier_rank(tier):
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
 
-# Same files as the Keyhole customer doors (rooms.html). Chloe is the blonde
-# city-window room; Bailey is dark hair. Do not swap these two.
+# Same character photos as the Keyhole customer doors (rooms.html).
+# Filenames are per-character: chloe-1.jpg is Chloe, bailey-1.jpg is Bailey.
+# (The old IMG_3542/IMG_3543 mapping contradicted this file's own comments
+# about which file showed which girl; the explicit names end that ambiguity.)
+# Do not swap these two.
 KEYHOLE_DOOR_ORIGIN = "https://keyhole-latest-production.up.railway.app"
 KEYHOLE_DOOR_AVATARS = {
-    "chloe": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3543.jpeg",
-    "bailey": KEYHOLE_DOOR_ORIGIN + "/assets/IMG_3542.jpeg",
+    "chloe": KEYHOLE_DOOR_ORIGIN + "/assets/chloe-1.jpg",
+    "bailey": KEYHOLE_DOOR_ORIGIN + "/assets/bailey-1.jpg",
 }
 _KEYHOLE_DOOR_FILES = (
     "IMG_3542.jpeg", "IMG_3543.jpeg", "IMG_3547.jpeg", "IMG_3548.jpeg",
+    "chloe-room.png", "bailey-room.jpg",
+    "chloe-1.jpg", "bailey-1.jpg",
 )
 
 # The roster is the personas table, not this file, so a new sister can be added
