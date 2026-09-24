@@ -691,5 +691,217 @@ class TestGeneratorReferenceLoading(unittest.TestCase):
         self.assertFalse(res.json()["used_reference"])
 
 
+class TestMediaServeRotation(unittest.TestCase):
+    """detect_and_serve_media must not repeat a video/picture within 30 days."""
+
+    LIBRARY = [
+        {"type": "video", "url": "https://cdn.example/v1.mp4"},
+        {"type": "video", "url": "https://cdn.example/v2.mp4"},
+        {"type": "video", "url": "https://cdn.example/v3.mp4"},
+    ]
+
+    def _mock_db(self, history_rows):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.side_effect = [
+            None,  # live private-show check
+            None,  # live public-show entitlement check
+            {"video_replies_left": 5, "fresh_videos_left": 0},
+            {"media_library": list(self.LIBRARY), "avatar_url": "", "name": "Chloe"},
+        ]
+        mock_cur.fetchall.return_value = history_rows
+        return mock_conn, mock_cur
+
+    @patch("main.db")
+    def test_skips_seen_inside_window_and_records_serve(self, mock_db):
+        mock_conn, mock_cur = self._mock_db([
+            {"media_url": "https://cdn.example/v1.mp4", "last_served": "2026-09-20T00:00:00+00:00"},
+        ])
+        mock_db.return_value = mock_conn
+        with patch("main.random.choice", side_effect=lambda seq: seq[0]):
+            item = main.detect_and_serve_media("u1", "chloe", "send me a video")
+        self.assertEqual(item["url"], "https://cdn.example/v2.mp4")
+        inserts = [c for c in mock_cur.execute.call_args_list
+                   if "INSERT INTO media_serve_history" in str(c.args[0])]
+        self.assertEqual(len(inserts), 1)
+        self.assertIn("https://cdn.example/v2.mp4", str(inserts[0]))
+        mock_conn.commit.assert_called()
+
+    @patch("main.db")
+    def test_falls_back_to_least_recent_when_all_seen(self, mock_db):
+        mock_conn, mock_cur = self._mock_db([
+            {"media_url": "https://cdn.example/v1.mp4", "last_served": "2026-09-22T00:00:00+00:00"},
+            {"media_url": "https://cdn.example/v2.mp4", "last_served": "2026-09-21T00:00:00+00:00"},
+            {"media_url": "https://cdn.example/v3.mp4", "last_served": "2026-09-20T00:00:00+00:00"},
+        ])
+        mock_db.return_value = mock_conn
+        item = main.detect_and_serve_media("u1", "chloe", "send me a video")
+        # least recently served = v3
+        self.assertEqual(item["url"], "https://cdn.example/v3.mp4")
+
+    @patch("main.db")
+    def test_non_media_message_serves_nothing(self, mock_db):
+        mock_conn, _ = self._mock_db([])
+        mock_db.return_value = mock_conn
+        self.assertIsNone(main.detect_and_serve_media("u1", "chloe", "hello there"))
+
+
+class TestShowGating(unittest.TestCase):
+    """Live private/group shows are webcam-only: no premade video sets."""
+
+    LIBRARY = [
+        {"type": "video", "url": "https://cdn.example/v1.mp4"},
+        {"type": "video", "url": "https://cdn.example/v2.mp4"},
+    ]
+    CLIP = {"id": "cam1", "url": "https://cam.example/live1.mp4", "title": "Live webcam"}
+
+    def _mock_db(self, private_hit, public_hit):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.side_effect = [
+            {"1": 1} if private_hit else None,
+            {"1": 1} if public_hit else None,
+            {"video_replies_left": 5, "fresh_videos_left": 3},
+            {"media_library": list(self.LIBRARY), "avatar_url": "", "name": "Chloe"},
+        ]
+        mock_cur.fetchall.return_value = []
+        return mock_conn, mock_cur
+
+    def _serve(self, mock_db, private_hit, public_hit):
+        mock_conn, mock_cur = self._mock_db(private_hit, public_hit)
+        mock_db.return_value = mock_conn
+        with patch.object(main._WEBCAM_FIFO_BUFFER, "pop_clip", return_value=dict(self.CLIP)):
+            item = main.detect_and_serve_media("u1", "chloe", "send me a video")
+        return item, mock_cur
+
+    @patch("main.db")
+    def test_private_show_serves_webcam_not_library(self, mock_db):
+        item, _ = self._serve(mock_db, private_hit=True, public_hit=False)
+        self.assertEqual(item["type"], "video")
+        self.assertEqual(item["url"], "https://cam.example/live1.mp4")
+
+    @patch("main.db")
+    def test_group_show_serves_webcam_not_library(self, mock_db):
+        item, _ = self._serve(mock_db, private_hit=False, public_hit=True)
+        self.assertEqual(item["type"], "video")
+        self.assertEqual(item["url"], "https://cam.example/live1.mp4")
+
+    @patch("main.db")
+    def test_show_mode_does_not_debit_video_credits(self, mock_db):
+        _, mock_cur = self._serve(mock_db, private_hit=True, public_hit=False)
+        updates = [str(c.args[0]) for c in mock_cur.execute.call_args_list
+                   if "UPDATE users SET" in str(c.args[0])]
+        self.assertEqual(updates, [])
+
+    @patch("main.db")
+    def test_no_show_serves_library_video(self, mock_db):
+        item, _ = self._serve(mock_db, private_hit=False, public_hit=False)
+        self.assertIn(item["url"], ["https://cdn.example/v1.mp4", "https://cdn.example/v2.mp4"])
+
+    @patch("main.db")
+    def test_show_with_empty_webcam_buffer_returns_notice(self, mock_db):
+        mock_conn, mock_cur = self._mock_db(private_hit=True, public_hit=False)
+        mock_db.return_value = mock_conn
+        with patch.object(main._WEBCAM_FIFO_BUFFER, "pop_clip", return_value=None):
+            item = main.detect_and_serve_media("u1", "chloe", "send me a video")
+        self.assertEqual(item["type"], "notice")
+        self.assertNotIn("cdn.example", item["text"])
+
+
+class TestPlatesRotation(unittest.TestCase):
+    """The stage manifest obeys the same 30-day no-repeat rule as chat."""
+
+    ASSETS = [
+        {"character_id": "chloe", "url": "https://cdn.example/p1.mp4",
+         "media_type": "video", "tags": ["idle", "variant:cut-a"], "file_path": ""},
+        {"character_id": "chloe", "url": "https://cdn.example/p1.mp4",
+         "media_type": "video", "tags": ["idle", "variant:cut-b"], "file_path": ""},
+        {"character_id": "chloe", "url": "https://cdn.example/p2.mp4",
+         "media_type": "video", "tags": ["tease"], "file_path": ""},
+    ]
+
+    def _mock_db(self, history_rows):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchall.side_effect = [list(self.ASSETS), [], history_rows]
+        return mock_conn, mock_cur
+
+    def _manifest(self, mock_db, history_rows, signed_in=True):
+        mock_conn, mock_cur = self._mock_db(history_rows)
+        mock_db.return_value = mock_conn
+        with patch.object(main, "DATABASE_URL", "postgresql://test"):
+            if signed_in:
+                with patch("main.current_user", return_value={"user_id": "u1"}):
+                    body = main.keyhole_plates(authorization="Bearer tok")
+            else:
+                with patch("main.current_user",
+                           side_effect=HTTPException(status_code=401, detail="Login required")):
+                    body = main.keyhole_plates(authorization="")
+        return body, mock_cur
+
+    @patch("main.db")
+    def test_seen_plate_filtered_for_signed_in_user(self, mock_db):
+        history = [{"media_url": "https://cdn.example/p1.mp4", "variant": "cut-a",
+                    "last_served": "2026-09-20T00:00:00+00:00"}]
+        body, _ = self._manifest(mock_db, history, signed_in=True)
+        idle_urls = [(p["url"], p["variant"]) for p in body["characters"]["chloe"]["idle"]]
+        self.assertNotIn(("https://cdn.example/p1.mp4", "cut-a"), idle_urls)
+        # same url, new cut still allowed
+        self.assertIn(("https://cdn.example/p1.mp4", "cut-b"), idle_urls)
+
+    @patch("main.db")
+    def test_anonymous_user_gets_unfiltered_manifest(self, mock_db):
+        history = [{"media_url": "https://cdn.example/p1.mp4", "variant": "cut-a",
+                    "last_served": "2026-09-20T00:00:00+00:00"}]
+        body, _ = self._manifest(mock_db, history, signed_in=False)
+        idle_urls = [(p["url"], p["variant"]) for p in body["characters"]["chloe"]["idle"]]
+        self.assertIn(("https://cdn.example/p1.mp4", "cut-a"), idle_urls)
+
+    @patch("main.db")
+    def test_fully_seen_beat_still_gets_fallback(self, mock_db):
+        history = [
+            {"media_url": "https://cdn.example/p1.mp4", "variant": "cut-a",
+             "last_served": "2026-09-20T00:00:00+00:00"},
+            {"media_url": "https://cdn.example/p1.mp4", "variant": "cut-b",
+             "last_served": "2026-09-20T00:00:00+00:00"},
+        ]
+        body, _ = self._manifest(mock_db, history, signed_in=True)
+        # idle beat had everything seen: auto-fill must keep the engine fed
+        self.assertTrue(len(body["characters"]["chloe"]["idle"]) > 0)
+
+
+class TestPlatePlayedEndpoint(unittest.TestCase):
+    """POST /keyhole/plates/played records stage plays into the rotation history."""
+
+    @patch("main.db")
+    def test_records_play(self, mock_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_db.return_value = mock_conn
+        body = main.PlatePlayedIn(character="Chloe", url="https://cdn.example/p1.mp4",
+                                  variant="cut-a", beat="idle")
+        res = main.keyhole_plate_played(body, user={"user_id": "u9"})
+        self.assertTrue(res["ok"])
+        inserts = [c for c in mock_cur.execute.call_args_list
+                   if "INSERT INTO media_serve_history" in str(c.args[0])]
+        self.assertEqual(len(inserts), 1)
+        params = inserts[0].args[1]
+        self.assertEqual(params[0], "u9")
+        self.assertEqual(params[1], "chloe")
+        self.assertEqual(params[2], "https://cdn.example/p1.mp4")
+        self.assertEqual(params[3], "cut-a")
+        mock_conn.commit.assert_called_once()
+
+    @patch("main.db")
+    def test_rejects_missing_url(self, mock_db):
+        with self.assertRaises(HTTPException) as ctx:
+            main.keyhole_plate_played(main.PlatePlayedIn(url="  "), user={"user_id": "u9"})
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

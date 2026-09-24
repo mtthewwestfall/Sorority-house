@@ -1485,6 +1485,26 @@ def init_db():
                 ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS updated_at   TIMESTAMPTZ NOT NULL DEFAULT now();
                 CREATE INDEX IF NOT EXISTS idx_media_assets_char ON media_assets (character_id);
 
+                -- KEYHOLE served-media rotation: per-user no-repeat history for
+                -- videos/pictures served in chat (DB-backed so it survives restarts).
+                CREATE TABLE IF NOT EXISTS media_serve_history (
+                    id         SERIAL PRIMARY KEY,
+                    user_id    TEXT NOT NULL,
+                    girl       TEXT NOT NULL DEFAULT '',
+                    media_url  TEXT NOT NULL,
+                    variant    TEXT NOT NULL DEFAULT '',
+                    media_type TEXT NOT NULL DEFAULT '',
+                    served_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                ALTER TABLE media_serve_history ADD COLUMN IF NOT EXISTS user_id    TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_serve_history ADD COLUMN IF NOT EXISTS girl       TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_serve_history ADD COLUMN IF NOT EXISTS media_url  TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_serve_history ADD COLUMN IF NOT EXISTS variant    TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_serve_history ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT '';
+                ALTER TABLE media_serve_history ADD COLUMN IF NOT EXISTS served_at  TIMESTAMPTZ NOT NULL DEFAULT now();
+                CREATE INDEX IF NOT EXISTS idx_media_serve_history_user_girl
+                    ON media_serve_history (user_id, girl, served_at);
+
                 -- KEYHOLE Live WebCam Shows (Unified Engine & Admin Control Panel)
                 CREATE TABLE IF NOT EXISTS keyhole_shows (
                     show_id               TEXT PRIMARY KEY,
@@ -5082,6 +5102,95 @@ def telegram_link(body: TelegramLinkIn):
 
 MEDIA_REQUEST_KEYWORDS = ["picture", "photo", "pic", "video", "selfie", "snap", "image", "media"]
 
+# No-repeat window for media served in chat: a user is never served the same
+# video/picture twice within this window. DB-backed (media_serve_history) so it
+# survives restarts, unlike the in-memory WebcamClipBufferService history.
+MEDIA_ROTATION_DAYS = int(os.environ.get("MEDIA_ROTATION_DAYS", "30"))
+
+
+def _media_item_url(item) -> str:
+    """Stable identifier for a library item (dict with url, or plain url string)."""
+    if isinstance(item, dict):
+        return str(item.get("url") or "")
+    return str(item or "")
+
+
+def _media_item_variant(item) -> str:
+    """Variant tag for a library item (a 'new way' to see the same url), or ''."""
+    if isinstance(item, dict):
+        return str(item.get("variant") or "")
+    return ""
+
+
+def _seen_media_map(cur, user_id: str, girl: str, days: int = MEDIA_ROTATION_DAYS):
+    """{(media_url, variant): last_served} seen by this user+girl inside the window."""
+    window_start = datetime.now(timezone.utc) - timedelta(days=days)
+    cur.execute(
+        """SELECT media_url, variant, MAX(served_at) AS last_served
+             FROM media_serve_history
+            WHERE user_id=%s AND girl=%s AND served_at >= %s
+            GROUP BY media_url, variant""",
+        (user_id, girl, window_start),
+    )
+    rows = cur.fetchall() or []
+    return {(r["media_url"], r.get("variant") or ""): r["last_served"] for r in rows}
+
+
+def _record_media_serve(cur, user_id: str, girl: str, url: str, variant: str, media_type: str):
+    cur.execute(
+        "INSERT INTO media_serve_history (user_id, girl, media_url, variant, media_type)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (user_id, girl, url, variant or "", media_type),
+    )
+
+
+def _pick_rotated_media(cur, user_id: str, girl: str, items: list, media_type: str):
+    """Pick a media item the user has not been served in the last MEDIA_ROTATION_DAYS.
+
+    Identity is (url, variant): the same video re-cut a new way counts as new.
+    When everything was seen inside the window, serves the least-recently-served
+    item. Records the serve in media_serve_history. The caller must commit.
+    """
+    last_served = _seen_media_map(cur, user_id, girl)
+
+    unseen = [it for it in items
+              if (_media_item_url(it), _media_item_variant(it)) not in last_served]
+    if unseen:
+        chosen = random.choice(unseen)
+    else:
+        # Everything seen inside the window: serve the least recently served.
+        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        chosen = min(items, key=lambda it: last_served.get(
+            (_media_item_url(it), _media_item_variant(it))) or epoch)
+
+    _record_media_serve(cur, user_id, girl,
+                        _media_item_url(chosen), _media_item_variant(chosen), media_type)
+    return chosen
+
+
+def _user_in_live_show(cur, user_id: str) -> bool:
+    """True when the user is inside a live private show, or entitled to a live public (group) show.
+
+    During shows the only video is webcam — no premade video sets.
+    """
+    cur.execute(
+        """SELECT 1 FROM keyhole_shows
+            WHERE show_type='private' AND customer_id=%s
+              AND status IN ('READY', 'LIVE') LIMIT 1""",
+        (user_id,),
+    )
+    if cur.fetchone():
+        return True
+    cur.execute(
+        """SELECT 1 FROM keyhole_shows s
+             JOIN keyhole_entitlements e ON e.show_id = s.show_id
+            WHERE s.show_type='public' AND s.status='LIVE' AND e.user_id=%s
+            LIMIT 1""",
+        (user_id,),
+    )
+    return bool(cur.fetchone())
+
+
 def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Dict[str, Any]]:
     """Detects if user asks for a picture or video during chat and serves an item from that girl's library."""
     msg_lower = message.lower()
@@ -5090,11 +5199,21 @@ def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Di
     conn = db()
     try:
         with conn.cursor() as cur:
+            is_video_req = any(kw in msg_lower for kw in ["video", "clip"])
+
+            # Live shows are webcam-only: no premade video sets while a show is running.
+            if is_video_req and _user_in_live_show(cur, user_id):
+                clip = _WEBCAM_FIFO_BUFFER.pop_clip(girl, user_id)
+                if clip and clip.get("url"):
+                    return {"type": "video", "url": str(clip["url"]),
+                            "title": clip.get("title") or "Live webcam"}
+                return {"type": "notice",
+                        "text": "The webcam is the show right now — no premade videos during live shows."}
+
             # Check video replies cap and fresh videos allowance
             cur.execute("SELECT video_replies_left, fresh_videos_left FROM users WHERE user_id=%s", (user_id,))
             user_row = cur.fetchone() or {}
 
-            is_video_req = any(kw in msg_lower for kw in ["video", "clip"])
             if is_video_req:
                 # Fresh video messages are restricted to users with fresh_videos_left (Premium Session tier)
                 if int(user_row.get("fresh_videos_left") or 0) > 0:
@@ -5115,7 +5234,10 @@ def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Di
                 except Exception:
                     library = []
             if library and isinstance(library, list):
-                item = random.choice(library)
+                item = _pick_rotated_media(
+                    cur, user_id, girl, library, "video" if is_video_req else "image"
+                )
+                conn.commit()
                 if isinstance(item, dict):
                     return item
                 return {"type": "video" if is_video_req else "image", "url": str(item)}
@@ -12041,11 +12163,15 @@ def admin_generator_webcam_status(job_id: str):
 
 
 @app.get("/keyhole/plates")
-def keyhole_plates():
+def keyhole_plates(authorization: str = Header(default="")):
     """Plate manifest for the plate engine: every enabled media asset tagged with a beat, grouped
-    character -> beat -> [{url, variant, media_type}]. Automatically fills missing beat folders."""
+    character -> beat -> [{url, variant, media_type}]. Automatically fills missing beat folders.
+
+    When the request carries a signed-in user, plates that user has already seen inside the
+    30-day rotation window are filtered out, so previews obey the same no-repeat rule as chat."""
     rows = []
     persona_girls = []
+    seen_user_id = None
     if DATABASE_URL:
         try:
             conn = db()
@@ -12058,10 +12184,30 @@ def keyhole_plates():
                     rows = cur.fetchall() or []
                     cur.execute("SELECT DISTINCT girl FROM personas WHERE is_enabled=TRUE")
                     persona_girls = [r["girl"].lower() for r in (cur.fetchall() or []) if r.get("girl")]
+                    # Optional auth: when we know the user, filter their 30-day seen history.
+                    try:
+                        seen_user_id = current_user(authorization)["user_id"]
+                    except HTTPException:
+                        seen_user_id = None
+                    seen_maps: Dict[str, set] = {}
             finally:
                 conn.close()
         except Exception:
             pass
+
+    def _plate_seen(cid: str, url: str, variant: str) -> bool:
+        if not seen_user_id:
+            return False
+        m = seen_maps.get(cid)
+        if m is None:
+            conn2 = db()
+            try:
+                with conn2.cursor() as cur2:
+                    m = set(_seen_media_map(cur2, seen_user_id, cid).keys())
+            finally:
+                conn2.close()
+            seen_maps[cid] = m
+        return (url, variant or "") in m
 
     all_chars = set(KEYHOLE_CHARACTERS)
     all_chars.update(persona_girls)
@@ -12090,6 +12236,8 @@ def keyhole_plates():
         variant = next((t.split(":", 1)[1] for t in tags if t.startswith("variant:")), "")
         folder = chars.setdefault(cid, {b: [] for b in PLATE_BEATS})
         m_type = r.get("media_type") or "image"
+        if _plate_seen(cid, url, variant):
+            continue
         for beat in PLATE_BEATS:
             if beat in tags:
                 folder[beat].append({"url": url, "variant": variant, "media_type": m_type})
@@ -12112,6 +12260,31 @@ def keyhole_plates():
                 folder[beat].append(fallback)
 
     return {"ok": True, "characters": chars}
+
+
+class PlatePlayedIn(BaseModel):
+    character: str = "chloe"
+    url: str = ""
+    variant: str = ""
+    beat: str = ""
+
+
+@app.post("/keyhole/plates/played")
+def keyhole_plate_played(body: PlatePlayedIn, user=Depends(current_user)):
+    """Records a plate the frontend played, so the 30-day rotation covers previews too."""
+    url = (body.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    girl = (body.character or "chloe").strip().lower()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            _record_media_serve(cur, user["user_id"], girl, url,
+                                (body.variant or "").strip(), "plate")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
 
 
 @app.post("/admin/media/{asset_id}/update", dependencies=[Depends(admin_required)])
