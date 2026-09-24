@@ -77,20 +77,18 @@ class TestKeyholeCharacterReferences(unittest.TestCase):
         self.assertIn(bailey_master, bailey_prompt)
         self.assertNotIn(chloe_master, bailey_prompt)
 
-    def test_chloe_skin_save_persists_appearance_and_asset(self):
+    def test_chloe_appearance_save_persists(self):
         outfit = "Current Outfit: Velvet platform bed, plush L-sofa, neon wall sign."
         res = self.client.post(
             "/admin/keyhole/character-references/set-appearance",
-            json={"character": "chloe", "current_appearance": outfit, "skin_asset_id": 42},
+            json={"character": "chloe", "current_appearance": outfit},
             headers=self.headers,
         )
         self.assertEqual(res.status_code, 200)
         saved = main.get_character_references("chloe")
         self.assertEqual(saved["current_appearance"], outfit)
-        self.assertEqual(saved["skin_asset_id"], 42)
         bailey = main.get_character_references("bailey")
         self.assertNotEqual(bailey["current_appearance"], outfit)
-        self.assertNotEqual(bailey.get("skin_asset_id"), 42)
 
 
 if __name__ == "__main__":

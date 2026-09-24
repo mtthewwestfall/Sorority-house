@@ -150,17 +150,21 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertFalse(body["live"])
         self.assertEqual(body["show"]["status"], "SCHEDULED")
         self.assertEqual(body["character_id"], "chloe")
-        self.assertIn("current_appearance", body["skin"])
+        self.assertIn("current_appearance", body["references"])
         listed = self.client.get("/admin/keyhole/shows", headers=self.headers).json()["shows"]
         saved = [s for s in listed if s["id"] == show_id][0]
         self.assertEqual(saved["status"], "SCHEDULED")
 
-    def test_customer_skin_and_extend_are_forbidden(self):
-        for path in ("/keyhole/skin-on", "/keyhole/extend-video"):
-            for method in ("get", "post", "put", "patch"):
-                res = getattr(self.client, method)(path, headers={"Authorization": "Bearer customer"})
-                self.assertEqual(res.status_code, 403, path)
-                self.assertIn("admin only", res.json()["detail"].lower())
+    def test_customer_skin_route_is_gone_and_extend_stays_admin_only(self):
+        # /keyhole/skin-on was removed with the fake skin system: gone for everyone.
+        for method in ("get", "post", "put", "patch"):
+            res = getattr(self.client, method)("/keyhole/skin-on", headers={"Authorization": "Bearer customer"})
+            self.assertEqual(res.status_code, 404, "/keyhole/skin-on")
+        # /keyhole/extend-video is a real admin feature and stays admin-gated.
+        for method in ("get", "post", "put", "patch"):
+            res = getattr(self.client, method)("/keyhole/extend-video", headers={"Authorization": "Bearer customer"})
+            self.assertEqual(res.status_code, 403, "/keyhole/extend-video")
+            self.assertIn("admin only", res.json()["detail"].lower())
 
     def test_content_maker_sites_and_schedule(self):
         sites = self.client.get("/admin/keyhole/content/sites", headers=self.headers)
