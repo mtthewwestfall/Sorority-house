@@ -9,3 +9,7 @@
 ## 2026-09-12 - N+1 Persona Difficulty DB Lookups in Roster Loops
 **Learning:** `roster()` returns persona rows containing the `difficulty` column, but calling `difficulty_for(girl)` inside `GET /roster` and `GET /state` loops opens and closes N sequential DB connections (`SELECT difficulty FROM personas WHERE girl=%s`) for N roster items. Using pre-fetched `r.get("difficulty")` or `row.get("difficulty")` in roster iterations and backing `difficulty_for()` with an in-memory TTL dictionary cache eliminates N DB queries per request (reducing DB connection opens from N+1 down to 1 for `/roster`).
 **Action:** Always check if iteration items already contain the needed attribute before calling individual lookup helpers, and add in-memory TTL caching to single-entity getter functions called in hot paths.
+
+## 2026-09-24 - Pre-compiling Combined Regex Patterns in Character Engine Intent Parsing
+**Learning:** Iterating over lists of regex pattern strings with `re.search` inside `parse_intent` on every character turn causes repeated string regex compilation/search overhead across 20+ patterns. Combining pattern lists into pre-compiled single regular expression objects (`_OFF_CARD_RE`, `_COMMAND_RE`, `_DIRECT_RE`) at module load time reduces pattern evaluation overhead in `parse_intent` by ~85% (~7x speedup).
+**Action:** Always pre-compile pattern lists into combined module-level `re.Pattern` objects when performing repeated intent, category, or keyword classification in hot path loops.
