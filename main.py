@@ -526,6 +526,28 @@ AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
 TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 # $4.99 public lounge. Same default the Telegram bot uses for PAY_LINK_PUBLIC.
 PAY_LINK_PUBLIC = os.environ.get("PAY_LINK_PUBLIC", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE BOOKINGS — scheduled private shows. Customer picks a character and a
+# time, pays through the package's Stripe Payment Link (the booking id rides
+# along as client_reference_id), and the character's webcam (plate clips) goes
+# live on the customer's screen for the booked window.
+# ---------------------------------------------------------------------------
+KEYHOLE_BOOKING_PAY_LINKS = {
+    "intro":    os.environ.get("KEYHOLE_PAY_LINK_INTRO",    "https://buy.stripe.com/9B69AM0Ur38HchN0ZrdjO0a"),
+    "quick":    os.environ.get("KEYHOLE_PAY_LINK_QUICK",    "https://buy.stripe.com/00w14gav1bFddlR6jLdjO09"),
+    "standard": os.environ.get("KEYHOLE_PAY_LINK_STANDARD", "https://buy.stripe.com/bJeeV67iPdNl2Hd8rTdjO08"),
+    "long":     os.environ.get("KEYHOLE_PAY_LINK_LONG",     "https://buy.stripe.com/4gM9AM46DbFda9F23vdjO03"),
+    "premium":  os.environ.get("KEYHOLE_PAY_LINK_PREMIUM",  "https://buy.stripe.com/9B600c0UrcJh4Pl0ZrdjO07"),
+}
+BOOKABLE_PACKAGES = tuple(KEYHOLE_BOOKING_PAY_LINKS)
+BOOKING_MAX_DAYS_AHEAD = 30
+
+
+def _keyhole_booking_pay_link(package: str) -> str:
+    """Stripe Payment Link for a bookable package (env override or default)."""
+    return (KEYHOLE_BOOKING_PAY_LINKS.get(package) or "").strip()
 SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
 
 WINDOW = 10          # Layer 3: last N raw messages sent to the model each turn
@@ -1561,6 +1583,8 @@ def init_db():
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS published_website     BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS viewer_count          INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS is_demo               BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS package TEXT NOT NULL DEFAULT '';
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS created_at            TIMESTAMPTZ NOT NULL DEFAULT now();
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS started_at            TIMESTAMPTZ;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS ended_at              TIMESTAMPTZ;
@@ -7474,6 +7498,227 @@ def keyhole_session_start(user=Depends(current_user)):
         conn.close()
 
 
+def _parse_booking_start(value: str) -> datetime:
+    """Parse an ISO8601 start time. Naive values are assumed UTC; the customer
+    site sends offset-aware values built from the browser's local time."""
+    try:
+        dt = datetime.fromisoformat((value or "").strip().replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="start_at must be ISO8601")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _keyhole_booking_window(show: Dict[str, Any]) -> Dict[str, Any]:
+    """Liveness of a scheduled private show derived from its paid status and
+    time window — no status mutation needed for the customer or admin to see it."""
+    now = datetime.now(timezone.utc)
+    start = show.get("scheduled_at")
+    if isinstance(start, str):
+        try:
+            start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except Exception:
+            start = None
+    if isinstance(start, datetime) and start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    minutes = int(show.get("duration_minutes") or 0)
+    end = start + timedelta(minutes=minutes) if isinstance(start, datetime) and minutes > 0 else None
+    paid_states = ("PAID", "READY", "LIVE")
+    live = bool(start and end and show.get("status") in paid_states and start <= now < end)
+    return {
+        "live_now": live,
+        "scheduled_at": start.isoformat() if isinstance(start, datetime) else None,
+        "ends_at": end.isoformat() if isinstance(end, datetime) else None,
+        "starts_in_seconds": max(0, int((start - now).total_seconds())) if isinstance(start, datetime) and now < start else 0,
+        "ends_in_seconds": max(0, int((end - now).total_seconds())) if isinstance(end, datetime) and now < end else 0,
+    }
+
+
+def _booking_public_dict(show: Dict[str, Any]) -> Dict[str, Any]:
+    d = {
+        "show_id": show.get("show_id"),
+        "character_id": show.get("character_id"),
+        "package": show.get("package") or "",
+        "price": float(show.get("price") or 0),
+        "duration_minutes": int(show.get("duration_minutes") or 0),
+        "status": show.get("status"),
+    }
+    d.update(_keyhole_booking_window(show))
+    return d
+
+
+@app.get("/keyhole/booking-packages")
+def keyhole_booking_packages():
+    """Bookable show packages: price, webcam minutes, and the Stripe link used at checkout."""
+    cfg = get_keyhole_config()
+    out = []
+    for p in BOOKABLE_PACKAGES:
+        link = _keyhole_booking_pay_link(p)
+        if not link:
+            continue
+        out.append({
+            "package": p,
+            "price": float(cfg.get(f"{p}_price", 0) or 0),
+            "webcam_minutes": int(cfg.get(f"{p}_webcam_minutes", 0) or 0),
+            "pay_link": link,
+        })
+    return {"packages": out}
+
+
+class KeyholeBookingIn(BaseModel):
+    character_id: str
+    package: str
+    start_at: str
+
+
+@app.post("/keyhole/bookings")
+def keyhole_bookings_create(body: KeyholeBookingIn, user=Depends(current_user)):
+    """Book a private show: pick character + package + time. Returns the Stripe
+    Payment Link with this booking as client_reference_id; the Stripe webhook
+    confirms the booking when payment lands."""
+    char_slug = _validate_character_exists(body.character_id)
+    pkg = (body.package or "").strip().lower()
+    if pkg not in BOOKABLE_PACKAGES:
+        raise HTTPException(status_code=400, detail=f"package must be one of {', '.join(BOOKABLE_PACKAGES)}")
+    link = _keyhole_booking_pay_link(pkg)
+    if not link:
+        raise HTTPException(status_code=400, detail=f"package '{pkg}' is not bookable right now")
+    start = _parse_booking_start(body.start_at)
+    now = datetime.now(timezone.utc)
+    if start <= now + timedelta(seconds=60):
+        raise HTTPException(status_code=400, detail="start_at must be in the future")
+    if start > now + timedelta(days=BOOKING_MAX_DAYS_AHEAD):
+        raise HTTPException(status_code=400, detail=f"bookings open {BOOKING_MAX_DAYS_AHEAD} days ahead")
+    cfg = get_keyhole_config()
+    minutes = int(cfg.get(f"{pkg}_webcam_minutes", 0) or 0)
+    if minutes <= 0:
+        raise HTTPException(status_code=400, detail=f"package '{pkg}' has no show length configured")
+    price = float(cfg.get(f"{pkg}_price", 0) or 0)
+    uid = user["user_id"]
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            # Idempotency for double-clicks: reuse a fresh unpaid booking for the
+            # same user/character/package/start minute.
+            cur.execute("""
+                SELECT show_id, scheduled_at, duration_minutes, package, price, status, character_id
+                FROM keyhole_shows
+                WHERE show_type='private' AND customer_id=%s AND character_id=%s
+                  AND package=%s AND status='PAYMENT_PENDING'
+                  AND abs(extract(epoch from (scheduled_at - %s))) < 60
+                  AND created_at > now() - interval '15 minutes'
+                ORDER BY created_at DESC LIMIT 1
+            """, (uid, char_slug, pkg, start))
+            row = cur.fetchone()
+            if row:
+                show = dict(row)
+            else:
+                show_id = _generate_show_id("priv")
+                cur.execute("""
+                    INSERT INTO keyhole_shows (
+                        show_id, show_type, character_id, "character", customer_id, customer,
+                        title, description, price, scheduled_at, duration_minutes, package, status
+                    ) VALUES (%s, 'private', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PAYMENT_PENDING')
+                    RETURNING show_id, scheduled_at, duration_minutes, package, price, status, character_id
+                """, (show_id, char_slug, char_slug.capitalize(), uid, user.get("display_name") or "",
+                      f"Private {minutes}-min show with {char_slug.capitalize()}",
+                      f"Scheduled private webcam session with {char_slug.capitalize()}",
+                      price, start, minutes, pkg))
+                show = dict(cur.fetchone())
+                conn.commit()
+            sep = "&" if "?" in link else "?"
+            payment_url = f"{link}{sep}client_reference_id={urllib.parse.quote(show['show_id'])}"
+            out = _booking_public_dict(show)
+            out["payment_url"] = payment_url
+            return out
+    finally:
+        conn.close()
+
+
+@app.get("/keyhole/bookings/mine")
+def keyhole_bookings_mine(user=Depends(current_user)):
+    """The customer's scheduled private shows: unpaid, upcoming, and live."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT show_id, scheduled_at, duration_minutes, package, price, status, character_id
+                FROM keyhole_shows
+                WHERE show_type='private' AND customer_id=%s
+                  AND status IN ('PAYMENT_PENDING', 'PAID', 'READY', 'LIVE')
+                ORDER BY scheduled_at NULLS LAST, created_at DESC
+            """, (user["user_id"],))
+            return {"bookings": [_booking_public_dict(dict(r)) for r in cur.fetchall()]}
+    finally:
+        conn.close()
+
+
+@app.get("/admin/keyhole/shows/live", dependencies=[Depends(admin_required)])
+def admin_keyhole_shows_live():
+    """All scheduled private shows: live now, plus upcoming — the admin lives display."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.show_id, s.scheduled_at, s.duration_minutes, s.package, s.price,
+                       s.status, s.character_id, s.customer_id, s.created_at,
+                       a.email AS customer_email
+                FROM keyhole_shows s
+                LEFT JOIN accounts a ON a.user_id = s.customer_id
+                WHERE s.show_type='private'
+                  AND s.status IN ('PAID', 'READY', 'LIVE')
+                  AND s.scheduled_at IS NOT NULL
+                ORDER BY s.scheduled_at
+            """)
+            live, upcoming = [], []
+            for r in cur.fetchall():
+                show = dict(r)
+                d = _booking_public_dict(show)
+                d["customer_id"] = show.get("customer_id")
+                d["customer_email"] = show.get("customer_email") or ""
+                (live if d["live_now"] else upcoming).append(d)
+            return {"live": live, "upcoming": upcoming}
+    finally:
+        conn.close()
+
+
+def _confirm_keyhole_booking(provider: str, payment_id: str, show_id: str, session_obj: Dict[str, Any]) -> Dict[str, Any]:
+    """Confirm a scheduled private-show booking from a paid Stripe checkout session.
+    One payment = one show: the booking is marked PAID and the payment is recorded,
+    but no package minutes are granted (the show itself is the product)."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s FOR UPDATE", (show_id,))
+            row = cur.fetchone()
+            if not row:
+                print(f"[{provider}] {payment_id}: booking {show_id} not found, ignored", flush=True)
+                return {"ok": True, "ignored": "unknown booking"}
+            show = dict(row)
+            if show.get("show_type") != "private":
+                return {"ok": True, "ignored": "not a private booking"}
+            if show.get("status") != "PAYMENT_PENDING":
+                return {"ok": True, "booking": show_id, "already": show.get("status"),
+                        "user_id": show.get("customer_id")}
+            amount = session_obj.get("amount_total")
+            price = float(show.get("price") or 0)
+            if amount is not None and price > 0 and int(amount) != round(price * 100):
+                print(f"[{provider}] {payment_id}: booking {show_id} paid {amount} != price {price}",
+                      flush=True)
+            cur.execute("UPDATE keyhole_shows SET status='PAID', updated_at=now() WHERE show_id=%s", (show_id,))
+            cur.execute(
+                "INSERT INTO keyhole_payments (payment_id, provider, user_id, package) "
+                "VALUES (%s,%s,%s,%s) ON CONFLICT (payment_id) DO NOTHING",
+                (payment_id, provider, show.get("customer_id"), show.get("package") or "booking"))
+            cur.execute("UPDATE keyhole_payments SET granted=TRUE WHERE payment_id=%s", (payment_id,))
+            conn.commit()
+            return {"ok": True, "booking": show_id, "user_id": show.get("customer_id"), "status": "PAID"}
+    finally:
+        conn.close()
+
+
 def _account_email(user_id: str) -> Optional[str]:
     conn = db()
     try:
@@ -9210,6 +9455,11 @@ async def stripe_webhook(request: Request):
         # one-time Keyhole Payment Link: the package sits in the link's metadata
         if obj.get("payment_status") != "paid":
             return {"ok": True, "ignored": "not paid yet"}
+        ref = (obj.get("client_reference_id") or "").strip()
+        if ref.startswith("priv_"):
+            # Scheduled private-show booking: confirm the show; the show itself
+            # is the product, so no package minutes are granted here.
+            return _confirm_keyhole_booking("stripe", f"stripe:{obj.get('id')}", ref, obj)
         meta = obj.get("metadata") or {}
         package = meta.get("package") or meta.get("sku") or ""
         if not package:
