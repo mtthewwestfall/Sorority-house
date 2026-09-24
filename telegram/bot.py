@@ -41,7 +41,7 @@ SITE_URL             website origin used for that 45-minute fallback
                      (default https://lockeddoor.ai).
 KEYHOLE_ASSET_ORIGIN origin that serves the Keyhole door photos
                      (default https://keyhole-latest-production.up.railway.app).
-                     Chloe is /assets/IMG_3542.jpeg, Bailey is /assets/IMG_3543.jpeg.
+                     Chloe is /assets/IMG_3543.jpeg, Bailey is /assets/IMG_3542.jpeg.
 """
 
 import asyncio
@@ -87,11 +87,11 @@ KEYHOLE_ASSET_ORIGIN = os.environ.get(
 # Restrict available models strictly to Chloe and Bailey
 ALLOWED_MODELS = {"chloe", "bailey"}
 
-# Same files as Keyhole rooms.html doors. Chloe is the blonde city-window room.
-# Bailey is dark hair. Do not swap.
+# Same files as Keyhole rooms.html doors and main.py KEYHOLE_DOOR_AVATARS.
+# Chloe is the blonde city-window room. Bailey is dark hair. Do not swap.
 DOOR_PHOTOS = {
-    "chloe": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3542.jpeg",
-    "bailey": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3543.jpeg",
+    "chloe": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3543.jpeg",
+    "bailey": KEYHOLE_ASSET_ORIGIN + "/assets/IMG_3542.jpeg",
 }
 _KEYHOLE_ASSET_HOSTS = frozenset({
     "keyhole-latest-production.up.railway.app",

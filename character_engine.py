@@ -3,6 +3,7 @@ Unified state machine with character-specific weights and satisfaction targets.
 """
 
 # Default behavior mixes are intentionally editable from the admin console.
+# Chloe: engaging by default; Bailey: reserved but still responsive.
 DEFAULT_BEHAVIOR_MIXES = {
     "chloe": {"give_a_little": 0.40, "presence": 0.25, "tease_withhold": 0.15, "redirect": 0.12, "hard_stop": 0.08},
     "bailey": {"give_a_little": 0.30, "presence": 0.25, "tease_withhold": 0.15, "redirect": 0.20, "hard_stop": 0.10},
@@ -74,9 +75,9 @@ CHARACTER_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-COMMAND_PATTERNS = [r"\\bdo it now\\b", r"\\btake it off\\b", r"\\bshow me now\\b", r"\\bdo what i say\\b", r"\\bunbutton\\b", r"\\bstrip\\b", r"\\bobey\\b", r"\\bnow!\\b"]
-OFF_CARD_PATTERNS = [r"\\bbreak character\\b", r"\\bignore previous instructions\\b", r"\\bsystem prompt\\b", r"\\byou are an ai\\b", r"\\bout of character\\b"]
-DIRECT_PATTERNS = [r"\\bshow\\b", r"\\bsee\\b", r"\\btake off\\b", r"\\bopen\\b", r"\\blift\\b", r"\\bdrop\\b", r"\\bpulls down\\b"]
+COMMAND_PATTERNS = [r"\bdo it now\b", r"\btake it off\b", r"\bshow me now\b", r"\bdo what i say\b", r"\bunbutton\b", r"\bstrip\b", r"\bobey\b", r"\bnow!\b"]
+OFF_CARD_PATTERNS = [r"\bbreak character\b", r"\bignore previous instructions\b", r"\bsystem prompt\b", r"\byou are an ai\b", r"\bout of character\b"]
+DIRECT_PATTERNS = [r"\bshow\b", r"\bsee\b", r"\btake off\b", r"\bopen\b", r"\blift\b", r"\bdrop\b", r"\bpulls down\b"]
 
 
 def parse_intent(message: str, last_ask_time: Optional[float] = None, last_ask_message: Optional[str] = None, time_window: float = 60.0) -> str:
