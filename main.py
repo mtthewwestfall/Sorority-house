@@ -70,7 +70,7 @@ API CONTRACT implemented here (point your chat app at these):
                                                             primary|secondary,"reference_asset_id"}
                                                             -> {"asset"} still saved as her plate.
                                                             secondary (Sogni) still generates when
-                                                            the selected skin cannot be loaded.
+                                                            the selected reference cannot be loaded.
                                                             primary, given reference_asset_id,
                                                             fails only after a relative /media
                                                             URL cannot be fetched either.
@@ -79,13 +79,13 @@ API CONTRACT implemented here (point your chat app at these):
                                                             -> {"job_id"} Veo motion clip
   GET  /admin/generator/webcam/{job_id}                  -> {"job":{status,asset,error}}
   GET  /admin/keyhole/shows/{show_id}/preview            -> pre-live stage preview (plates,
-                                                            skin, schedule). Does not go live
+                                                            references, schedule). Does not go live
   GET  /admin/keyhole/content/sites                      -> preset content-maker site list
   POST /admin/keyhole/content/search    {"tag","site_id","character_id"}
                                                          -> tag search (local library + presets)
   POST /admin/keyhole/content/record    {"character_id","url","loop_seconds","tag"}
-                                                         -> download an image or video, apply
-                                                            her skin, save a long loop
+                                                         -> download an image or video and
+                                                            save it as a long loop
   POST /admin/keyhole/content/{asset_id}/edit
   POST /admin/keyhole/content/{asset_id}/schedule
   GET  /keyhole/packages                                 -> {"packages":[{"package","price",
@@ -107,7 +107,6 @@ API CONTRACT implemented here (point your chat app at these):
   POST /keyhole/room/unlock             (bearer)        -> bedroom/VIP only with a paid
                                                             Keyhole purchase. Passcodes such as
                                                             KEY-VIP-ROOM are rejected
-  POST /keyhole/skin-on                                  -> 403. Skin controls are admin-only
   POST /keyhole/extend-video                             -> 403. Extend-video is admin-only
   POST /keyhole/nowpayments/invoice {"package"} (bearer) -> {"invoice_id","invoice_url"}: a
                                                             NOWPayments invoice for that package,
@@ -239,8 +238,8 @@ Env vars (Railway -> Variables):
                     sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
                     SOGNI_API_URL (default https://api.sogni.ai).
   KEYHOLE_MEDIA_DIR where uploaded/generated plates are stored (mount a Railway volume
-                    here or generated cuts vanish on redeploy). Remote character skins are
-                    downloaded into this directory before Gemini/Veo run. A relative
+                    here or generated cuts vanish on redeploy). Remote character reference
+                    images are downloaded into this directory before Gemini/Veo run. A relative
                     /media/files or /media URL is fetched from PUBLIC_URL, then
                     PUBLIC_API_BASE, when that file is missing on disk.
   KEYHOLE_CONTENT_SITES
@@ -4059,12 +4058,12 @@ async function saveMasterRefText() {
 }
 async function saveAppearanceRefText() {
   const value = ($('#refAppearanceText')?.value || '').trim();
-  if (!value) { toast('Enter the current outfit / skin', true); return; }
+  if (!value) { toast('Enter the current outfit', true); return; }
   try {
     await api('/admin/keyhole/character-references/set-appearance', {
       method: 'POST', body: JSON.stringify({ character: activeRefChar, current_appearance: value })
     });
-    toast(activeRefChar + ' skin saved');
+    toast(activeRefChar + ' outfit saved');
     await loadCharacterRefs();
   } catch (e) { toast(e.message, true); }
 }
@@ -4081,7 +4080,7 @@ async function uploadMasterRefFile() {
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || 'Upload failed');
-    toast(activeRefChar + ' skin image saved');
+    toast(activeRefChar + ' reference image saved');
     input.value = '';
     await loadCharacterRefs();
   } catch (e) { toast(e.message, true); }
@@ -6673,10 +6672,6 @@ def _set_house_rule(key: str, value: str) -> bool:
         if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
         try: _CHARACTER_REFS_CACHE[cid]["private_references"] = json.loads(value)
         except Exception: pass
-    elif key.startswith("ref_skin_asset_"):
-        cid = key.replace("ref_skin_asset_", "")
-        if cid not in _CHARACTER_REFS_CACHE: _CHARACTER_REFS_CACHE[cid] = {}
-        _CHARACTER_REFS_CACHE[cid]["skin_asset_id"] = value
 
     if not DATABASE_URL:
         return True
@@ -6719,13 +6714,11 @@ def get_character_references(character_id: str) -> Dict[str, Any]:
     else:
         private_refs = default_private
 
-    skin_raw = _get_house_rule(f"ref_skin_asset_{cid}") or str(mem_refs.get("skin_asset_id") or "")
     res = {
         "character": cid.capitalize(),
         "master_reference": master,
         "current_appearance": appearance,
         "private_references": private_refs,
-        "skin_asset_id": int(skin_raw) if str(skin_raw).isdigit() else None,
     }
     _CHARACTER_REFS_CACHE[cid] = dict(res)
     return res
@@ -7665,11 +7658,10 @@ def keyhole_room_unlock(body: KeyholeRoomUnlockIn, user=Depends(current_user)):
     return {"ok": True, "room": "bedroom", "vip_room": True}
 
 
-@app.api_route("/keyhole/skin-on", methods=["GET", "POST", "PUT", "PATCH"])
 @app.api_route("/keyhole/extend-video", methods=["GET", "POST", "PUT", "PATCH"])
 def keyhole_customer_studio_blocked():
-    """Skin-on and extend-video are admin studio controls. Customer routes cannot run them."""
-    raise HTTPException(status_code=403, detail="Skin and extend-video controls are admin only.")
+    """Extend-video is an admin studio control. Customer routes cannot run it."""
+    raise HTTPException(status_code=403, detail="Extend-video controls are admin only.")
 
 
 class KeyholeInvoiceIn(BaseModel):
@@ -9815,8 +9807,8 @@ _KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {
         "id": "demo_priv_1",
         "show_id": "demo_priv_1",
         "show_type": "private",
-        "customer": "alex.rivera@example.com",
-        "customer_id": "alex.rivera@example.com",
+        "customer": "mtthew.westfall@gmail.com",
+        "customer_id": "mtthew.westfall@gmail.com",
         "character": "Chloe",
         "character_id": "chloe",
         "status": "READY",
@@ -10118,13 +10110,13 @@ def admin_keyhole_show_preview(show_id: str):
     if not show:
         raise HTTPException(status_code=404, detail="Show not found")
     char_id = (show.get("character_id") or (show.get("character") or "")).strip().lower()
-    skin = get_character_references(char_id) if char_id in ("chloe", "bailey") else None
+    refs = get_character_references(char_id) if char_id in ("chloe", "bailey") else None
     return {
         "ok": True,
         "live": False,
         "show": show,
         "character_id": char_id,
-        "skin": skin,
+        "references": refs,
         "plates": _preview_plates(char_id),
     }
 
@@ -10272,21 +10264,18 @@ class ContentRecordIn(BaseModel):
 
 @app.post("/admin/keyhole/content/record", dependencies=[Depends(admin_required)])
 def admin_content_record(body: ContentRecordIn):
-    """Download an image or video, apply the selected character skin, and save it as a long loop."""
+    """Download an image or video and save it as a long loop."""
     char_id = _keyhole_character(body.character_id)
     url = _validate_media_url(body.url)
     loop_seconds = body.loop_seconds if body.loop_seconds in (30, 60, 120, 180, 300) else 60
     content, ext, mime, m_type = _fetch_remote_media(url, prefer="")
     if m_type not in ("video", "image"):
         raise HTTPException(status_code=400, detail="Download was not an image or video")
-    content, ext, mime, m_type, skinned = _apply_character_skin_bytes(char_id, content, ext, mime, m_type)
     tags = [body.tag.strip().lower() or "loop", "loop", "content", "download", f"loop:{loop_seconds}"]
-    if skinned:
-        tags.append("skinned")
     title = (body.title or "").strip() or f"{char_id.capitalize()} loop {loop_seconds}s"
     asset = _save_generated_asset(char_id, content, ext or (".mp4" if m_type == "video" else ".png"),
                                   m_type, title, tags)
-    return {"ok": True, "asset": asset, "loop_seconds": loop_seconds, "skinned": skinned, "media_type": m_type}
+    return {"ok": True, "asset": asset, "loop_seconds": loop_seconds, "media_type": m_type}
 
 
 class ContentEditIn(BaseModel):
@@ -10464,8 +10453,8 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "id": show_id,
             "show_id": show_id,
             "show_type": "private",
-            "customer": "alex.rivera@example.com",
-            "customer_id": "alex.rivera@example.com",
+            "customer": "mtthew.westfall@gmail.com",
+            "customer_id": "mtthew.westfall@gmail.com",
             "character": "Chloe",
             "character_id": "chloe",
             "status": "READY",
@@ -10494,8 +10483,8 @@ def admin_demo_simulate(body: DemoSimulateIn):
             "id": "demo_priv_1",
             "show_id": "demo_priv_1",
             "show_type": "private",
-            "customer": "alex.rivera@example.com",
-            "customer_id": "alex.rivera@example.com",
+            "customer": "mtthew.westfall@gmail.com",
+            "customer_id": "mtthew.westfall@gmail.com",
             "character": "Chloe",
             "character_id": "chloe",
             "status": "READY",
@@ -10617,38 +10606,11 @@ def admin_set_master_reference(body: SetMasterRefIn):
 class SetAppearanceRefIn(BaseModel):
     character: str
     current_appearance: str
-    skin_asset_id: Optional[int] = None
 
 
-def _ensure_asset_skin_tag(asset_id: int, cid: str) -> None:
-    """Mark an existing local asset as this character's skin so generation can find it."""
-    if not DATABASE_URL:
-        return
-    try:
-        conn = db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT tags, character_id FROM media_assets WHERE id=%s", (asset_id,))
-                row = cur.fetchone()
-                if not row or (row.get("character_id") or "").lower() != cid:
-                    return
-                tags = _parse_tags_input(row.get("tags") or [])
-                for needed in ("skin", "reference"):
-                    if needed not in tags:
-                        tags.append(needed)
-                cur.execute("""UPDATE media_assets
-                               SET tags=%s, is_enabled=TRUE, updated_at=now()
-                               WHERE id=%s""", (Json(tags), asset_id))
-                conn.commit()
-        finally:
-            conn.close()
-    except Exception:
-        return
-
-
-def _register_character_skin(cid: str, safe_name: str, url: str, title: str, tags: List[str],
-                             media_type: str = "image") -> Optional[int]:
-    """Record a local skin/reference file in media_assets so the generator can load it."""
+def _register_character_reference(cid: str, safe_name: str, url: str, title: str, tags: List[str],
+                                media_type: str = "image") -> Optional[int]:
+    """Record a local reference file in media_assets so the generator can load it."""
     if not DATABASE_URL:
         return None
     try:
@@ -10672,7 +10634,7 @@ def _register_character_skin(cid: str, safe_name: str, url: str, title: str, tag
 
 @app.post("/admin/keyhole/character-references/set-appearance", dependencies=[Depends(admin_required)])
 def admin_set_appearance_reference(body: SetAppearanceRefIn):
-    """Persist Chloe or Bailey's current outfit / skin. The master identity is not touched."""
+    """Persist Chloe or Bailey's current outfit. The master identity is not touched."""
     cid = (body.character or "chloe").strip().lower()
     if cid not in ("chloe", "bailey"):
         raise HTTPException(status_code=400, detail="Character must be chloe or bailey")
@@ -10680,11 +10642,7 @@ def admin_set_appearance_reference(body: SetAppearanceRefIn):
     if not appearance:
         raise HTTPException(status_code=400, detail="current_appearance is required")
     if not _set_house_rule(f"ref_appearance_{cid}", appearance):
-        raise HTTPException(status_code=500, detail=f"Could not save {cid}'s skin")
-    if body.skin_asset_id:
-        if not _set_house_rule(f"ref_skin_asset_{cid}", str(int(body.skin_asset_id))):
-            raise HTTPException(status_code=500, detail=f"Could not save {cid}'s skin asset")
-        _ensure_asset_skin_tag(int(body.skin_asset_id), cid)
+        raise HTTPException(status_code=500, detail=f"Could not save {cid}'s appearance")
     saved = get_character_references(cid)
     if saved.get("current_appearance") != appearance:
         _CHARACTER_REFS_CACHE.setdefault(cid, {})["current_appearance"] = appearance
@@ -10723,10 +10681,8 @@ async def admin_upload_master_reference(
         master = (master.rstrip() + f" Visual reference: {url}").strip()
     if not _set_house_rule(f"ref_master_{cid}", master):
         raise HTTPException(status_code=500, detail=f"Could not save {cid}'s master reference")
-    asset_id = _register_character_skin(
-        cid, safe_name, url, f"{cid.capitalize()} skin", ["skin", "reference", "master"])
-    if asset_id:
-        _set_house_rule(f"ref_skin_asset_{cid}", str(asset_id))
+    asset_id = _register_character_reference(
+        cid, safe_name, url, f"{cid.capitalize()} reference", ["reference", "master"])
 
     return {"ok": True, "character": cid, "url": url, "asset_id": asset_id,
             "references": get_character_references(cid)}
@@ -10766,7 +10722,7 @@ async def admin_upload_private_reference(
         raise HTTPException(status_code=500, detail=f"Could not save {cid}'s private reference")
 
     media_type = "image" if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "video"
-    _register_character_skin(
+    _register_character_reference(
         cid, safe_name, url, f"{cid.capitalize()} Private Reference",
         ["private_reference"], media_type=media_type)
 
@@ -11333,25 +11289,18 @@ def admin_import_media_url(body: AdminMediaUrlIn):
                 url, target_format=body.target_format or "original", prefer=m_type)
             if detected_mtype in ("video", "image"):
                 m_type = detected_mtype
-            content, ext, mime, m_type, skinned = _apply_character_skin_bytes(char_id, content, ext, mime, m_type)
             safe_name = f"{char_id}_{secrets.token_hex(8)}{ext}"
             dest_path = os.path.join(UPLOAD_DIR, safe_name)
             with open(dest_path, "wb") as f:
                 f.write(content)
             saved_path = safe_name
             asset_url = f"/media/files/{safe_name}"
-            body_skinned = skinned
         except Exception as e:
             logger.warning(f"Remote fetch/scrape for '{url}' fell back to direct URL import: {e}")
-            body_skinned = False
-    else:
-        body_skinned = False
 
     parsed_tags = _parse_tags_input(body.tags)
     if body.download_remote and saved_path and "download" not in parsed_tags:
         parsed_tags.append("download")
-    if body_skinned and "skinned" not in parsed_tags:
-        parsed_tags.append("skinned")
     asset_title = body.title.strip() or os.path.basename(urllib.parse.urlparse(url).path) or "Imported Media"
 
     conn = db()
@@ -11470,7 +11419,7 @@ def _cache_reference_file(char_id: str, content: bytes, ext: str, asset_id: Opti
     ext = ext if str(ext).startswith(".") else f".{ext or 'jpg'}"
     if ext not in _IMAGE_MIME_BY_EXT:
         ext = ".jpg"
-    safe = f"skin_{char_id}_{secrets.token_hex(6)}{ext}"
+    safe = f"ref_{char_id}_{secrets.token_hex(6)}{ext}"
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     with open(os.path.join(UPLOAD_DIR, safe), "wb") as f:
         f.write(content)
@@ -11594,41 +11543,9 @@ def _materialize_reference_explained(asset: Dict[str, Any]) -> tuple:
 
 
 def _materialize_reference(asset: Dict[str, Any]) -> Optional[tuple]:
-    """Local image bytes for a skin. Remote URLs and data URLs are cached under KEYHOLE_MEDIA_DIR first."""
+    """Local image bytes for a reference. Remote URLs and data URLs are cached under KEYHOLE_MEDIA_DIR first."""
     data, _reason = _materialize_reference_explained(asset)
     return data
-
-
-def _uploaded_disk_skin(char_id: str) -> Optional[tuple]:
-    """Newest master/skin upload in UPLOAD_DIR."""
-    cid = (char_id or "").strip().lower()
-    if os.path.isdir(UPLOAD_DIR):
-        prefixes = (f"master_ref_{cid}_", f"skin_{cid}_")
-        found = []
-        for name in os.listdir(UPLOAD_DIR):
-            if not name.lower().startswith(prefixes):
-                continue
-            data = _image_bytes_at(os.path.join(UPLOAD_DIR, name))
-            if data:
-                found.append((os.path.getmtime(os.path.join(UPLOAD_DIR, name)), data))
-        if found:
-            found.sort(key=lambda item: item[0])
-            return found[-1][1]
-    return None
-
-
-def _disk_character_skin(char_id: str) -> Optional[tuple]:
-    """Newest master/skin upload in UPLOAD_DIR first, then fallback to keyhole_skins/{cid}.jpg."""
-    upload = _uploaded_disk_skin(char_id)
-    if upload:
-        return upload
-    cid = (char_id or "").strip().lower()
-    if cid in ("chloe", "bailey"):
-        owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid}.jpg")
-        data = _image_bytes_at(owner)
-        if data:
-            return data
-    return None
 
 
 def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]]:
@@ -11638,17 +11555,11 @@ def _load_asset_row(cur, asset_id: int, char_id: str) -> Optional[Dict[str, Any]
 
 
 def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool = True) -> Optional[tuple]:
-    """The girl's skin: reference image bytes used to keep every generated cut looking like her.
-    Otherwise an explicit asset, then tagged skins, then other disk files.
+    """Reference image bytes used to keep generated cuts looking like the character.
+    An explicit asset_id is loaded first; otherwise the newest enabled asset tagged
+    'reference' or 'master' is used. Returns None when nothing usable is found.
     strict=True (primary / webcam): an explicit asset_id that still cannot be loaded raises.
     strict=False (Sogni): the same miss returns None so generation can continue text-only."""
-    cid0 = (char_id or "").strip().lower()
-    preferred_id = asset_id
-    if not preferred_id:
-        raw = _get_house_rule(f"ref_skin_asset_{char_id}") or str(
-            (_CHARACTER_REFS_CACHE.get(char_id) or {}).get("skin_asset_id") or "")
-        if str(raw).isdigit():
-            preferred_id = int(raw)
     explicit_reason = "missing file"
     explicit_asset_failed = False
     conn = None
@@ -11659,45 +11570,30 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
     if conn is not None:
         try:
             with conn.cursor() as cur:
-                if preferred_id:
-                    row = _load_asset_row(cur, int(preferred_id), char_id)
-                    if asset_id and not row:
+                if asset_id:
+                    row = _load_asset_row(cur, int(asset_id), char_id)
+                    if not row:
                         if strict:
                             raise HTTPException(status_code=404, detail="Reference asset not found for this character")
-                    elif row:
+                    else:
                         data, reason = _materialize_reference_explained(row)
                         if data:
                             return data
-                        if asset_id and int(row.get("id") or 0) == int(asset_id):
-                            explicit_reason = reason or "missing file"
-                            explicit_asset_failed = True
-                cur.execute("""
-                    SELECT * FROM media_assets
-                    WHERE character_id=%s AND media_type='image' AND is_enabled
-                      AND (tags ? 'skin' OR tags ? 'reference')
-                    ORDER BY created_at DESC
-                """, (char_id,))
-                for raw in cur.fetchall() or []:
-                    row = dict(raw)
-                    if asset_id and int(row.get("id") or 0) == int(asset_id):
-                        continue
-                    data = _materialize_reference(row)
-                    if data:
-                        return data
-                if asset_id:
-                    cur.execute("SELECT * FROM media_assets WHERE id=%s AND character_id=%s", (asset_id, char_id))
-                    row = cur.fetchone()
-                    if row and (row.get("media_type") or "") != "image":
-                        data = _materialize_reference(dict(row))
+                        explicit_reason = reason or "missing file"
+                        explicit_asset_failed = True
+                else:
+                    cur.execute("""
+                        SELECT * FROM media_assets
+                        WHERE character_id=%s AND media_type='image' AND is_enabled
+                          AND (tags ? 'reference' OR tags ? 'master')
+                        ORDER BY created_at DESC
+                    """, (char_id,))
+                    for raw in cur.fetchall() or []:
+                        data = _materialize_reference(dict(raw))
                         if data:
                             return data
         finally:
             conn.close()
-
-    # Check upload directory disk skins first
-    upload = _uploaded_disk_skin(cid0)
-    if upload:
-        return upload
 
     if explicit_asset_failed or asset_id:
         if strict:
@@ -11706,74 +11602,7 @@ def _character_reference(char_id: str, asset_id: Optional[int], *, strict: bool 
                 detail=f"Reference asset {asset_id} could not be loaded: {explicit_reason}")
         return None
 
-    if cid0 in ("chloe", "bailey"):
-        owner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyhole_skins", f"{cid0}.jpg")
-        data = _image_bytes_at(owner)
-        if data:
-            return data
-
     return None
-
-
-def _gemini_apply_skin(skin_bytes: bytes, skin_mime: str, scene_bytes: bytes, scene_mime: str, prompt: str):
-    """Image-to-image with the character skin and the downloaded scene. Returns (mime, base64)."""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    payload = {"contents": [{"role": "user", "parts": [
-        {"text": "Character skin:"},
-        {"inline_data": {"mime_type": skin_mime, "data": base64.b64encode(skin_bytes).decode()}},
-        {"text": "Scene to restyle:"},
-        {"inline_data": {"mime_type": scene_mime, "data": base64.b64encode(scene_bytes).decode()}},
-        {"text": prompt},
-    ]}], "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
-    r = requests.post(f"{GEMINI_BASE}/{IMAGE_MODEL}:generateContent", json=payload,
-                      params={"key": GEMINI_API_KEY},
-                      headers={"Content-Type": "application/json"}, timeout=MODEL_TIMEOUT_S)
-    if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Image model failed ({r.status_code}): {r.text[:300]}")
-    try:
-        for part in r.json()["candidates"][0]["content"]["parts"]:
-            blob = part.get("inlineData") or part.get("inline_data")
-            if blob and blob.get("data"):
-                return blob.get("mimeType") or blob.get("mime_type") or "image/png", blob["data"]
-    except Exception:
-        pass
-    raise HTTPException(status_code=502, detail="Skin apply failed")
-
-
-def _apply_character_skin_bytes(char_id: str, content: bytes, ext: str, mime: str, media_type: str):
-    """Apply the selected character skin onto downloaded media.
-    Images are restyled with her reference. Videos are kept as videos (downloads are not images-only)
-    and tagged by the caller when a skin reference exists for her."""
-    if media_type == "video":
-        try:
-            has_skin = _character_reference(char_id, None) is not None
-        except HTTPException:
-            has_skin = False
-        return content, ext or ".mp4", mime or "video/mp4", "video", has_skin
-    if media_type != "image":
-        return content, ext, mime, media_type, False
-    try:
-        ref = _character_reference(char_id, None)
-    except HTTPException:
-        ref = None
-    if not ref or not GEMINI_API_KEY:
-        return content, ext or ".png", mime or "image/png", "image", False
-    appearance = ""
-    if char_id in ("chloe", "bailey"):
-        appearance = get_character_references(char_id).get("current_appearance") or ""
-    prompt = (
-        "Recreate the scene image using the woman from the character skin: same face, hair, and body. "
-        "Keep the scene's pose, framing, furniture, and lighting. Fully clothed unless the scene already is. "
-        f"{appearance} No text, no watermark."
-    )
-    try:
-        new_mime, b64 = _gemini_apply_skin(ref[0], ref[1], content, mime or "image/jpeg", prompt)
-    except Exception as exc:
-        logger.warning("Skin apply skipped for %s: %s", char_id, exc)
-        return content, ext or ".png", mime or "image/png", "image", False
-    new_ext = ".jpg" if "jpeg" in (new_mime or "") else ".png"
-    return base64.b64decode(b64), new_ext, new_mime or "image/png", "image", True
 
 
 # krea-2-turbo / z-image take a starting image on generate_image. Other creative-agent
@@ -11797,7 +11626,7 @@ def _sogni_reference_mode(model: str) -> str:
 
 
 def _secondary_prompt(char_id: str, prompt: str, *, with_image: bool) -> str:
-    """Lean a text-only Sogni prompt toward her stored look. An attached skin image
+    """Lean a text-only Sogni prompt toward her stored look. An attached reference image
     still gets the outfit line; the face description is only needed without pixels."""
     text = (prompt or "").strip()
     if char_id not in ("chloe", "bailey"):
@@ -11820,7 +11649,7 @@ def _secondary_prompt(char_id: str, prompt: str, *, with_image: bool) -> str:
 
 
 def _sogni_workflow_body(prompt: str, reference_url: str = "") -> Dict[str, Any]:
-    """One-step creative-agent body. reference_url attaches the skin when the model can use it."""
+    """One-step creative-agent body. reference_url attaches the reference image when the model can use it."""
     model = SOGNI_IMAGE_MODEL
     arguments: Dict[str, Any] = {"prompt": (prompt or "")[:4000], "model": model}
     tool = "generate_image"
@@ -11861,7 +11690,7 @@ def _sogni_image_type(content: bytes, mime: str) -> str:
 
 
 def _sogni_upload_reference(content: bytes, mime: str, api_key: str, mode: str) -> str:
-    """Put skin bytes on Sogni and return the presigned download URL workflows can fetch."""
+    """Put reference image bytes on Sogni and return the presigned download URL workflows can fetch."""
     ctype = _sogni_image_type(content, mime)
     upload_type = "startingImage" if mode == "img2img" else "referenceImage"
     job_id = f"keyhole-{secrets.token_hex(8)}"
@@ -11876,7 +11705,7 @@ def _sogni_upload_reference(content: bytes, mime: str, api_key: str, mode: str) 
     if not post_url or not isinstance(fields, dict):
         raise RuntimeError("upload url missing fields")
     ext = next((e for e, m in _IMAGE_MIME_BY_EXT.items() if m == ctype), ".jpg")
-    up = requests.post(post_url, data=fields, files={"file": (f"skin{ext}", content, ctype)}, timeout=60)
+    up = requests.post(post_url, data=fields, files={"file": (f"reference{ext}", content, ctype)}, timeout=60)
     if up.status_code not in (200, 201, 204):
         raise RuntimeError(f"upload {up.status_code}: {(up.text or '')[:180]}")
     got = requests.get(f"{SOGNI_API_URL}/v2/image/downloadUrl", headers=headers, params=params, timeout=30)
@@ -11946,8 +11775,8 @@ def _sogni_finish_workflow(wf_id: str, api_key: str) -> tuple:
 
 def _secondary_image(prompt: str, api_key: str, char_id: str = "", ref: Optional[tuple] = None) -> tuple:
     """Sogni still. Returns (bytes, ext, used_reference_image).
-    A loadable skin is uploaded and passed as a creative-agent reference when this model
-    accepts one. If the skin is missing, or Sogni rejects the reference, generation continues
+    A loadable reference image is uploaded and passed as a creative-agent reference when this model
+    accepts one. If the reference is missing, or Sogni rejects it, generation continues
     text-only with her stored appearance in the prompt. Never raises the local-file reference error."""
     key = (api_key or SOGNI_API_KEY).strip()
     if not key:
@@ -11990,8 +11819,8 @@ class GeneratorImageIn(BaseModel):
 def admin_generator_image(body: GeneratorImageIn):
     """Generate a still for a girl and save it as her plate/reference.
     primary: Gemini image model; with a reference image it is image-to-image so the result keeps her
-    look (the 'skin'). An explicit reference that cannot be loaded (after a relative /media fetch)
-    is an error. secondary: Sogni. A missing skin does not block it; when the bytes are available
+    look. An explicit reference that cannot be loaded (after a relative /media fetch)
+    is an error. secondary: Sogni. A missing reference does not block it; when the bytes are available
     and the model accepts a reference they are sent, otherwise her stored appearance is added to
     the prompt. NSFW stays on this engine. The result is a media asset tagged
     [beat, 'generated', engine]; beat may be empty for a plain reference still."""
@@ -12004,7 +11833,7 @@ def admin_generator_image(body: GeneratorImageIn):
     if engine not in ("primary", "secondary"):
         raise HTTPException(status_code=400, detail="engine must be 'primary' or 'secondary'")
 
-    # Sogni is text-to-image capable. A skin that is not on disk must not 400 the request.
+    # Sogni is text-to-image capable. A reference that is not on disk must not 400 the request.
     ref = None
     if body.use_reference:
         ref = _character_reference(char_id, body.reference_asset_id, strict=(engine == "primary"))
@@ -12018,13 +11847,13 @@ def admin_generator_image(body: GeneratorImageIn):
         ext = ".jpg" if "jpeg" in mime else ".png"
     else:
         if body.use_reference and not ref:
-            logger.warning("Sogni image for %s continuing without a local skin (asset %s)",
+            logger.warning("Sogni image for %s continuing without a local reference (asset %s)",
                            char_id, body.reference_asset_id)
         content, ext, applied = _secondary_image(prompt, body.api_key or "", char_id, ref)
         if not applied:
             ref = None
 
-    tags = [t for t in (beat, "generated", engine, "skinned" if ref else "") if t]
+    tags = [t for t in (beat, "generated", engine, "referenced" if ref else "") if t]
     title = (body.title or "").strip() or f"{char_id.capitalize()} {beat or 'still'} ({engine})"
     asset = _save_generated_asset(char_id, content, ext, "image", title, tags)
     return {"ok": True, "asset": asset, "url": asset["url"], "used_reference": bool(ref), "engine": engine}
@@ -12087,7 +11916,7 @@ def _veo_headers():
 @app.post("/admin/generator/webcam", dependencies=[Depends(admin_required)])
 def admin_generator_webcam(body: GeneratorWebcamIn):
     """Start an AI motion clip (Veo, VIDEO_MODEL) for a girl's beat. With a reference image the clip is
-    image-to-video from her skin so it is her on cam. Returns a job id; poll
+    image-to-video from her reference so it is her on cam. Returns a job id; poll
     GET /admin/generator/webcam/{job_id}. When done the clip is saved as a media asset tagged
     [beat, 'webcam', 'generated'] and is that beat's plate from then on."""
     char_id = _keyhole_character(body.character)
@@ -12160,7 +11989,7 @@ def admin_generator_webcam_status(job_id: str):
     if vid.status_code != 200 or not vid.content:
         job["status"], job["error"] = "error", f"Download failed ({vid.status_code})"
         return {"ok": True, "job": job}
-    tags = [job["beat"], "webcam", "generated", "skinned" if job["used_reference"] else ""]
+    tags = [job["beat"], "webcam", "generated", "referenced" if job["used_reference"] else ""]
     title = job["title"] or f"{job['character'].capitalize()} {job['beat']} (webcam)"
     job["asset"] = _save_generated_asset(job["character"], vid.content, ".mp4", "video", title, [t for t in tags if t])
     job["status"] = "done"
@@ -12790,7 +12619,7 @@ def spatiotemporal_split_stitch_clip(
         "temporal_segment": temporal_meta,
         "user_request_fulfilled": user_request or "Fitted to 8s spatiotemporal grid",
         "fidelity_reference_matched": True,
-        "skin_reference": refs.get("current_appearance") or f"Reference skin for {cid}",
+        "appearance_reference": refs.get("current_appearance") or f"Reference for {cid}",
         "output_clip_url": clip.get("url") or f"/assets/webcam/{cid}_8s_stitched.mp4",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
