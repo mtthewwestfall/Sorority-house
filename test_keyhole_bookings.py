@@ -200,6 +200,46 @@ class TestConfirmBooking(unittest.TestCase):
         out = main._confirm_keyhole_booking("stripe", "stripe:cs_x", "priv_nope", {})
         self.assertEqual(out["ignored"], "unknown booking")
 
+    @patch("main.db")
+    def test_wrong_amount_rejected(self, mock_db):
+        mock_conn, mock_cur = _mock_db()
+        mock_db.return_value = mock_conn
+        show = {"show_id": "priv_b1", "show_type": "private", "status": "PAYMENT_PENDING",
+                "customer_id": "usr_alice", "price": 19.99, "package": "intro"}
+        mock_cur.fetchone.return_value = show
+        session = {"id": "cs_test_cheat", "amount_total": 799, "currency": "usd"}
+        out = main._confirm_keyhole_booking("stripe", "stripe:cs_test_cheat", "priv_b1", session)
+        self.assertEqual(out["ignored"], "amount mismatch")
+        sqls = " ".join(str(c.args[0]) for c in mock_cur.execute.call_args_list)
+        self.assertNotIn("SET status='PAID'", sqls)
+        self.assertNotIn("INSERT INTO keyhole_payments", sqls)
+
+    @patch("main.db")
+    def test_wrong_currency_rejected(self, mock_db):
+        mock_conn, mock_cur = _mock_db()
+        mock_db.return_value = mock_conn
+        show = {"show_id": "priv_b1", "show_type": "private", "status": "PAYMENT_PENDING",
+                "customer_id": "usr_alice", "price": 19.99, "package": "intro"}
+        mock_cur.fetchone.return_value = show
+        session = {"id": "cs_test_fx", "amount_total": 1999, "currency": "eur"}
+        out = main._confirm_keyhole_booking("stripe", "stripe:cs_test_fx", "priv_b1", session)
+        self.assertEqual(out["ignored"], "amount mismatch")
+        sqls = " ".join(str(c.args[0]) for c in mock_cur.execute.call_args_list)
+        self.assertNotIn("SET status='PAID'", sqls)
+
+    @patch("main.db")
+    def test_missing_amount_rejected(self, mock_db):
+        mock_conn, mock_cur = _mock_db()
+        mock_db.return_value = mock_conn
+        show = {"show_id": "priv_b1", "show_type": "private", "status": "PAYMENT_PENDING",
+                "customer_id": "usr_alice", "price": 19.99, "package": "intro"}
+        mock_cur.fetchone.return_value = show
+        out = main._confirm_keyhole_booking("stripe", "stripe:cs_test_none", "priv_b1",
+                                            {"id": "cs_test_none", "currency": "usd"})
+        self.assertEqual(out["ignored"], "amount mismatch")
+        sqls = " ".join(str(c.args[0]) for c in mock_cur.execute.call_args_list)
+        self.assertNotIn("SET status='PAID'", sqls)
+
 
 class TestBookingsMine(unittest.TestCase):
     @patch("main.db")

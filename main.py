@@ -7703,10 +7703,18 @@ def _confirm_keyhole_booking(provider: str, payment_id: str, show_id: str, sessi
                 return {"ok": True, "booking": show_id, "already": show.get("status"),
                         "user_id": show.get("customer_id")}
             amount = session_obj.get("amount_total")
+            currency = (session_obj.get("currency") or "usd").lower()
             price = float(show.get("price") or 0)
-            if amount is not None and price > 0 and int(amount) != round(price * 100):
-                print(f"[{provider}] {payment_id}: booking {show_id} paid {amount} != price {price}",
-                      flush=True)
+            expected_cents = round(price * 100)
+            try:
+                paid_cents = int(amount)
+            except (TypeError, ValueError):
+                paid_cents = None
+            if paid_cents is None or paid_cents != expected_cents or currency != "usd":
+                print(f"[{provider}] {payment_id}: booking {show_id} payment rejected: "
+                      f"paid {amount} {currency} != expected {expected_cents} usd "
+                      f"(package price {price})", flush=True)
+                return {"ok": True, "ignored": "amount mismatch"}
             cur.execute("UPDATE keyhole_shows SET status='PAID', updated_at=now() WHERE show_id=%s", (show_id,))
             cur.execute(
                 "INSERT INTO keyhole_payments (payment_id, provider, user_id, package) "
