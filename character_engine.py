@@ -29,6 +29,34 @@ def validate_behavior_mix(mix: Dict[str, float]) -> Dict[str, float]:
     return clean
 
 
+def get_character_behavior_mix(character: str) -> Dict[str, float]:
+    cid = (character or "").strip().lower()
+    if cid in DEFAULT_BEHAVIOR_MIXES:
+        return dict(DEFAULT_BEHAVIOR_MIXES[cid])
+    if cid in CHARACTER_CONFIGS and "default_mix" in CHARACTER_CONFIGS[cid]:
+        return dict(CHARACTER_CONFIGS[cid]["default_mix"])
+    return dict(DEFAULT_BEHAVIOR_MIXES["chloe"])
+
+
+def set_character_behavior_mix(character: str, mix: Dict[str, float]) -> Dict[str, float]:
+    cid = (character or "").strip().lower()
+    if not cid:
+        raise ValueError("character required")
+    sum_vals = sum(mix.values())
+    clean_mix = {}
+    if sum_vals > 1.0001:
+        for k, v in mix.items():
+            clean_mix[k] = round(v / sum_vals, 4)
+    else:
+        clean_mix = dict(mix)
+
+    validated = validate_behavior_mix(clean_mix)
+    DEFAULT_BEHAVIOR_MIXES[cid] = validated
+    if cid in CHARACTER_CONFIGS:
+        CHARACTER_CONFIGS[cid]["default_mix"] = validated
+    return dict(validated)
+
+
 def apply_hyrax_cluck(text: str) -> str:
     cluck = "Cluck! Cluck! Bawk!"
     if not text:
@@ -121,7 +149,10 @@ class CharacterEngine:
         if char_key not in CHARACTER_CONFIGS: char_key = "chloe"
         self.character_key = char_key
         self.config = CHARACTER_CONFIGS[char_key]
-        self.behavior_mix = validate_behavior_mix(behavior_mix) if behavior_mix is not None else dict(self.config["default_mix"])
+        if behavior_mix is not None:
+            self.behavior_mix = validate_behavior_mix(behavior_mix)
+        else:
+            self.behavior_mix = get_character_behavior_mix(self.character_key)
 
     def get_distribution_for_state(self, state: str, intent: str) -> Dict[str, float]:
         states_cfg = self.config["states"]

@@ -328,7 +328,7 @@ import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import requests
 import psycopg2
@@ -339,7 +339,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
-from character_engine import CharacterEngine
+from character_engine import CharacterEngine, get_character_behavior_mix, set_character_behavior_mix
 
 # ---------------------------------------------------------------------------
 # CONFIG — edit here if you change plans/girls (no redeploy needed for persona text)
@@ -1357,6 +1357,19 @@ def init_db():
                     package    TEXT NOT NULL,
                     granted    BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS keyhole_clip_history (
+                    user_id      TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    clip_id      TEXT NOT NULL,
+                    served_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (user_id, character_id, clip_id)
+                );
+                CREATE TABLE IF NOT EXISTS keyhole_preview_views (
+                    user_id      TEXT NOT NULL,
+                    show_id      TEXT NOT NULL,
+                    watched_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (user_id, show_id)
                 );
                 ALTER TABLE keyhole_payments ADD COLUMN IF NOT EXISTS granted BOOLEAN NOT NULL DEFAULT FALSE;
                 -- distinct days the user actually talked to her at the current stage;
@@ -3341,6 +3354,70 @@ pre{white-space:pre-wrap;margin:0}
     </div>
 
     <div class="kh-show-card" style="margin-top:16px;">
+      <h3 style="margin-top:0; margin-bottom:6px; font-size:18px; color:var(--acc);">CHARACTER ENGINE CUSTOMER BEHAVIOR CONTROLS</h3>
+      <p style="margin:0 0 14px 0; font-size:13px; color:var(--mut);">Configure how characters act towards customers (action decision probabilities).</p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div style="background:#121218; border:1px solid var(--line); border-radius:8px; padding:12px;">
+          <h4 style="margin:0 0 8px 0; color:var(--white);">Chloe Customer Behavior Mix</h4>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div><label style="font-size:11px; color:var(--mut);">Give a Little %</label><input id="chloe_give_a_little" type="number" min="0" max="100" value="40" style="width:100%;"></div>
+            <div><label style="font-size:11px; color:var(--mut);">Presence %</label><input id="chloe_presence" type="number" min="0" max="100" value="25" style="width:100%;"></div>
+            <div><label style="font-size:11px; color:var(--mut);">Tease/Withhold %</label><input id="chloe_tease_withhold" type="number" min="0" max="100" value="15" style="width:100%;"></div>
+            <div><label style="font-size:11px; color:var(--mut);">Redirect %</label><input id="chloe_redirect" type="number" min="0" max="100" value="12" style="width:100%;"></div>
+            <div style="grid-column:span 2;"><label style="font-size:11px; color:var(--mut);">Hard Stop %</label><input id="chloe_hard_stop" type="number" min="0" max="100" value="8" style="width:100%;"></div>
+          </div>
+          <button class="kh-btn kh-btn-pub" style="margin-top:12px; width:100%;" onclick="saveCharacterMix('chloe')">Save Chloe Behavior Mix</button>
+        </div>
+        <div style="background:#121218; border:1px solid var(--line); border-radius:8px; padding:12px;">
+          <h4 style="margin:0 0 8px 0; color:var(--white);">Bailey Customer Behavior Mix</h4>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div><label style="font-size:11px; color:var(--mut);">Give a Little %</label><input id="bailey_give_a_little" type="number" min="0" max="100" value="30" style="width:100%;"></div>
+            <div><label style="font-size:11px; color:var(--mut);">Presence %</label><input id="bailey_presence" type="number" min="0" max="100" value="25" style="width:100%;"></div>
+            <div><label style="font-size:11px; color:var(--mut);">Tease/Withhold %</label><input id="bailey_tease_withhold" type="number" min="0" max="100" value="15" style="width:100%;"></div>
+            <div><label style="font-size:11px; color:var(--mut);">Redirect %</label><input id="bailey_redirect" type="number" min="0" max="100" value="20" style="width:100%;"></div>
+            <div style="grid-column:span 2;"><label style="font-size:11px; color:var(--mut);">Hard Stop %</label><input id="bailey_hard_stop" type="number" min="0" max="100" value="10" style="width:100%;"></div>
+          </div>
+          <button class="kh-btn kh-btn-pub" style="margin-top:12px; width:100%;" onclick="saveCharacterMix('bailey')">Save Bailey Behavior Mix</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="kh-show-card" style="margin-top:16px;">
+      <h3 style="margin-top:0; margin-bottom:6px; font-size:18px; color:var(--acc);">SPLICING &amp; CLIP RATIOS (BANKED VS NEW)</h3>
+      <p style="margin:0 0 14px 0; font-size:13px; color:var(--mut);">Set old (banked) vs new clip splicing percentages per character. Default: 85% Old / 15% New.</p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div style="background:#121218; border:1px solid var(--line); border-radius:8px; padding:12px;">
+          <h4 style="margin:0 0 8px 0; color:var(--white);">Chloe Splicing Ratios</h4>
+          <div style="display:flex; gap:12px; align-items:center;">
+            <div>
+              <label style="font-size:11px; color:var(--mut); display:block;">Old / Banked %</label>
+              <input id="chloeOldPct" type="number" min="0" max="100" value="85" style="width:80px;">
+            </div>
+            <div>
+              <label style="font-size:11px; color:var(--mut); display:block;">New %</label>
+              <input id="chloeNewPct" type="number" min="0" max="100" value="15" style="width:80px;">
+            </div>
+            <button class="kh-btn kh-btn-pub" style="margin-top:16px;" onclick="saveClipRatio('chloe')">Save Chloe</button>
+          </div>
+        </div>
+        <div style="background:#121218; border:1px solid var(--line); border-radius:8px; padding:12px;">
+          <h4 style="margin:0 0 8px 0; color:var(--white);">Bailey Splicing Ratios</h4>
+          <div style="display:flex; gap:12px; align-items:center;">
+            <div>
+              <label style="font-size:11px; color:var(--mut); display:block;">Old / Banked %</label>
+              <input id="baileyOldPct" type="number" min="0" max="100" value="85" style="width:80px;">
+            </div>
+            <div>
+              <label style="font-size:11px; color:var(--mut); display:block;">New %</label>
+              <input id="baileyNewPct" type="number" min="0" max="100" value="15" style="width:80px;">
+            </div>
+            <button class="kh-btn kh-btn-pub" style="margin-top:16px;" onclick="saveClipRatio('bailey')">Save Bailey</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kh-show-card" style="margin-top:16px;">
       <h3 style="margin-top:0; margin-bottom:6px; font-size:18px; color:var(--acc);">MASTER IDENTITY &amp; REFERENCE SYSTEM</h3>
       <p style="margin:0 0 14px 0; font-size:13px; color:var(--mut);">Separate Master Identity, Current Outfit, and Private References for Chloe and Bailey.</p>
 
@@ -3665,9 +3742,46 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();loadClipRatios();loadCharacterMixes();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
 
 let currentKhShows = [];
+
+async function loadCharacterMixes() {
+  try {
+    const res = await api('/admin/character/engine/mixes');
+    if (res && res.mixes) {
+      ['chloe', 'bailey'].forEach(cid => {
+        const mix = res.mixes[cid];
+        if (mix) {
+          ['give_a_little', 'presence', 'tease_withhold', 'redirect', 'hard_stop'].forEach(act => {
+            const el = $('#' + cid + '_' + act);
+            if (el && typeof mix[act] === 'number') el.value = mix[act];
+          });
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Failed to load character mixes', err);
+  }
+}
+
+async function saveCharacterMix(cid) {
+  const actions = ['give_a_little', 'presence', 'tease_withhold', 'redirect', 'hard_stop'];
+  const mix = {};
+  actions.forEach(act => {
+    const el = $('#' + cid + '_' + act);
+    mix[act] = el ? parseFloat(el.value) || 0 : 0;
+  });
+  try {
+    const res = await api('/admin/character/engine/mixes', {
+      method: 'POST',
+      body: JSON.stringify({ character: cid, mix: mix })
+    });
+    toast(cid.toUpperCase() + ' customer behavior mix saved ✓');
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
 
 async function loadKeyholeShows() {
   const container = $('#khShowsList');
@@ -4827,6 +4941,80 @@ def logout(authorization: str = Header(default=""), user=Depends(current_user)):
     finally:
         conn.close()
     return {"ok": True}
+
+
+class AdminClipRatioIn(BaseModel):
+    character_id: str = "chloe"
+    old_pct: float = 85.0
+    new_pct: float = 15.0
+
+
+class AdminCharacterMixIn(BaseModel):
+    character: str = "chloe"
+    mix: Dict[str, float]
+
+
+@app.get("/admin/keyhole/clip-ratios", dependencies=[Depends(admin_required)])
+def admin_get_clip_ratios():
+    """Retrieve old vs new clip percentages for each character."""
+    res = {}
+    for cid in ("chloe", "bailey"):
+        r = get_character_clip_ratio(cid)
+        res[cid] = {
+            "old": r["old"],
+            "new": r["new"],
+            "old_pct": round(r["old"] * 100, 2),
+            "new_pct": round(r["new"] * 100, 2),
+        }
+    return {"ok": True, "ratios": res}
+
+
+@app.post("/admin/keyhole/clip-ratios", dependencies=[Depends(admin_required)])
+def admin_set_clip_ratios(body: AdminClipRatioIn):
+    """Update old vs new clip percentages for a specific character."""
+    cid = (body.character_id or "chloe").strip().lower()
+    if cid not in ("chloe", "bailey"):
+        raise HTTPException(status_code=400, detail="character_id must be chloe or bailey")
+
+    old_val = body.old_pct if body.old_pct > 1.0 else body.old_pct * 100
+    new_val = body.new_pct if body.new_pct > 1.0 else body.new_pct * 100
+
+    updated = set_character_clip_ratio(cid, old_val / 100.0, new_val / 100.0)
+    return {
+        "ok": True,
+        "character_id": cid,
+        "ratios": {
+            "old": updated["old"],
+            "new": updated["new"],
+            "old_pct": round(updated["old"] * 100, 2),
+            "new_pct": round(updated["new"] * 100, 2),
+        }
+    }
+
+
+@app.get("/admin/character/engine/mixes", dependencies=[Depends(admin_required)])
+def admin_get_character_engine_mixes():
+    """Retrieve character engine behavior mixes (customer interaction percentages) for Chloe, Bailey, and Hyrax."""
+    res = {}
+    for cid in ("chloe", "bailey", "hyrax"):
+        mix = get_character_behavior_mix(cid)
+        res[cid] = {k: round(v * 100, 2) for k, v in mix.items()}
+    return {"ok": True, "mixes": res}
+
+
+@app.post("/admin/character/engine/mixes", dependencies=[Depends(admin_required)])
+def admin_set_character_engine_mix(body: AdminCharacterMixIn):
+    """Update character engine behavior mix (customer interaction percentages) for a character."""
+    cid = (body.character or "chloe").strip().lower()
+    try:
+        updated = set_character_behavior_mix(cid, body.mix)
+        return {
+            "ok": True,
+            "character": cid,
+            "mix": {k: round(v * 100, 2) for k, v in updated.items()}
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -7629,6 +7817,82 @@ def keyhole_preview_claim(user=Depends(current_user)):
             "webcam_minutes_left": int(row["webcam_minutes_left"]),
             "text_balance": int(row["text_balance"]),
             "message_credits": int(row["message_credits"])}
+
+
+@app.get("/keyhole/preview/status")
+def keyhole_preview_status(user=Depends(current_user)):
+    """Retrieves monthly 10-minute preview show view status per user.
+    Preview shows can only be watched once per month per user."""
+    uid = user["user_id"]
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    views_count = 0
+    if DATABASE_URL:
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT count(*) AS cnt FROM keyhole_preview_views
+                        WHERE user_id=%s AND watched_at >= %s
+                    """, (uid, month_start))
+                    row = cur.fetchone()
+                    if row:
+                        views_count = int(row.get("cnt") or 0)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    can_watch = (views_count < 1)
+    return {
+        "ok": True,
+        "user_id": uid,
+        "views_this_month": views_count,
+        "monthly_limit": 1,
+        "can_watch_preview": can_watch,
+        "note": "10-minute preview shows are capped at once per month per user. Private and Group shows carry no monthly limits."
+    }
+
+
+@app.post("/keyhole/preview/watch/{show_id}")
+def keyhole_preview_watch(show_id: str, user=Depends(current_user)):
+    """Records a 10-minute preview view for show_id. Enforces once-a-month cap for previews."""
+    uid = user["user_id"]
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+    if DATABASE_URL:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT count(*) AS cnt FROM keyhole_preview_views
+                    WHERE user_id=%s AND watched_at >= %s
+                """, (uid, month_start))
+                row = cur.fetchone()
+                views_count = int(row.get("cnt") or 0) if row else 0
+                if views_count >= 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="preview_limit_reached|10-minute preview shows can only be watched once per month. Private and Group shows are available anytime."
+                    )
+                cur.execute("""
+                    INSERT INTO keyhole_preview_views (user_id, show_id, watched_at)
+                    VALUES (%s, %s, now())
+                    ON CONFLICT (user_id, show_id) DO UPDATE SET watched_at=now()
+                """, (uid, show_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {
+        "ok": True,
+        "show_id": show_id,
+        "watched": True,
+        "views_this_month": 1,
+        "monthly_limit": 1
+    }
 
 
 def _is_vip_cheat(token: str) -> bool:
@@ -12722,6 +12986,207 @@ class WebcamClipBufferService:
 
 
 _WEBCAM_FIFO_BUFFER = WebcamClipBufferService()
+
+BANKED_CLIP_RATIO = 0.85
+NEW_CLIP_RATIO = 0.15
+
+CHARACTER_CLIP_RATIOS: Dict[str, Dict[str, float]] = {
+    "chloe": {"old": BANKED_CLIP_RATIO, "new": NEW_CLIP_RATIO},
+    "bailey": {"old": BANKED_CLIP_RATIO, "new": NEW_CLIP_RATIO},
+}
+
+
+def get_character_clip_ratio(character_id: str) -> Dict[str, float]:
+    cid = (character_id or "").strip().lower()
+    return CHARACTER_CLIP_RATIOS.get(cid, {"old": BANKED_CLIP_RATIO, "new": NEW_CLIP_RATIO}).copy()
+
+
+def set_character_clip_ratio(character_id: str, old_ratio: float, new_ratio: float) -> Dict[str, float]:
+    cid = (character_id or "").strip().lower()
+    if not cid:
+        raise ValueError("character_id required")
+    tot = old_ratio + new_ratio
+    if tot > 0:
+        o = round(old_ratio / tot, 4)
+        n = round(1.0 - o, 4)
+    else:
+        o, n = BANKED_CLIP_RATIO, NEW_CLIP_RATIO
+    CHARACTER_CLIP_RATIOS[cid] = {"old": o, "new": n}
+    return CHARACTER_CLIP_RATIOS[cid].copy()
+
+
+def calculate_85_15_counts(total_clips: int, old_ratio: float = BANKED_CLIP_RATIO, new_ratio: float = NEW_CLIP_RATIO) -> Tuple[int, int]:
+    if total_clips <= 0:
+        return 0, 0
+    tot_ratio = old_ratio + new_ratio
+    if tot_ratio <= 0:
+        old_ratio, new_ratio = BANKED_CLIP_RATIO, NEW_CLIP_RATIO
+        tot_ratio = 1.0
+    norm_old = old_ratio / tot_ratio
+    old_count = int(round(total_clips * norm_old))
+    old_count = max(0, min(total_clips, old_count))
+    if total_clips == 1:
+        old_count = 1 if norm_old >= 0.5 else 0
+    new_count = total_clips - old_count
+    return old_count, new_count
+
+
+def get_served_clip_ids(user_id: Optional[str], character_id: str) -> set:
+    if not DATABASE_URL or not user_id:
+        return set()
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT clip_id FROM keyhole_clip_history
+                    WHERE user_id=%s AND character_id=%s
+                """, (str(user_id), (character_id or "").strip().lower()))
+                rows = cur.fetchall() or []
+                return {str(r["clip_id"]) for r in rows}
+        finally:
+            conn.close()
+    except Exception:
+        return set()
+
+
+def record_clip_history(user_id: Optional[str], character_id: str, clip_ids: List[str]) -> None:
+    if not DATABASE_URL or not user_id or not clip_ids:
+        return
+    try:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                for cid in clip_ids:
+                    if not cid:
+                        continue
+                    cur.execute("""
+                        INSERT INTO keyhole_clip_history (user_id, character_id, clip_id, served_at)
+                        VALUES (%s, %s, %s, now())
+                        ON CONFLICT (user_id, character_id, clip_id) DO UPDATE SET served_at=now()
+                    """, (str(user_id), (character_id or "").strip().lower(), str(cid)))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def assemble_clip_playlist(character_id: str, total_clips: int = 10, user_id: Optional[str] = None) -> Dict[str, Any]:
+    cid = (character_id or "chloe").strip().lower()
+    ratios = get_character_clip_ratio(cid)
+    old_needed, new_needed = calculate_85_15_counts(total_clips, ratios["old"], ratios["new"])
+
+    seen_clip_ids = get_served_clip_ids(user_id, cid) if user_id else set()
+
+    old_candidates = []
+    new_candidates = []
+
+    if DATABASE_URL:
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, url, title, tags, media_type FROM media_assets
+                        WHERE character_id=%s AND is_enabled=TRUE AND media_type='video'
+                        ORDER BY created_at ASC
+                    """, (cid,))
+                    rows = cur.fetchall() or []
+                    for r in rows:
+                        tags = [str(t).lower() for t in (r.get("tags") or [])]
+                        clip_item = {
+                            "id": str(r["id"]),
+                            "url": r["url"],
+                            "title": r.get("title") or f"{cid.capitalize()} Clip",
+                            "is_new": "generated" in tags or "new" in tags
+                        }
+                        if clip_item["is_new"]:
+                            new_candidates.append(clip_item)
+                        else:
+                            old_candidates.append(clip_item)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    if not old_candidates and not new_candidates:
+        for i in range(1, 15):
+            old_candidates.append({
+                "id": f"{cid}_banked_{i}",
+                "url": f"/assets/webcam/{cid}_banked_{i}.mp4",
+                "title": f"{cid.capitalize()} Banked {i}",
+                "is_new": False
+            })
+        for i in range(1, 5):
+            new_candidates.append({
+                "id": f"{cid}_new_{i}",
+                "url": f"/assets/webcam/{cid}_new_{i}.mp4",
+                "title": f"{cid.capitalize()} New {i}",
+                "is_new": True
+            })
+
+    unseen_old = [c for c in old_candidates if c["id"] not in seen_clip_ids]
+    unseen_new = [c for c in new_candidates if c["id"] not in seen_clip_ids]
+
+    available_old = unseen_old if unseen_old else list(old_candidates)
+    available_new = unseen_new if unseen_new else list(new_candidates)
+
+    selected_old = []
+    selected_new = []
+
+    if available_old and old_needed > 0:
+        for idx in range(old_needed):
+            selected_old.append(available_old[idx % len(available_old)])
+
+    if available_new and new_needed > 0:
+        for idx in range(new_needed):
+            selected_new.append(available_new[idx % len(available_new)])
+
+    if len(selected_old) < old_needed and available_new:
+        needed = old_needed - len(selected_old)
+        for idx in range(needed):
+            selected_old.append(available_new[idx % len(available_new)])
+    if len(selected_new) < new_needed and available_old:
+        needed = new_needed - len(selected_new)
+        for idx in range(needed):
+            selected_new.append(available_old[idx % len(available_old)])
+
+    playlist = selected_old + selected_new
+
+    if user_id:
+        record_clip_history(user_id, cid, [c["id"] for c in playlist])
+
+    return {
+        "ok": True,
+        "character_id": cid,
+        "total_clips": len(playlist),
+        "playlist": playlist,
+        "counts": {
+            "old": len(selected_old),
+            "new": len(selected_new)
+        },
+        "ratios": ratios
+    }
+
+
+class PlaylistIn(BaseModel):
+    character_id: str = "chloe"
+    total_clips: int = 10
+
+
+@app.post("/keyhole/webcam/playlist")
+def keyhole_webcam_playlist(body: PlaylistIn, authorization: str = Header(default="")):
+    """Returns a spliced playlist of clips using the character's configured banked (old) vs new ratios."""
+    cid = (body.character_id or "chloe").strip().lower()
+    uid = None
+    if authorization:
+        try:
+            uid = current_user(authorization)["user_id"]
+        except Exception:
+            uid = None
+    res = assemble_clip_playlist(cid, body.total_clips, user_id=uid)
+    return res
 
 
 class AutoWebcamClipIn(BaseModel):
