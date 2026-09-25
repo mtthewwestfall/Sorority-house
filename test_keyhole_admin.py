@@ -10,8 +10,6 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         os.environ["ADMIN_SECRET"] = "test-admin-secret"
         self.headers = {"X-Admin-Secret": "test-admin-secret"}
         self.client = TestClient(main.app)
-        # Reset demo shows state
-        self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "reset"}, headers=self.headers)
 
     def test_get_shows(self):
         response = self.client.get("/admin/keyhole/shows", headers=self.headers)
@@ -40,28 +38,46 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_state_machine_validation(self):
-        sim_resp = self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "private_request"}, headers=self.headers)
-        shows = sim_resp.json()["shows"]
-        show_id = [s for s in shows if s["show_type"] == "private"][-1]["id"]
+        # Create a public show that starts in SCHEDULED status
+        create_resp = self.client.post(
+            "/admin/keyhole/shows/create-public",
+            json={
+                "character": "Chloe",
+                "scheduled_at": "Tonight — 9:00 PM",
+                "price": "$4.99",
+                "details": "Validation test show"
+            },
+            headers=self.headers
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        show_id = create_resp.json()["show"]["id"]
 
-        # Attempting to END a show that is READY (not LIVE) should fail with 400
+        # Attempting to END a show that is SCHEDULED (not LIVE) should fail with 400
         end_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/end", headers=self.headers)
         self.assertEqual(end_fail.status_code, 400)
 
-        # Attempting to PUBLISH a show that is READY (not PREVIEW_READY / approved) should fail with 400
+        # Attempting to PUBLISH a show that is SCHEDULED (not PREVIEW_READY / approved) should fail with 400
         pub_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/publish-preview", json={"publish_telegram": True}, headers=self.headers)
         self.assertEqual(pub_fail.status_code, 400)
 
     def test_private_show_workflow(self):
-        # 1. Trigger private show request
-        sim_resp = self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "private_request"}, headers=self.headers)
-        self.assertEqual(sim_resp.status_code, 200)
-        shows = sim_resp.json()["shows"]
-        priv_show = [s for s in shows if s["show_type"] == "private"][-1]
-        show_id = priv_show["id"]
+        # 1. Create a show to drive through workflow
+        create_resp = self.client.post(
+            "/admin/keyhole/shows/create-public",
+            json={
+                "character": "Chloe",
+                "scheduled_at": "Tonight — 9:00 PM",
+                "price": "$19.99",
+                "details": "Chloe Private Show"
+            },
+            headers=self.headers
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        show = create_resp.json()["show"]
+        show_id = show["id"]
 
-        self.assertEqual(priv_show["character"], "Chloe")
-        self.assertEqual(priv_show["status"], "READY")
+        self.assertEqual(show["character"], "Chloe")
+        self.assertEqual(show["status"], "SCHEDULED")
 
         # 2. START SHOW
         start_resp = self.client.post(f"/admin/keyhole/shows/{show_id}/start", headers=self.headers)
