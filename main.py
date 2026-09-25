@@ -78,6 +78,10 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "reference_asset_id","duration_seconds"}
                                                             -> {"job_id"} Veo motion clip
   GET  /admin/generator/webcam/{job_id}                  -> {"job":{status,asset,error}}
+  POST /admin/keyhole/render-video (X-Admin-Secret)      {"character_id","title","tags",
+                                                            "chapters":[{"asset_id","minutes"}]}
+                                                            -> {"job_id"} one-video render
+  GET  /admin/keyhole/render-video/{job_id}              -> {status,progress,asset_id,error}
   GET  /admin/keyhole/shows/{show_id}/preview            -> pre-live stage preview (plates,
                                                             references, schedule). Does not go live
   GET  /admin/keyhole/content/sites                      -> preset content-maker site list
@@ -3595,6 +3599,23 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
     </div>
   </div>
   <div class="card">
+    <h4 style="margin-top:0">Render One-Video</h4>
+    <div class="mut" style="margin-bottom:8px">Stitch chapters into one continuous video: each chapter loops a single clip seamlessly, then chapters melt together. The finished file is saved straight into the media library below.</div>
+    <div class="row2">
+      <input id="rCharId" placeholder="Character ID (e.g. chloe)" style="flex:1" value="chloe">
+      <input id="rTitle" placeholder="Title (e.g. Chloe preview - one video)" style="flex:2">
+    </div>
+    <div class="row2">
+      <input id="rTags" placeholder="Tags (comma separated, e.g. idle, onevideo)" style="flex:1">
+    </div>
+    <div id="rChapters"></div>
+    <div class="row2" style="margin-top:8px">
+      <button class="s" onclick="rAddChapter()">+ Add chapter</button>
+      <button class="p" onclick="rStartRender()">Render video</button>
+      <span id="rStatus" class="mut"></span>
+    </div>
+  </div>
+  <div class="card">
     <div class="row2" style="justify-content:space-between">
       <h4 style="margin:0">Media Library</h4>
       <div class="row2" style="margin:0">
@@ -4220,6 +4241,37 @@ async function importMediaUrlAsset(){
     loadMediaAssets();
   }catch(e){toast(e.message,true);}
 }
+
+function rAddChapter(assetId='', minutes=''){
+  const d=document.createElement('div'); d.className='row2'; d.style.marginTop='4px';
+  d.innerHTML='<input placeholder="Asset ID" type="number" style="width:130px">'
+    +'<input placeholder="Minutes" type="number" step="0.25" min="0.25" max="30" style="width:130px">'
+    +'<span class="mut">one clip, looped seamlessly</span>'
+    +'<button class="s" onclick="this.parentElement.remove()">x</button>';
+  d.children[0].value=assetId; d.children[1].value=minutes;
+  $('#rChapters').appendChild(d);
+}
+async function rStartRender(){
+  const rows=[...$('#rChapters').children].map(r=>({asset_id:parseInt(r.children[0].value,10),minutes:parseFloat(r.children[1].value)}));
+  if(!rows.length||rows.some(r=>!r.asset_id||!(r.minutes>0))){toast('Add at least one chapter with an asset ID and minutes',true);return;}
+  try{
+    $('#rStatus').textContent='starting...';
+    const j=await api('/admin/keyhole/render-video',{method:'POST',body:JSON.stringify({
+      character_id:($('#rCharId').value||'').trim()||'chloe',
+      title:$('#rTitle').value.trim(),
+      tags:($('#rTags').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+      chapters:rows})});
+    const poll=setInterval(async()=>{
+      try{
+        const s=await api('/admin/keyhole/render-video/'+j.job_id);
+        $('#rStatus').textContent=s.status+': '+(s.progress||'');
+        if(s.status==='done'){clearInterval(poll);toast('Rendered and saved to the media library!');loadMediaAssets();}
+        if(s.status==='error'){clearInterval(poll);toast('Render failed: '+(s.error||'unknown'),true);}
+      }catch(e){clearInterval(poll);toast(e.message,true);}
+    },5000);
+  }catch(e){toast(e.message,true);}
+}
+rAddChapter();
 
 let webcamStream=null, mediaRecorder=null, recChunks=[];
 async function startWebcamStream(){
@@ -11512,6 +11564,198 @@ async def admin_upload_media(
             return {"ok": True, "asset": dict(asset)}
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# KEYHOLE ONE-VIDEO RENDER (admin): stitch chapter loops into one continuous
+# video with ffmpeg, saved straight into the media library as a new asset.
+# ---------------------------------------------------------------------------
+_RENDER_JOBS: Dict[str, Dict[str, Any]] = {}
+
+
+def _render_ffmpeg_available() -> bool:
+    import shutil
+    return shutil.which("ffmpeg") is not None
+
+
+def _render_run(cmd: list) -> None:
+    import subprocess
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("ffmpeg failed: " + (r.stderr or "")[-400:])
+
+
+def _render_probe_duration(path: str) -> float:
+    import subprocess
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                        "-of", "csv=p=0", path], capture_output=True, text=True, timeout=30)
+    return float(r.stdout.strip())
+
+
+class RenderChapterIn(BaseModel):
+    asset_id: int
+    minutes: float
+
+
+class RenderVideoIn(BaseModel):
+    character_id: str
+    title: str = ""
+    tags: List[str] = []
+    chapters: List[RenderChapterIn]
+    crf: int = 23
+
+
+def _run_render_job(job_id: str, character_id: str, title: str, tags: list,
+                    chapters: list, crf: int) -> None:
+    import subprocess  # noqa: F401 (kept for parity with local render scripts)
+    import tempfile
+    import shutil
+    job = _RENDER_JOBS[job_id]
+    tmp = tempfile.mkdtemp(prefix="onevideo_")
+    try:
+        job["status"] = "rendering"
+        conn = db()
+        try:
+            srcs: List[tuple] = []
+            with conn.cursor() as cur:
+                for ch in chapters:
+                    cur.execute(
+                        "SELECT id, file_path, media_type FROM media_assets "
+                        "WHERE id=%s AND character_id=%s",
+                        (ch["asset_id"], character_id))
+                    row = cur.fetchone()
+                    if not row:
+                        raise ValueError(f"asset {ch['asset_id']} not found for {character_id}")
+                    fp = row["file_path"] or ""
+                    local = os.path.join(UPLOAD_DIR, os.path.basename(fp)) if fp else ""
+                    if not fp or not os.path.exists(local):
+                        raise ValueError(f"asset {ch['asset_id']} has no local file to render from")
+                    if (row["media_type"] or "") != "video":
+                        raise ValueError(f"asset {ch['asset_id']} is not a video")
+                    srcs.append((local, float(ch["minutes"])))
+        finally:
+            conn.close()
+
+        vf_norm = ("scale=720:1280:force_original_aspect_ratio=increase,"
+                   "crop=720:1280,setsar=1,fps=30")
+        built: List[str] = []
+        for i, (src, minutes) in enumerate(srcs):
+            job["progress"] = f"chapter {i + 1}/{len(srcs)}: looping"
+            norm = os.path.join(tmp, f"n{i}.mp4")
+            _render_run(["ffmpeg", "-v", "error", "-y", "-i", src, "-vf", vf_norm,
+                         "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
+                         "-pix_fmt", "yuv420p", "-an", norm])
+            D = _render_probe_duration(norm)
+            target = minutes * 60.0
+            xf = 0.8
+            N = max(2, round((target - xf) / (D - xf)))
+            inputs: List[str] = []
+            for _ in range(N):
+                inputs += ["-i", norm]
+            fc = ["[0:v][1:v]xfade=transition=fade:duration=%.1f:offset=%.3f[x1]" % (xf, D - xf)]
+            chain = 2 * D - xf
+            for k in range(2, N):
+                fc.append("[x%d][%d:v]xfade=transition=fade:duration=%.1f:offset=%.3f[x%d]"
+                          % (k - 1, k, xf, chain - xf, k))
+                chain += D - xf
+            out = os.path.join(tmp, f"c{i}.mp4")
+            _render_run(["ffmpeg", "-v", "error", "-y"] + inputs +
+                        ["-filter_complex", ";".join(fc), "-map", "[x%d]" % (N - 1),
+                         "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
+                         "-pix_fmt", "yuv420p", out])
+            built.append(out)
+
+        job["progress"] = "joining chapters"
+        ds = [_render_probe_duration(f) for f in built]
+        args: List[str] = []
+        for f in built:
+            args += ["-i", f]
+        fc2 = ["[0:v][1:v]xfade=transition=fade:duration=1.5:offset=%.3f[x1]" % (ds[0] - 1.5)]
+        total = ds[0] + ds[1] - 1.5
+        for i in range(2, len(built)):
+            fc2.append("[x%d][%d:v]xfade=transition=fade:duration=1.5:offset=%.3f[x%d]"
+                       % (i - 1, i, total - 1.5, i))
+            total = total + ds[i] - 1.5
+        final_tmp = os.path.join(tmp, "final.mp4")
+        _render_run(["ffmpeg", "-v", "error", "-y"] + args +
+                    ["-filter_complex", ";".join(fc2), "-map", "[x%d]" % (len(built) - 1),
+                     "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
+                     "-pix_fmt", "yuv420p", "-movflags", "+faststart", final_tmp])
+
+        size = os.path.getsize(final_tmp)
+        if size > MAX_MEDIA_UPLOAD_BYTES:
+            raise ValueError(f"rendered file is {size // (1024 * 1024)}MB, "
+                             f"over the {MAX_MEDIA_UPLOAD_BYTES // (1024 * 1024)}MB upload limit")
+
+        safe_name = f"{character_id}_{secrets.token_hex(8)}.mp4"
+        shutil.move(final_tmp, os.path.join(UPLOAD_DIR, safe_name))
+        public_url = f"/media/files/{safe_name}"
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO media_assets (
+                           character_id, title, media_type, url, file_path, tags,
+                           is_default, is_fallback, is_enabled
+                       ) VALUES (%s, %s, 'video', %s, %s, %s, FALSE, FALSE, TRUE)
+                       RETURNING id""",
+                    (character_id, title.strip() or "One-video render",
+                     public_url, safe_name, Json(tags or [])))
+                asset_id = cur.fetchone()["id"]
+                conn.commit()
+        finally:
+            conn.close()
+        job["status"] = "done"
+        job["asset_id"] = asset_id
+        job["progress"] = "saved to media library"
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)[:500]
+        job["progress"] = "failed"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@app.post("/admin/keyhole/render-video", dependencies=[Depends(admin_required)])
+def admin_render_video(body: RenderVideoIn):
+    """Render a one-video: each chapter loops one clip seamlessly, chapters join
+    with crossfades. Output is saved straight into the media library."""
+    if not _render_ffmpeg_available():
+        raise HTTPException(status_code=501,
+                            detail="ffmpeg is not installed on the server yet")
+    char_id = _validate_character_exists(body.character_id)
+    if not body.chapters or len(body.chapters) > 8:
+        raise HTTPException(status_code=400, detail="1-8 chapters required")
+    total_min = 0.0
+    for ch in body.chapters:
+        if ch.minutes < 0.25 or ch.minutes > 30:
+            raise HTTPException(status_code=400,
+                                detail="each chapter must be 0.25-30 minutes")
+        total_min += ch.minutes
+    if total_min > 40:
+        raise HTTPException(status_code=400,
+                            detail="total render capped at 40 minutes")
+    crf = max(18, min(30, int(body.crf or 23)))
+    job_id = secrets.token_hex(8)
+    _RENDER_JOBS[job_id] = {"status": "queued", "progress": "queued"}
+    threading.Thread(
+        target=_run_render_job,
+        args=(job_id, char_id, body.title or "",
+              list(body.tags or []),
+              [{"asset_id": c.asset_id, "minutes": c.minutes} for c in body.chapters],
+              crf),
+        daemon=True).start()
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/admin/keyhole/render-video/{job_id}", dependencies=[Depends(admin_required)])
+def admin_render_video_status(job_id: str):
+    job = _RENDER_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="unknown render job")
+    return {"ok": True, "job_id": job_id,
+            "status": job.get("status"), "progress": job.get("progress"),
+            "asset_id": job.get("asset_id"), "error": job.get("error")}
 
 
 @app.post("/admin/media/import-url", dependencies=[Depends(admin_required)])
