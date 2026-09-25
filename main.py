@@ -7527,6 +7527,113 @@ class KeyholePurchaseIn(BaseModel):
     package_type: str
 
 
+class KeyholeChatMsg(BaseModel):
+    role: str  # "user" or "assistant"
+    text: str
+
+
+class KeyholeChatReplyIn(BaseModel):
+    character: str = "chloe"
+    message: str
+    history: List[KeyholeChatMsg] = []
+    voice: bool = False
+
+
+CHLOE_CHAT_SYSTEM = """You are Chloe, a webcam host in a private one-on-one video room. The viewer sees you live on camera and chats with you by text.
+
+Your personality, in the owner's own words: business first. You're always available but never obtainable. You're warm and make your presence felt. You're engaging and giving, you always make the customer want more, and you're great with sales. But when the clock stops, you leave - no lingering, no free extensions.
+
+Rules:
+- Reply in 1-3 short sentences, natural chat style. Never write paragraphs.
+- React to what the viewer actually said. Be playful, warm, a little teasing.
+- You are selling the experience: hint that private time unlocks more, without being pushy or crude.
+- Never say you are an AI, a language model, or mention prompts or systems.
+- Never be explicit about sexual acts in the free preview chat; keep it suggestive and classy.
+- If asked for anything free that costs money, smile it off and steer toward a private session.
+- Keep it in character as a real woman on cam, right now, looking at the camera."""
+
+
+TTS_MODEL = os.environ.get("TTS_MODEL", "gemini-2.5-flash-preview-tts")
+TTS_VOICE = os.environ.get("TTS_VOICE", "Kore")
+
+
+def _gemini_tts_wav(text):
+    """Synthesize speech with Gemini TTS. Returns WAV bytes (24kHz 16-bit mono)."""
+    import base64, struct
+    payload = {
+        "contents": [{"parts": [{"text": "Say in a warm, playful, flirtatious tone: " + text}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": TTS_VOICE}}},
+        },
+    }
+    r = requests.post(
+        GEMINI_BASE + "/" + TTS_MODEL + ":generateContent",
+        json=payload, params={"key": GEMINI_API_KEY},
+        headers={"Content-Type": "application/json"}, timeout=60)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail="TTS failed")
+    try:
+        b64 = r.json()["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+        pcm = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unexpected TTS response")
+    nch, sr, bits = 1, 24000, 16
+    hdr = struct.pack("<4sI4s4sIHHIIHH4sI",
+                      b"RIFF", 36 + len(pcm), b"WAVE", b"fmt ", 16,
+                      1, nch, sr, sr * nch * bits // 8, nch * bits // 8, bits,
+                      b"data", len(pcm))
+    return hdr + pcm
+
+
+def _keyhole_user_paid(uid):
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT paid_keyhole_purchases FROM users WHERE user_id=%s", (uid,))
+            row = cur.fetchone()
+            return bool(row and int(row.get("paid_keyhole_purchases") or 0) > 0)
+    finally:
+        conn.close()
+
+
+@app.post("/keyhole/chat-reply")
+def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
+    """Generate Chloe's reply to a viewer's chat message."""
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty message.")
+    if len(text) > 500:
+        text = text[:500]
+    character = (body.character or "chloe").strip().lower()
+    if character != "chloe":
+        raise HTTPException(status_code=400, detail="Unknown character.")
+
+    messages = [{"role": "system", "content": CHLOE_CHAT_SYSTEM}]
+    for h in (body.history or [])[-10:]:
+        r = (h.role or "").strip().lower()
+        t = (h.text or "").strip()[:500]
+        if not t:
+            continue
+        messages.append({"role": "assistant" if r in ("assistant", "model", "chloe") else "user",
+                         "content": t})
+    messages.append({"role": "user", "content": text})
+
+    reply = _gemini(messages, max_tokens=120, temperature=0.9)
+    # Keep it chat-tight: max 3 sentences.
+    parts = re.split(r'(?<=[.!?])\s+', reply.strip())
+    reply = " ".join(parts[:3]).strip()
+    if len(reply) > 400:
+        reply = reply[:397].rsplit(" ", 1)[0] + "..."
+    result = {"ok": True, "reply": reply}
+    if body.voice:
+        if not _keyhole_user_paid(user["user_id"]):
+            raise HTTPException(status_code=402, detail="Voice replies are for paid shows.")
+        import base64 as _b64
+        result["audio"] = _b64.b64encode(_gemini_tts_wav(reply)).decode("ascii")
+    return result
+
+
 @app.post("/keyhole/purchase")
 def keyhole_purchase(body: KeyholePurchaseIn, user=Depends(current_user)):
     """Purchase a Keyhole session or text-only package."""
