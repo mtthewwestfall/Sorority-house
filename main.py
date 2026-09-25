@@ -1582,6 +1582,7 @@ def init_db():
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS published_telegram    BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS published_website     BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS viewer_count          INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS ticket_url            TEXT NOT NULL DEFAULT '';
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS is_demo               BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE keyhole_shows ADD COLUMN IF NOT EXISTS package TEXT NOT NULL DEFAULT '';
@@ -10138,8 +10139,8 @@ def _save_show_db(show: Dict[str, Any]) -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO keyhole_shows (
-                    show_id, id, show_type, customer, customer_id, "character", character_id, status, scheduled_at, price, details, description, viewer_count, preview_url, sanitized_preview_url, preview_approved, preview_status, published_telegram, published_website, is_demo, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    show_id, id, show_type, customer, customer_id, "character", character_id, status, scheduled_at, price, details, description, viewer_count, preview_url, sanitized_preview_url, preview_approved, preview_status, published_telegram, published_website, is_demo, ticket_url, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (show_id) DO UPDATE SET
                     id = EXCLUDED.id,
                     show_type = EXCLUDED.show_type,
@@ -10160,6 +10161,7 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                     published_telegram = EXCLUDED.published_telegram,
                     published_website = EXCLUDED.published_website,
                     is_demo = EXCLUDED.is_demo,
+                    ticket_url = EXCLUDED.ticket_url,
                     updated_at = now()
             """, (
                 sid,
@@ -10181,7 +10183,8 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                 show.get("preview_status", "APPROVED" if show.get("preview_approved") else "NONE"),
                 show.get("published_telegram", False),
                 show.get("published_website", False),
-                show.get("is_demo", False)
+                show.get("is_demo", False),
+                show.get("ticket_url", "")
             ))
             conn.commit()
     finally:
@@ -10203,6 +10206,7 @@ class CreatePublicShowIn(BaseModel):
     scheduled_at: str
     price: Optional[str] = "$4.99"
     details: Optional[str] = ""
+    ticket_url: Optional[str] = ""
 
 
 @app.post("/admin/keyhole/shows/create-public", dependencies=[Depends(admin_required)])
@@ -10230,6 +10234,7 @@ def admin_create_public_show(body: CreatePublicShowIn):
         "published_telegram": False,
         "published_website": False,
         "is_demo": False,
+        "ticket_url": (body.ticket_url or "").strip(),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -10722,7 +10727,7 @@ def user_keyhole_list_shows():
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT show_id, show_type, character_id, title, description, price, scheduled_at, status, created_at
+                SELECT show_id, show_type, character_id, title, description, price, scheduled_at, status, created_at, ticket_url
                 FROM keyhole_shows
                 WHERE show_type='public' AND status IN ('SCHEDULED', 'LIVE', 'ENDED', 'PUBLISHED')
                 ORDER BY CASE WHEN status='LIVE' THEN 1 WHEN status='SCHEDULED' THEN 2 ELSE 3 END, scheduled_at ASC
@@ -10748,7 +10753,8 @@ def user_keyhole_get_show(show_id: str):
         "price": show.get("price"),
         "scheduled_at": show.get("scheduled_at"),
         "status": show.get("status"),
-        "created_at": show.get("created_at")
+        "created_at": show.get("created_at"),
+        "ticket_url": show.get("ticket_url") or ""
     }
     return {"ok": True, "show": public_show}
 
@@ -10756,6 +10762,51 @@ def user_keyhole_get_show(show_id: str):
 @app.post("/keyhole/shows/{show_id}/purchase")
 def user_keyhole_purchase_show(show_id: str, body: KeyholeShowPurchaseIn, user=Depends(current_user)):
     show = keyhole_record_show_payment(show_id=show_id, user_id=user["user_id"], payment_id=body.payment_id)
+    return {"ok": True, "show": show}
+
+
+@app.post("/keyhole/shows/{show_id}/claim-ticket")
+def user_keyhole_claim_ticket(show_id: str, user=Depends(current_user)):
+    """Grants a group-show ticket from the user's most recent verified Stripe payment.
+
+    Payment verification is the only gate: the newest stripe_checkouts row for this
+    user that hasn't already been consumed by an entitlement becomes the ticket's
+    payment reference. No passwords, no passcodes.
+    """
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM keyhole_shows WHERE show_id=%s", (show_id,))
+            show = cur.fetchone()
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found")
+            if show["show_type"] != "public":
+                raise HTTPException(status_code=400, detail="Ticket claim is for group shows.")
+            cur.execute(
+                "SELECT 1 FROM keyhole_entitlements WHERE show_id=%s AND user_id=%s",
+                (show_id, user["user_id"]),
+            )
+            if cur.fetchone():
+                return {"ok": True, "show": _fetch_show_dict(cur, show_id), "already_held": True}
+            cur.execute(
+                """SELECT subscription_id FROM stripe_checkouts
+                   WHERE user_id=%s AND NOT EXISTS (
+                       SELECT 1 FROM keyhole_entitlements e
+                       WHERE e.payment_id = stripe_checkouts.subscription_id
+                   )
+                   ORDER BY created_at DESC LIMIT 1""",
+                (user["user_id"],),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=402,
+                    detail="No verified payment found. Complete the ticket checkout first.",
+                )
+            payment_id = row["subscription_id"]
+    finally:
+        conn.close()
+    show = keyhole_record_show_payment(show_id=show_id, user_id=user["user_id"], payment_id=payment_id)
     return {"ok": True, "show": show}
 
 
