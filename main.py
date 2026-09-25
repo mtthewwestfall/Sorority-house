@@ -12194,8 +12194,10 @@ def admin_generator_webcam(body: GeneratorWebcamIn):
     if ref:
         instance["image"] = {"bytesBase64Encoded": base64.b64encode(ref[0]).decode(), "mimeType": ref[1]}
     payload = {"instances": [instance],
-               "parameters": {"aspectRatio": aspect, "durationSeconds": duration, "sampleCount": 1,
-                              "personGeneration": "allow_adult"}}
+               # NOTE 2026-09-24: personGeneration="allow_adult" is rejected by the Veo API
+               # (400 INVALID_ARGUMENT, "currently not supported"), so the parameter is omitted
+               # and the model default applies.
+               "parameters": {"aspectRatio": aspect, "durationSeconds": duration, "sampleCount": 1}}
     r = requests.post(f"{GEMINI_BASE}/{VIDEO_MODEL}:predictLongRunning", json=payload,
                       headers=_veo_headers(), timeout=MODEL_TIMEOUT_S)
     if r.status_code != 200:
