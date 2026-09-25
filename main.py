@@ -3357,11 +3357,13 @@ pre{white-space:pre-wrap;margin:0}
 <section id="khShow" class="hid">
   <div class="kh-container">
     <details style="margin-bottom:8px; background:#121218; border:1px solid var(--line); border-radius:8px; padding:8px 12px;">
-      <summary style="cursor:pointer; font-weight:600; color:var(--mut); font-size:13px;">⚡ Testing &amp; Simulation Tools (Demo Data Only)</summary>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <button class="s" style="flex:1" onclick="simulateDemoAction('private_request')">+ Simulate Private Request</button>
-        <button class="s" style="flex:1" onclick="simulateDemoAction('reset')">↻ Reset Demo Data</button>
+      <summary style="cursor:pointer; font-weight:600; color:var(--mut); font-size:13px;">⚡ Test Mode — grant webcam minutes (no payment)</summary>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+        <input id="testModeEmail" type="email" placeholder="account email" value="mtthew.westfall@gmail.com" style="flex:2; min-width:200px;">
+        <input id="testModeMinutes" type="number" value="75" min="1" max="1000" style="width:90px;" title="Minutes to grant">
+        <button class="s" style="flex:1" onclick="grantTestMinutes()">Grant test minutes</button>
       </div>
+      <div class="mut" style="margin-top:6px;">Granted minutes work exactly like purchased ones and unlock the private room. Admin only.</div>
     </details>
 
     <div id="khShowsList">
@@ -4026,14 +4028,16 @@ async function createPublicShow() {
   }
 }
 
-async function simulateDemoAction(action) {
+async function grantTestMinutes() {
+  const email = $('#testModeEmail').value.trim();
+  const minutes = +$('#testModeMinutes').value;
+  if (!email || !(minutes > 0)) { toast('Enter an email and minutes', true); return; }
   try {
-    await api('/admin/keyhole/shows/demo-simulate', {
+    const r = await api('/admin/keyhole/grant-minutes', {
       method: 'POST',
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ email, minutes })
     });
-    toast(`Simulated: ${action}`);
-    await loadKeyholeShows();
+    toast(`Granted ${r.minutes_granted}m to ${r.email} — ${r.webcam_minutes_left}m total`);
   } catch (err) {
     toast(err.message, true);
   }
@@ -10060,31 +10064,7 @@ def admin_set_keyhole_config(body: KeyholeConfigIn):
 # KEYHOLE SHOW CONTROL PANEL & WEBCAM ENGINE API ENDPOINTS
 # ---------------------------------------------------------------------------
 
-_KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {
-    "demo_priv_1": {
-        "id": "demo_priv_1",
-        "show_id": "demo_priv_1",
-        "show_type": "private",
-        "customer": "mtthew.westfall@gmail.com",
-        "customer_id": "mtthew.westfall@gmail.com",
-        "character": "Chloe",
-        "character_id": "chloe",
-        "status": "READY",
-        "scheduled_at": "",
-        "price": "$19.99",
-        "details": "",
-        "viewer_count": 1,
-        "preview_url": "",
-        "sanitized_preview_url": "",
-        "preview_approved": False,
-        "preview_status": "NONE",
-        "published_telegram": False,
-        "published_website": False,
-        "is_demo": True,
-        "created_at": "2025-01-01T00:00:00Z",
-        "updated_at": "2025-01-01T00:00:00Z"
-    }
-}
+_KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _get_all_shows_db() -> List[Dict[str, Any]]:
@@ -10698,78 +10678,32 @@ def admin_keyhole_trigger_reminders():
         conn.close()
 
 
-class DemoSimulateIn(BaseModel):
-    action: str
+class KeyholeGrantMinutesIn(BaseModel):
+    email: str
+    minutes: int
 
 
-@app.post("/admin/keyhole/shows/demo-simulate", dependencies=[Depends(admin_required)])
-def admin_demo_simulate(body: DemoSimulateIn):
-    act = body.action.lower()
-    if act == "private_request":
-        show_id = f"priv_{int(time.time()*1000)}_{secrets.token_hex(4)}"
-        show = {
-            "id": show_id,
-            "show_id": show_id,
-            "show_type": "private",
-            "customer": "mtthew.westfall@gmail.com",
-            "customer_id": "mtthew.westfall@gmail.com",
-            "character": "Chloe",
-            "character_id": "chloe",
-            "status": "READY",
-            "scheduled_at": "",
-            "price": "$19.99",
-            "details": "",
-            "description": "",
-            "viewer_count": 1,
-            "preview_url": "",
-            "sanitized_preview_url": "",
-            "preview_approved": False,
-            "preview_status": "NONE",
-            "published_telegram": False,
-            "published_website": False,
-            "is_demo": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        _save_show_db(show)
-    elif act == "reset":
-        for k in list(_KEYHOLE_SHOWS_CACHE.keys()):
-            if _KEYHOLE_SHOWS_CACHE[k].get("is_demo"):
-                del _KEYHOLE_SHOWS_CACHE[k]
-
-        _KEYHOLE_SHOWS_CACHE["demo_priv_1"] = {
-            "id": "demo_priv_1",
-            "show_id": "demo_priv_1",
-            "show_type": "private",
-            "customer": "mtthew.westfall@gmail.com",
-            "customer_id": "mtthew.westfall@gmail.com",
-            "character": "Chloe",
-            "character_id": "chloe",
-            "status": "READY",
-            "scheduled_at": "",
-            "price": "$19.99",
-            "details": "",
-            "description": "",
-            "viewer_count": 1,
-            "preview_url": "",
-            "sanitized_preview_url": "",
-            "preview_approved": False,
-            "preview_status": "NONE",
-            "published_telegram": False,
-            "published_website": False,
-            "is_demo": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        if DATABASE_URL:
-            conn = db()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM keyhole_shows WHERE is_demo = TRUE")
-                conn.commit()
-            finally:
-                conn.close()
-    return {"ok": True, "shows": _get_all_shows_db()}
+@app.post("/admin/keyhole/grant-minutes", dependencies=[Depends(admin_required)])
+def admin_keyhole_grant_minutes(body: KeyholeGrantMinutesIn):
+    """Test mode: grant webcam minutes to an account without a Stripe purchase.
+    Minutes behave exactly like purchased ones (unlock the private room)."""
+    if body.minutes < 1 or body.minutes > 1000:
+        raise HTTPException(status_code=400, detail="minutes must be 1..1000")
+    user = _user_for_email(body.email)
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET webcam_minutes_left = webcam_minutes_left + %s "
+                "WHERE user_id=%s RETURNING webcam_minutes_left",
+                (body.minutes, user["user_id"]))
+            row = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "email": _account_key(body.email),
+            "minutes_granted": body.minutes,
+            "webcam_minutes_left": int(row["webcam_minutes_left"])}
 
 
 # ---------------------------------------------------------------------------
