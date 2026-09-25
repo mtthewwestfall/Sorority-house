@@ -11573,13 +11573,29 @@ async def admin_upload_media(
 _RENDER_JOBS: Dict[str, Dict[str, Any]] = {}
 
 
-def _render_ffmpeg_available() -> bool:
+def _render_ffmpeg_exe() -> "str | None":
+    """ffmpeg binary: system install first, else the imageio-ffmpeg bundle."""
     import shutil
-    return shutil.which("ffmpeg") is not None
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def _render_ffmpeg_available() -> bool:
+    return _render_ffmpeg_exe() is not None
 
 
 def _render_run(cmd: list) -> None:
     import subprocess
+    exe = _render_ffmpeg_exe()
+    if not exe:
+        raise RuntimeError("ffmpeg is not installed on the server")
+    cmd = [exe if (i == 0 and c == "ffmpeg") else c for i, c in enumerate(cmd)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("ffmpeg failed: " + (r.stderr or "")[-400:])
@@ -11587,9 +11603,12 @@ def _render_run(cmd: list) -> None:
 
 def _render_probe_duration(path: str) -> float:
     import subprocess
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                        "-of", "csv=p=0", path], capture_output=True, text=True, timeout=30)
-    return float(r.stdout.strip())
+    exe = _render_ffmpeg_exe()
+    r = subprocess.run([exe, "-i", path], capture_output=True, text=True, timeout=30)
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", r.stderr or "")
+    if not m:
+        raise RuntimeError("could not probe duration of " + os.path.basename(path))
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
 
 
 class RenderChapterIn(BaseModel):
