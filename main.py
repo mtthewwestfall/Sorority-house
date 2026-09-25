@@ -11685,21 +11685,25 @@ def _run_render_job(job_id: str, character_id: str, title: str, tags: list,
             built.append(out)
 
         job["progress"] = "joining chapters"
-        ds = [_render_probe_duration(f) for f in built]
-        args: List[str] = []
-        for f in built:
-            args += ["-i", f]
-        fc2 = ["[0:v][1:v]xfade=transition=fade:duration=1.5:offset=%.3f[x1]" % (ds[0] - 1.5)]
-        total = ds[0] + ds[1] - 1.5
-        for i in range(2, len(built)):
-            fc2.append("[x%d][%d:v]xfade=transition=fade:duration=1.5:offset=%.3f[x%d]"
-                       % (i - 1, i, total - 1.5, i))
-            total = total + ds[i] - 1.5
         final_tmp = os.path.join(tmp, "final.mp4")
-        _render_run(["ffmpeg", "-v", "error", "-y"] + args +
-                    ["-filter_complex", ";".join(fc2), "-map", "[x%d]" % (len(built) - 1),
-                     "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
-                     "-pix_fmt", "yuv420p", "-movflags", "+faststart", final_tmp])
+        if len(built) == 1:
+            _render_run([_render_ffmpeg_exe(), "-v", "error", "-y", "-i", built[0],
+                         "-c", "copy", "-movflags", "+faststart", final_tmp])
+        else:
+            ds = [_render_probe_duration(f) for f in built]
+            args: List[str] = []
+            for f in built:
+                args += ["-i", f]
+            fc2 = ["[0:v][1:v]xfade=transition=fade:duration=1.5:offset=%.3f[x1]" % (ds[0] - 1.5)]
+            total = ds[0] + ds[1] - 1.5
+            for i in range(2, len(built)):
+                fc2.append("[x%d][%d:v]xfade=transition=fade:duration=1.5:offset=%.3f[x%d]"
+                           % (i - 1, i, total - 1.5, i))
+                total = total + ds[i] - 1.5
+            _render_run(["ffmpeg", "-v", "error", "-y"] + args +
+                        ["-filter_complex", ";".join(fc2), "-map", "[x%d]" % (len(built) - 1),
+                         "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
+                         "-pix_fmt", "yuv420p", "-movflags", "+faststart", final_tmp])
 
         size = os.path.getsize(final_tmp)
         if size > MAX_MEDIA_UPLOAD_BYTES:
