@@ -384,6 +384,9 @@ ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 SITE_PASSWORD = ""
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
+ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 MAIL_FROM = os.environ.get("MAIL_FROM", "God's Greek <no-reply@example.com>")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 VERIFY_REDIRECT = os.environ.get("VERIFY_REDIRECT", "")
@@ -5342,6 +5345,43 @@ def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Di
             return {"type": "video" if is_video_req else "image", "url": fallback_url, "title": f"Media from {row.get('name', girl.title())}'s library"}
     finally:
         conn.close()
+
+
+class TTSIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@app.post("/tts")
+def text_to_speech(body: TTSIn, user=Depends(current_user)):
+    """Generate Jessica's Keyhole voice server-side; the API key never reaches the browser."""
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="ElevenLabs is not configured")
+    if not ELEVENLABS_VOICE_ID:
+        raise HTTPException(status_code=503, detail="ElevenLabs voice is not configured")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+    try:
+        r = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{urllib.parse.quote(ELEVENLABS_VOICE_ID, safe='')}",
+            params={"output_format": "mp3_44100_128"},
+            headers={
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json={"text": text, "model_id": ELEVENLABS_MODEL},
+            timeout=90,
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Voice service unavailable")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Voice generation failed ({r.status_code})")
+    return StreamingResponse(
+        iter([r.content]),
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/chat")
