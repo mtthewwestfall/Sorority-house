@@ -7636,7 +7636,25 @@ def _gemini_tts_wav(text):
                       b"data", len(pcm))
     return hdr + pcm
 
-\n\ndef _elevenlabs_tts_mp3(text):\n    """Synthesize Chloe's configured ElevenLabs voice and return MP3 bytes."""\n    r = requests.post(\n        f"https://api.elevenlabs.io/v1/text-to-speech/{urllib.parse.quote(ELEVENLABS_VOICE_ID, safe='')}",\n        params={"output_format": "mp3_44100_128"},\n        headers={\n            "xi-api-key": ELEVENLABS_API_KEY,\n            "Content-Type": "application/json",\n            "Accept": "audio/mpeg",\n        },\n        json={"text": text, "model_id": ELEVENLABS_MODEL},\n        timeout=90,\n    )\n    if r.status_code != 200:\n        raise HTTPException(status_code=502, detail=f"Chloe voice generation failed ({r.status_code})")\n    return r.content\n
+
+
+def _elevenlabs_tts_mp3(text):
+    """Synthesize Chloe's configured ElevenLabs voice and return MP3 bytes."""
+    r = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{urllib.parse.quote(ELEVENLABS_VOICE_ID, safe='')}",
+        params={"output_format": "mp3_44100_128"},
+        headers={
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        },
+        json={"text": text, "model_id": ELEVENLABS_MODEL},
+        timeout=90,
+    )
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Chloe voice generation failed ({r.status_code})")
+    return r.content
+
 def _keyhole_user_paid(uid):
     conn = db()
     try:
