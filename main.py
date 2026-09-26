@@ -78,6 +78,10 @@ API CONTRACT implemented here (point your chat app at these):
                                                             "reference_asset_id","duration_seconds"}
                                                             -> {"job_id"} Veo motion clip
   GET  /admin/generator/webcam/{job_id}                  -> {"job":{status,asset,error}}
+  GET  /admin/autofill/branch  (X-Admin-Secret)          -> {"branch":slug|null} daily branch
+                                                            autofill override (null = auto rotation)
+  POST /admin/autofill/branch  (X-Admin-Secret)          {"branch":slug|null} set/clear the
+                                                            daily branch autofill override
   POST /admin/keyhole/render-video (X-Admin-Secret)      {"character_id","title","tags",
                                                             "chapters":[{"asset_id","minutes"}]}
                                                             -> {"job_id"} one-video render
@@ -1486,6 +1490,13 @@ def init_db():
                 );
                 INSERT INTO promo_counters (key, used) VALUES ('free_audits', 0)
                 ON CONFLICT (key) DO NOTHING;
+
+                -- Daily branch autofill control (key/value; 'branch' = override slug or '' for auto rotation)
+                CREATE TABLE IF NOT EXISTS autofill_control (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
 
                 -- KEYHOLE Webcam Video & Media Assets Library
                 CREATE TABLE IF NOT EXISTS media_assets (
@@ -12613,6 +12624,56 @@ def admin_generator_webcam_status(job_id: str):
     job["asset"] = _save_generated_asset(job["character"], vid.content, ".mp4", "video", title, [t for t in tags if t])
     job["status"] = "done"
     return {"ok": True, "job": job}
+
+
+# Branch slugs the daily autofill can generate. Keep in sync with the
+# autofill script (goals/chloe-webcam-companion-site/hidden_files/
+# chloe_idle_autofill.py) and the admin panel branch dropdown.
+AUTOFILL_BRANCHES = (
+    "breathing", "coffee", "phone", "reading", "typing", "stretching",
+    "hair", "window", "laughing", "water", "waving", "tidying",
+)
+
+
+class AutofillBranchIn(BaseModel):
+    branch: Optional[str] = None  # slug to pin, or null/"" for auto rotation
+
+
+@app.get("/admin/autofill/branch", dependencies=[Depends(admin_required)])
+def admin_autofill_branch_get():
+    """Current daily branch autofill override. null = auto daily rotation."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM autofill_control WHERE key='branch'")
+            row = cur.fetchone()
+            val = (row["value"] if row else "") or ""
+            return {"ok": True, "branch": val or None, "branches": list(AUTOFILL_BRANCHES)}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/autofill/branch", dependencies=[Depends(admin_required)])
+def admin_autofill_branch_set(body: AutofillBranchIn):
+    """Pin the daily branch autofill to one activity, or clear back to auto rotation."""
+    branch = (body.branch or "").strip().lower()
+    if branch and branch not in AUTOFILL_BRANCHES:
+        raise HTTPException(status_code=400, detail=f"Unknown branch '{body.branch}'")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO autofill_control (key, value, updated_at)
+                VALUES ('branch', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                (branch,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "branch": branch or None}
 
 
 @app.get("/keyhole/plates")
