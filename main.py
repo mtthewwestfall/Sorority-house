@@ -1194,6 +1194,8 @@ UPLOAD_DIR = os.environ.get(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "media")
 )
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+VOICE_CACHE_DIR = os.path.join(UPLOAD_DIR, "voice_cache", "chloe")
+os.makedirs(VOICE_CACHE_DIR, exist_ok=True)
 
 ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".ogv", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
 ALLOWED_MEDIA_MIMES = {
@@ -7716,13 +7718,31 @@ def _xai_tts_mp3(text):
     return r.content
 
 def _chloe_voice_mp3(text):
-    """Chloe's spoken reply audio (MP3 bytes), via the configured voice provider."""
+    """Chloe's spoken reply audio (MP3 bytes), via the configured voice provider.
+
+    Every generated clip is saved to the voice cache (keyed by sha1 of the
+    normalized text + provider), so repeats are served from disk instead of
+    burning another TTS call, and every line she ever speaks is banked.
+    """
+    import hashlib
     provider = (CHLOE_VOICE_PROVIDER or "xai").strip().lower()
+    cache_key = hashlib.sha1(f"{provider}:{(text or '').strip().lower()}".encode()).hexdigest()
+    cache_path = os.path.join(VOICE_CACHE_DIR, f"{cache_key}.mp3")
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as fh:
+            return fh.read()
     if provider == "xai" and XAI_API_KEY:
-        return _xai_tts_mp3(text)
-    if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
-        return _elevenlabs_tts_mp3(text)
-    raise HTTPException(status_code=503, detail="Chloe voice is not configured")
+        mp3 = _xai_tts_mp3(text)
+    elif ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
+        mp3 = _elevenlabs_tts_mp3(text)
+    else:
+        raise HTTPException(status_code=503, detail="Chloe voice is not configured")
+    try:
+        with open(cache_path, "wb") as fh:
+            fh.write(mp3)
+    except Exception:
+        pass
+    return mp3
 
 def _keyhole_user_paid(uid):
     conn = db()
