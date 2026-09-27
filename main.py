@@ -584,32 +584,32 @@ KEYHOLE_DEFAULT_CONFIG = {
     "intro_price": 5.99,          # 10-minute starter, one per account for life
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
-    "intro_text_included": 100,
+    "intro_text_included": 70,
     "intro_lifetime_cap": 1,
     "quick_price": 7.99,
     "quick_webcam_minutes": 15,
     "quick_video_replies": 35,
-    "quick_text_included": 100,
+    "quick_text_included": 70,
     "quick_monthly_cap": 3,
     "standard_price": 11.99,
     "standard_webcam_minutes": 30,
     "standard_video_replies": 70,
-    "standard_text_included": 200,
+    "standard_text_included": 120,
     "extended_price": 14.99,
     "extended_webcam_minutes": 45,
     "extended_video_replies": 100,
-    "extended_text_included": 300,
+    "extended_text_included": 170,
     "long_price": 17.99,
     "long_webcam_minutes": 55,
     "long_video_replies": 100,
-    "long_text_included": 300,
+    "long_text_included": 195,
     "premium_price": 19.99,
     "premium_webcam_minutes": 60,
-    "premium_text_included": 300,
+    "premium_text_included": 220,
     "marathon_price": 23.99,
     "marathon_webcam_minutes": 75,
     "marathon_video_replies": 120,
-    "marathon_text_included": 400,
+    "marathon_text_included": 270,
     "premium_fresh_videos": 3,
     "premium_premade_pictures": 5,
     "text_only_price": 5.99,
@@ -7544,7 +7544,7 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
             if pkg == "intro":
                 add_webcam = int(cfg.get("intro_webcam_minutes", 10))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("intro_text_included", 100))
+                add_text = int(cfg.get("intro_text_included", 70))
                 cur.execute("UPDATE users SET intro_bought = intro_bought + 1 WHERE user_id=%s", (user_id,))
             elif pkg == "mini":
                 add_webcam = 10
@@ -7553,27 +7553,27 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
             elif pkg == "quick":
                 add_webcam = int(cfg.get("quick_webcam_minutes", 15))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("quick_text_included", 100))
+                add_text = int(cfg.get("quick_text_included", 70))
                 cur.execute("UPDATE users SET quick_sessions_bought_this_month = quick_sessions_bought_this_month + 1 WHERE user_id=%s", (user_id,))
             elif pkg == "standard":
                 add_webcam = int(cfg.get("standard_webcam_minutes", 30))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("standard_text_included", 200))
+                add_text = int(cfg.get("standard_text_included", 120))
             elif pkg == "extended":
                 add_webcam = int(cfg.get("extended_webcam_minutes", 45))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("extended_text_included", 300))
+                add_text = int(cfg.get("extended_text_included", 170))
             elif pkg == "long":
                 add_webcam = int(cfg.get("long_webcam_minutes", 55))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("long_text_included", 300))
+                add_text = int(cfg.get("long_text_included", 195))
             elif pkg == "marathon":
                 add_webcam = int(cfg.get("marathon_webcam_minutes", 75))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("marathon_text_included", 400))
+                add_text = int(cfg.get("marathon_text_included", 270))
             elif pkg == "premium":
                 add_webcam = int(cfg.get("premium_webcam_minutes", 60))
-                add_text = int(cfg.get("premium_text_included", 300))
+                add_text = int(cfg.get("premium_text_included", 220))
                 add_fresh_videos = int(cfg.get("premium_fresh_videos", 3))
                 # Add picture credits
                 pics = int(cfg.get("premium_premade_pictures", 5))
