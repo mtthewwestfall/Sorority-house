@@ -345,15 +345,16 @@ def _fetch_history(token, girl):
     return r.json().get("messages", [])
 
 
-def _send_chat(token, girl, message, voice=True):
+def _send_chat(token, girl, message, voice=True, history=None):
     if girl not in ALLOWED_MODELS:
         raise BackendError("Only Chloe and Bailey are available on the WebCam show.")
     # Chloe uses the new Keyhole endpoint with Liora voice + updated personality.
     # Bailey stays on the legacy /chat endpoint.
     if girl == "chloe":
-        r = _post("/keyhole/chat-reply",
-                  {"character": "chloe", "message": message, "voice": voice, "room": "preview"},
-                  token=token, timeout=150)
+        payload = {"character": "chloe", "message": message, "voice": voice, "room": "preview"}
+        if history:
+            payload["history"] = history[-10:]
+        r = _post("/keyhole/chat-reply", payload, token=token, timeout=150)
     else:
         r = _post("/chat", {"girl": girl, "message": message}, token=token, timeout=150)
     if r.status_code != 200:
@@ -975,7 +976,21 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     try:
-        out = await _call(update, send_chat, slug, text)
+        hist = []
+        try:
+            hist = await _call(update, fetch_history, slug) or []
+        except Exception:
+            pass
+        # Normalize to [{role, text}] for the backend
+        # /history returns [{sender, message}]
+        norm_hist = []
+        for m in hist:
+            sender = (m.get("sender") or "").lower()
+            role = "user" if sender == "user" else "assistant"
+            t = m.get("message", "")
+            if t:
+                norm_hist.append({"role": role, "text": t})
+        out = await _call(update, send_chat, slug, text, True, norm_hist)
     except BackendError as exc:
         msg = str(exc)
         if exc.code == "out_of_messages" or "remaining" in msg.lower() or "allowance" in msg.lower():
