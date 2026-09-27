@@ -10993,7 +10993,7 @@ class PublishPreviewIn(BaseModel):
 
 
 @app.post("/admin/keyhole/shows/{show_id}/publish-preview", dependencies=[Depends(admin_required)])
-def admin_publish_preview(show_id: str, body: PublishPreviewIn):
+def admin_publish_preview(show_id: str, body: PublishPreviewIn = PublishPreviewIn()):
     shows = {s["id"]: s for s in _get_all_shows_db()}
     show = shows.get(show_id)
     if not show:
@@ -11171,7 +11171,7 @@ def user_keyhole_claim_ticket(show_id: str, user=Depends(current_user)):
 def user_keyhole_get_access(show_id: str, user=Depends(current_user)):
     res = keyhole_check_viewer_access(show_id=show_id, user_id=user["user_id"])
     if not res.get("access"):
-        raise HTTPException(status_code=403, detail=res.get("reason", "Access denied"))
+        return {"access": False, "reason": res.get("reason", "Access denied")}
     return res
 # KEYHOLE CHARACTER REFERENCE SYSTEM (CHLOE & BAILEY)
 # ---------------------------------------------------------------------------
