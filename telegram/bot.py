@@ -558,6 +558,9 @@ def _absolute_media_url(url: str) -> str:
     url = (url or "").strip()
     if not url or url.startswith("data:") or url.startswith("//") or ".." in url:
         return ""
+    # Rewrite lockeddoor.ai to keyhole.lockeddoor.ai (backend sends wrong domain)
+    if "://lockeddoor.ai/" in url:
+        url = url.replace("://lockeddoor.ai/", "://keyhole.lockeddoor.ai/", 1)
     if url.startswith("http://") or url.startswith("https://"):
         if _own_origin(url) or _keyhole_asset_url(url):
             return url
