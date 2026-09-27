@@ -7601,7 +7601,7 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                 RETURNING text_balance, message_credits, webcam_minutes_left, video_replies_left,
                           fresh_videos_left, pic_credits, paid_keyhole_purchases
             """, (add_webcam, add_video_replies, add_fresh_videos,
-                  KEYHOLE_MESSAGES_PER_PACKAGE.get(pkg, KEYHOLE_MESSAGES_PER_PURCHASE), user_id))
+                  add_text, user_id))
             updated = cur.fetchone()
             conn.commit()
             return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
