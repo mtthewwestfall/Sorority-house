@@ -344,10 +344,17 @@ def _fetch_history(token, girl):
     return r.json().get("messages", [])
 
 
-def _send_chat(token, girl, message):
+def _send_chat(token, girl, message, voice=True):
     if girl not in ALLOWED_MODELS:
         raise BackendError("Only Chloe and Bailey are available on the WebCam show.")
-    r = _post("/chat", {"girl": girl, "message": message}, token=token, timeout=150)
+    # Chloe uses the new Keyhole endpoint with Liora voice + updated personality.
+    # Bailey stays on the legacy /chat endpoint.
+    if girl == "chloe":
+        r = _post("/keyhole/chat-reply",
+                  {"character": "chloe", "message": message, "voice": voice, "room": "preview"},
+                  token=token, timeout=150)
+    else:
+        r = _post("/chat", {"girl": girl, "message": message}, token=token, timeout=150)
     if r.status_code != 200:
         try:
             detail = r.json().get("detail", "")
@@ -968,8 +975,30 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except BackendError as exc:
         msg = str(exc)
         if exc.code == "out_of_messages" or "remaining" in msg.lower() or "allowance" in msg.lower():
+            # Preview finale: lingerie stills + buy-a-show CTA (mirrors website)
+            try:
+                rec_finale = store.get(update.effective_chat.id)
+                token_finale = (rec_finale or {}).get("token")
+                # Fetch the two preview-tease stills (#421, #422)
+                for tag in ["preview-tease"]:
+                    try:
+                        r = await asyncio.to_thread(_get, f"/media/character/chloe/tag/{tag}", token_finale)
+                        if r.status_code == 200 and r.json().get("ok"):
+                            assets = r.json().get("assets", [])[:2]
+                            for ast in assets:
+                                url = _absolute_media_url(ast.get("url", ""))
+                                if url:
+                                    try:
+                                        data = await _fetch_portrait(url)
+                                        await update.effective_message.reply_photo(data)
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             await update.effective_message.reply_text(
-                "You need additional WebCam show minutes or message balance to continue.",
+                "Want the whole thing? Buy a private or group show now.",
                 reply_markup=_plans_markup(store.get(update.effective_chat.id)))
             return
         await _txt(update, msg)
@@ -982,6 +1011,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     reply = out.get("reply") or "…"
     tail = f"\n\n(Messages left: {rem})" if isinstance(rem, int) else ""
     await _txt(update, reply + tail)
+    # Send Liora voice message if the backend returned audio (Chloe only)
+    audio_b64 = out.get("audio")
+    if audio_b64:
+        try:
+            import base64 as _b64
+            audio_bytes = _b64.b64decode(audio_b64)
+            await update.effective_message.reply_voice(voice=audio_bytes)
+        except Exception as e:
+            log.warning("Failed to send voice message: %s", e)
 
 
 async def on_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
