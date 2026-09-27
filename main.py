@@ -621,14 +621,14 @@ KEYHOLE_DEFAULT_CONFIG = {
 # account and stack with the next purchase. The client never reports this number.
 # Message credits granted per Keyhole package purchase (scales with tier).
 KEYHOLE_MESSAGES_PER_PACKAGE = {
-    "mini": 30,       # 10 min
-    "intro": 50,      # 15 min
-    "quick": 50,      # 15 min
-    "standard": 100,  # 30 min
-    "extended": 150,  # 45 min
-    "long": 175,      # 55 min
-    "premium": 200,   # 60 min
-    "marathon": 250,  # 75 min
+    "mini": 50,       # 10 min
+    "intro": 70,      # 15 min
+    "quick": 70,      # 15 min
+    "standard": 120,  # 30 min
+    "extended": 170,  # 45 min
+    "long": 195,      # 55 min
+    "premium": 220,   # 60 min
+    "marathon": 270,  # 75 min
 }
 KEYHOLE_MESSAGES_PER_PURCHASE = 100  # fallback for unknown packages
 # Passcodes that used to unlock the VIP bedroom with no payment. They never grant access.
