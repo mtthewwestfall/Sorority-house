@@ -385,8 +385,12 @@ SITE_PASSWORD = ""
 PORT = int(os.environ.get("PORT", "8080"))
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
 ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+# xAI (Grok) TTS for Chloe's voice. XAI_TTS_VOICE_ID defaults to Liora.
+XAI_TTS_VOICE_ID = os.environ.get("XAI_TTS_VOICE_ID", "liora")
+CHLOE_VOICE_PROVIDER = os.environ.get("CHLOE_VOICE_PROVIDER", "xai")  # "xai" | "elevenlabs"
 MAIL_FROM = os.environ.get("MAIL_FROM", "God's Greek <no-reply@example.com>")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 VERIFY_REDIRECT = os.environ.get("VERIFY_REDIRECT", "")
@@ -7668,6 +7672,28 @@ def _elevenlabs_tts_mp3(text):
         raise HTTPException(status_code=502, detail=f"Chloe voice generation failed ({r.status_code})")
     return r.content
 
+def _xai_tts_mp3(text):
+    """Synthesize Chloe's xAI (Grok) voice and return MP3 bytes."""
+    r = requests.post(
+        "https://api.x.ai/v1/tts",
+        headers={"Authorization": "Bearer " + XAI_API_KEY, "Content-Type": "application/json"},
+        json={"text": text, "voice_id": XAI_TTS_VOICE_ID or "liora",
+              "language": "en", "response_format": "mp3"},
+        timeout=90,
+    )
+    if r.status_code != 200 or not r.content:
+        raise HTTPException(status_code=502, detail=f"Chloe voice generation failed ({r.status_code})")
+    return r.content
+
+def _chloe_voice_mp3(text):
+    """Chloe's spoken reply audio (MP3 bytes), via the configured voice provider."""
+    provider = (CHLOE_VOICE_PROVIDER or "xai").strip().lower()
+    if provider == "xai" and XAI_API_KEY:
+        return _xai_tts_mp3(text)
+    if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
+        return _elevenlabs_tts_mp3(text)
+    raise HTTPException(status_code=503, detail="Chloe voice is not configured")
+
 def _keyhole_user_paid(uid):
     conn = db()
     try:
@@ -7712,19 +7738,15 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
         reply = reply[:397].rsplit(" ", 1)[0] + "..."
     result = {"ok": True, "reply": reply}
     if body.voice:
-        # Use Chloe's configured ElevenLabs clone for both preview and paid chat.
-        # Preview voice is intentionally not gated; the message allowance remains
-        # the gate for preview usage.
-        if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
-            raise HTTPException(status_code=503, detail="Chloe voice is not configured")
+        # Chloe's configured voice (xAI Liora, ElevenLabs fallback) for preview
+        # and paid chat. Preview voice is intentionally not gated; the message
+        # allowance remains the gate for preview usage. Text survives a voice
+        # failure: the reply still goes out, it just plays no audio.
         import base64 as _b64
         try:
-            audio = _elevenlabs_tts_mp3(reply)
-        except HTTPException:
-            raise
+            result["audio"] = _b64.b64encode(_chloe_voice_mp3(reply)).decode("ascii")
         except Exception:
-            raise HTTPException(status_code=502, detail="Chloe voice generation failed")
-        result["audio"] = _b64.b64encode(audio).decode("ascii")
+            pass
     return result
 
 
