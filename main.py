@@ -7780,6 +7780,17 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
     room = (body.room or "preview").strip().lower()
     if room not in CHLOE_ROOM_BLOCKS:
         room = "preview"
+
+    # Spend one message credit before generating. Raises 402 if out of messages.
+    limit = TIERS.get(user.get("tier"), TIERS["visitor"])["limit"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            spend_one_message(cur, user["user_id"], limit)
+        conn.commit()
+    finally:
+        conn.close()
+
     messages = [{"role": "system", "content": CHLOE_CHAT_SYSTEM.format(ROOM=CHLOE_ROOM_BLOCKS[room])}]
     for h in (body.history or [])[-10:]:
         r = (h.role or "").strip().lower()
