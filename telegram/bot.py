@@ -84,8 +84,8 @@ KEYHOLE_ASSET_ORIGIN = os.environ.get(
     "KEYHOLE_ASSET_ORIGIN", "https://keyhole-latest-production.up.railway.app"
 ).rstrip("/")
 
-# Restrict available models strictly to Chloe and Bailey
-ALLOWED_MODELS = {"chloe", "bailey"}
+# Chloe-only for now (Bailey hidden, mirrors website)
+ALLOWED_MODELS = {"chloe"}
 
 # Same character photos as the Keyhole rooms.html doors and main.py
 # KEYHOLE_DOOR_AVATARS. Filenames are per-character (chloe-1.jpg is Chloe,
@@ -1047,7 +1047,7 @@ def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🌐 KEYHOLE Web Lounge", url=SITE_URL + "/community-cam.html")],
     ]
     if signed_in:
-        rows.append([InlineKeyboardButton("📹 Select Model (Chloe / Bailey)", callback_data="menu:models")])
+        rows.append([InlineKeyboardButton("📹 Chat with Chloe", callback_data="menu:models")])
     return InlineKeyboardMarkup(rows)
 
 
