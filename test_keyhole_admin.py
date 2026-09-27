@@ -10,8 +10,6 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         os.environ["ADMIN_SECRET"] = "test-admin-secret"
         self.headers = {"X-Admin-Secret": "test-admin-secret"}
         self.client = TestClient(main.app)
-        # Reset demo shows state
-        self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "reset"}, headers=self.headers)
 
     def test_get_shows(self):
         response = self.client.get("/admin/keyhole/shows", headers=self.headers)
@@ -40,9 +38,32 @@ class TestKeyholeAdminAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_state_machine_validation(self):
-        sim_resp = self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "private_request"}, headers=self.headers)
-        shows = sim_resp.json()["shows"]
-        show_id = [s for s in shows if s["show_type"] == "private"][-1]["id"]
+        show_id = "priv_test_val"
+        show = {
+            "id": show_id,
+            "show_id": show_id,
+            "show_type": "private",
+            "character": "Chloe",
+            "character_id": "chloe",
+            "customer": "cust_123",
+            "customer_id": "cust_123",
+            "status": "READY",
+            "price": 19.99,
+            "details": "Private show test",
+            "description": "Private show test",
+            "viewer_count": 1,
+            "preview_url": "",
+            "sanitized_preview_url": "",
+            "preview_approved": False,
+            "preview_status": "NONE",
+            "published_telegram": False,
+            "published_website": False,
+            "is_demo": False,
+            "ticket_url": "",
+            "created_at": "2026-09-27T00:00:00Z",
+            "updated_at": "2026-09-27T00:00:00Z"
+        }
+        main._save_show_db(show)
 
         # Attempting to END a show that is READY (not LIVE) should fail with 400
         end_fail = self.client.post(f"/admin/keyhole/shows/{show_id}/end", headers=self.headers)
@@ -54,11 +75,34 @@ class TestKeyholeAdminAPI(unittest.TestCase):
 
     def test_private_show_workflow(self):
         # 1. Trigger private show request
-        sim_resp = self.client.post("/admin/keyhole/shows/demo-simulate", json={"action": "private_request"}, headers=self.headers)
-        self.assertEqual(sim_resp.status_code, 200)
-        shows = sim_resp.json()["shows"]
-        priv_show = [s for s in shows if s["show_type"] == "private"][-1]
-        show_id = priv_show["id"]
+        show_id = "priv_test_workflow"
+        show = {
+            "id": show_id,
+            "show_id": show_id,
+            "show_type": "private",
+            "character": "Chloe",
+            "character_id": "chloe",
+            "customer": "cust_123",
+            "customer_id": "cust_123",
+            "status": "READY",
+            "price": 19.99,
+            "details": "Private show test",
+            "description": "Private show test",
+            "viewer_count": 1,
+            "preview_url": "",
+            "sanitized_preview_url": "",
+            "preview_approved": False,
+            "preview_status": "NONE",
+            "published_telegram": False,
+            "published_website": False,
+            "is_demo": False,
+            "ticket_url": "",
+            "created_at": "2026-09-27T00:00:00Z",
+            "updated_at": "2026-09-27T00:00:00Z"
+        }
+        main._save_show_db(show)
+
+        priv_show = main._KEYHOLE_SHOWS_CACHE.get(show_id)
 
         self.assertEqual(priv_show["character"], "Chloe")
         self.assertEqual(priv_show["status"], "READY")

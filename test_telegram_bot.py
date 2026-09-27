@@ -200,10 +200,11 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         # Re-read with the module's current SITE_URL so the 45-minute fallback matches the bot.
         rooms = bot.SITE_URL + "/rooms.html"
         by_url = {url: label for label, url in links}
-        self.assertEqual(len(links), 8)
+        self.assertEqual(len(links), 9)
         labels = [label for label, _url in links]
-        self.assertEqual(labels[0], "15 min · $7.99")
-        self.assertNotIn("100 texts", labels[0])
+        self.assertEqual(labels[0], "10 min · $5.99 · 30 texts")
+        self.assertEqual(labels[1], "15 min · $7.99 · 50 texts")
+        self.assertNotIn("100 texts", labels[1])
         self.assertNotIn("Preview", labels[0])
         self.assertIn("https://buy.stripe.com/00w14gav1bFddlR6jLdjO09", by_url)
         self.assertIn("https://buy.stripe.com/bJeeV67iPdNl2Hd8rTdjO08", by_url)
@@ -212,7 +213,7 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertIn("https://buy.stripe.com/9B600c0UrcJh4Pl0ZrdjO07", by_url)
         self.assertIn("https://buy.stripe.com/5kQ5kw0UrfVtepVaA1djO04", by_url)
         self.assertIn("https://buy.stripe.com/6oUfZh1jradL0he4098AE00", by_url)
-        self.assertIn(("45 min · $14.99 · 100 texts", "https://buy.stripe.com/00w7sU0Ur8t1fhZ003"), links)
+        self.assertIn(("45 min · $14.99 · 150 texts", "https://buy.stripe.com/00w7sU0Ur8t1fhZ003"), links)
         self.assertTrue(any("30 min" in label and "$11.99" in label and "100 texts" in label for label in labels))
         self.assertTrue(any("60 min" in label and "$19.99" in label for label in labels))
         self.assertTrue(any("75 min" in label and "$23.99" in label for label in labels))

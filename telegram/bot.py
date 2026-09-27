@@ -84,8 +84,8 @@ KEYHOLE_ASSET_ORIGIN = os.environ.get(
     "KEYHOLE_ASSET_ORIGIN", "https://keyhole-latest-production.up.railway.app"
 ).rstrip("/")
 
-# Chloe-only for now (Bailey hidden, mirrors website)
-ALLOWED_MODELS = {"chloe"}
+# Featured WebCam models on Keyhole (Chloe and Bailey)
+ALLOWED_MODELS = {"chloe", "bailey"}
 
 # Same character photos as the Keyhole rooms.html doors and main.py
 # KEYHOLE_DOOR_AVATARS. Filenames are per-character (chloe-1.jpg is Chloe,
