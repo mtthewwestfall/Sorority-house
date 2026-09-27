@@ -128,7 +128,7 @@ def text_pack_url() -> str:
     configured variant id when the storefront cannot be reached."""
     if _TEXT_CACHE["url"] and time.time() - _TEXT_CACHE["at"] < 300:
         return _TEXT_CACHE["url"]
-    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1?channel=web"
+    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1"
     if requests is not None:
         try:
             r = requests.get(f"{_TEXT_STORE.rstrip('/')}/products/{_TEXT_HANDLE}.js",
@@ -136,7 +136,7 @@ def text_pack_url() -> str:
             if r.status_code == 200:
                 variants = [v for v in (r.json().get("variants") or []) if v.get("available", True)]
                 if variants:
-                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1?channel=web"
+                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1"
         except Exception:
             pass
     _TEXT_CACHE.update({"url": url, "at": time.time()})

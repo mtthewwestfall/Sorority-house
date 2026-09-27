@@ -512,8 +512,8 @@ def _text_only_variant() -> Dict[str, str]:
 
 def _text_only_cart_url() -> str:
     """Cart permalink for the Text-Only pack, e.g.
-    https://lockeddoorai.myshopify.com/cart/44898187903066:1?channel=web"""
-    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1?channel=web"
+    https://lockeddoorai.myshopify.com/cart/44898187903066:1"""
+    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1"
 WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
