@@ -7794,19 +7794,26 @@ class AdminGrantPackageIn(BaseModel):
 @app.post("/admin/keyhole/grant-package", dependencies=[Depends(admin_required)])
 def admin_grant_keyhole_package(body: AdminGrantPackageIn):
     """Grant a Keyhole package to any account by email (testing/comps)."""
-    conn = db()
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT user_id FROM users WHERE lower(email)=lower(%s)",
-                        (body.email.strip(),))
-            row = cur.fetchone()
-            if not row:
-                return {"ok": False, "error": "user_not_found"}
-            user_id = row["user_id"] if isinstance(row, dict) else row[0]
-            return grant_keyhole_package(user_id, body.package_type.strip().lower(),
-                                         source="admin")
-    finally:
-        conn.close()
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users WHERE lower(email)=lower(%s)",
+                            (body.email.strip(),))
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "user_not_found"}
+                user_id = row["user_id"] if isinstance(row, dict) else row[0]
+        finally:
+            conn.close()
+        return grant_keyhole_package(user_id, body.package_type.strip().lower(),
+                                     source="admin")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
+                "trace": traceback.format_exc(limit=5)}
 
 
 @app.post("/keyhole/session/start")
