@@ -5314,6 +5314,7 @@ def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Di
     try:
         with conn.cursor() as cur:
             is_video_req = any(kw in msg_lower for kw in ["video", "clip"])
+            is_give_req = any(kw in msg_lower for kw in ["give", "spicy", "lingerie", "sexy", "hot"])
 
             # Live shows are webcam-only: no premade video sets while a show is running.
             if is_video_req and _user_in_live_show(cur, user_id):
@@ -5348,8 +5349,20 @@ def detect_and_serve_media(user_id: str, girl: str, message: str) -> Optional[Di
                 except Exception:
                     library = []
             if library and isinstance(library, list):
+                # Give videos: only for paid text plan users, filter to give-tagged items
+                pool = library
+                if is_give_req:
+                    # Check paid status: text_only purchased this month
+                    cur.execute("SELECT text_only_bought_this_month FROM users WHERE user_id=%s", (user_id,))
+                    urow = cur.fetchone() or {}
+                    if int(urow.get("text_only_bought_this_month") or 0) == 0:
+                        return {"type": "notice", "text": "Give videos are for paid text plans. Upgrade to unlock."}
+                    # Filter to give-tagged variants
+                    give_pool = [it for it in library if "give" in _media_item_variant(it).lower()]
+                    if give_pool:
+                        pool = give_pool
                 item = _pick_rotated_media(
-                    cur, user_id, girl, library, "video" if is_video_req else "image"
+                    cur, user_id, girl, pool, "video" if is_video_req else "image"
                 )
                 conn.commit()
                 if isinstance(item, dict):
@@ -7528,33 +7541,33 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
 
             if pkg == "intro":
                 add_webcam = int(cfg.get("intro_webcam_minutes", 10))
-                add_video_replies = int(cfg.get("intro_video_replies", 20))
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = int(cfg.get("intro_text_included", 100))
                 cur.execute("UPDATE users SET intro_bought = intro_bought + 1 WHERE user_id=%s", (user_id,))
             elif pkg == "mini":
                 add_webcam = 10
-                add_video_replies = 15
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = 30
             elif pkg == "quick":
                 add_webcam = int(cfg.get("quick_webcam_minutes", 15))
-                add_video_replies = int(cfg.get("quick_video_replies", 35))
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = int(cfg.get("quick_text_included", 100))
                 cur.execute("UPDATE users SET quick_sessions_bought_this_month = quick_sessions_bought_this_month + 1 WHERE user_id=%s", (user_id,))
             elif pkg == "standard":
                 add_webcam = int(cfg.get("standard_webcam_minutes", 30))
-                add_video_replies = int(cfg.get("standard_video_replies", 70))
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = int(cfg.get("standard_text_included", 200))
             elif pkg == "extended":
                 add_webcam = int(cfg.get("extended_webcam_minutes", 45))
-                add_video_replies = int(cfg.get("extended_video_replies", 100))
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = int(cfg.get("extended_text_included", 300))
             elif pkg == "long":
                 add_webcam = int(cfg.get("long_webcam_minutes", 55))
-                add_video_replies = int(cfg.get("long_video_replies", 100))
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = int(cfg.get("long_text_included", 300))
             elif pkg == "marathon":
                 add_webcam = int(cfg.get("marathon_webcam_minutes", 75))
-                add_video_replies = int(cfg.get("marathon_video_replies", 120))
+                add_video_replies = 0  # webcam: live, no clip replies
                 add_text = int(cfg.get("marathon_text_included", 400))
             elif pkg == "premium":
                 add_webcam = int(cfg.get("premium_webcam_minutes", 60))
@@ -7565,6 +7578,7 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                 cur.execute("UPDATE users SET pic_credits = pic_credits + %s WHERE user_id=%s", (pics, user_id))
             elif pkg == "text_only":
                 add_text = int(cfg.get("text_only_included", 300))
+                add_video_replies = 10  # paid text plan: includes video replies (give available)
                 cur.execute("UPDATE users SET text_only_bought_this_month = text_only_bought_this_month + 1 WHERE user_id=%s", (user_id,))
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
