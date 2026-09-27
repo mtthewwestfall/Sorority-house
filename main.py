@@ -7786,6 +7786,29 @@ def keyhole_purchase(body: KeyholePurchaseIn, user=Depends(current_user)):
     return grant_keyhole_package(user["user_id"], body.package_type)
 
 
+class AdminGrantPackageIn(BaseModel):
+    email: str
+    package_type: str
+
+
+@app.post("/admin/keyhole/grant-package", dependencies=[Depends(admin_required)])
+def admin_grant_keyhole_package(body: AdminGrantPackageIn):
+    """Grant a Keyhole package to any account by email (testing/comps)."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users WHERE lower(email)=lower(%s)",
+                        (body.email.strip(),))
+            row = cur.fetchone()
+            if not row:
+                return {"ok": False, "error": "user_not_found"}
+            user_id = row["user_id"] if isinstance(row, dict) else row[0]
+            return grant_keyhole_package(user_id, body.package_type.strip().lower(),
+                                         source="admin")
+    finally:
+        conn.close()
+
+
 @app.post("/keyhole/session/start")
 def keyhole_session_start(user=Depends(current_user)):
     """Starts or reconnects a webcam session server-side."""
