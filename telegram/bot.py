@@ -145,12 +145,12 @@ def text_pack_url() -> str:
 def plan_links():
     """Website checkout links. Env vars override a single package without forking products."""
     return [
-        ("15 min · $7.99", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
+        ("15 min · $7.99 · 50 texts", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
         ("30 min · $11.99 · 100 texts", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
-        ("45 min · $14.99 · 100 texts", os.environ.get("PAY_LINK_45", _ROOMS_STRIPE["45"])),
-        ("55 min · $17.99 · 100 texts", os.environ.get("PAY_LINK_55", _ROOMS_STRIPE["55"])),
-        ("60 min · $19.99 · 100 texts", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
-        ("75 min · $23.99 · 100 texts", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
+        ("45 min · $14.99 · 150 texts", os.environ.get("PAY_LINK_45", _ROOMS_STRIPE["45"])),
+        ("55 min · $17.99 · 175 texts", os.environ.get("PAY_LINK_55", _ROOMS_STRIPE["55"])),
+        ("60 min · $19.99 · 200 texts", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
+        ("75 min · $23.99 · 250 texts", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
         ("Public Lounge · $4.99", os.environ.get("PAY_LINK_PUBLIC", _PUBLIC_LOUNGE_LINK)),
         ("300 texts · $5.99", os.environ.get("PAY_LINK_TEXT", text_pack_url())),
     ]
@@ -1065,8 +1065,9 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     await update.effective_message.reply_text(
         "Website sessions — same checkout as the site.\n"
-        "15 minutes is a real session (not the free preview) and does not include texts.\n"
-        "30–75 minutes include 100 texts. Public lounge is $4.99.",
+        "15 minutes is a real session (not the free preview) with 50 texts.\n"
+        "Message counts scale with the tier: 30 min/100, 45/150, 55/175, 60/200, 75/250.\n"
+        "Public lounge is $4.99.",
         reply_markup=_plans_markup(rec))
 
 
