@@ -7585,13 +7585,13 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid package type: {package_type}")
 
-            # Apply carryover: existing text_balance + add_text, and +100 message
-            # credits. Unused preview messages move into message_credits so a purchase
+            # Package messages go into message_credits only (the single spend pool;
+            # spend_one_message drains message_credits before legacy text_balance).
+            # Unused preview messages move into message_credits so a purchase
             # does not wipe what the free preview had not spent.
             cur.execute("""
                 UPDATE users
-                SET text_balance = text_balance + %s,
-                    webcam_minutes_left = webcam_minutes_left + %s,
+                SET webcam_minutes_left = webcam_minutes_left + %s,
                     video_replies_left = video_replies_left + %s,
                     fresh_videos_left = fresh_videos_left + %s,
                     message_credits = message_credits + %s + preview_message_credits,
@@ -7600,7 +7600,7 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                 WHERE user_id=%s
                 RETURNING text_balance, message_credits, webcam_minutes_left, video_replies_left,
                           fresh_videos_left, pic_credits, paid_keyhole_purchases
-            """, (add_text, add_webcam, add_video_replies, add_fresh_videos,
+            """, (add_webcam, add_video_replies, add_fresh_videos,
                   KEYHOLE_MESSAGES_PER_PACKAGE.get(pkg, KEYHOLE_MESSAGES_PER_PURCHASE), user_id))
             updated = cur.fetchone()
             conn.commit()
