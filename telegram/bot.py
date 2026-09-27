@@ -1075,6 +1075,9 @@ def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Previews and shows require an account: gate the whole menu behind login.
+    if not await _require_login(update):
+        return
     rec = await _ensure_session(update)
     await update.effective_message.reply_text(
         "KEYHOLE Live WebCam Show Menu:\n\n"
