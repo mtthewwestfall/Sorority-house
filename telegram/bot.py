@@ -60,7 +60,8 @@ except Exception:  # pragma: no cover
     NetError = Exception
 
 from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto,
-                      KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update)
+                      KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update,
+                      WebAppInfo)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -1062,6 +1063,9 @@ def _plans_markup(rec=None) -> InlineKeyboardMarkup:
 
 def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
     rows = [
+        # Full Keyhole site inside Telegram: video, live chat, shows, everything.
+        [InlineKeyboardButton("🖥️ Open Chloe's Room",
+                              web_app=WebAppInfo(url=SITE_URL + "/rooms.html"))],
         [InlineKeyboardButton("💳 WebCam Show Packages", callback_data="menu:upgrade")],
         [InlineKeyboardButton("🌐 KEYHOLE Web Lounge", url=SITE_URL + "/community-cam.html")],
     ]
