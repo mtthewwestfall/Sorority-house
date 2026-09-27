@@ -78,7 +78,7 @@ logger = logging.getLogger("keyhole_tg")
 TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 URL_ENV = "PUBLIC_URL"
 SECRET_ENV = "TELEGRAM_BOT_SECRET"
-SITE_URL = os.environ.get("SITE_URL", "https://lockeddoor.ai").rstrip("/")
+SITE_URL = os.environ.get("SITE_URL", "https://keyhole.lockeddoor.ai").rstrip("/")
 # Live Keyhole static origin. keyhole.lockeddoor.ai proxies here (netlify.toml).
 KEYHOLE_ASSET_ORIGIN = os.environ.get(
     "KEYHOLE_ASSET_ORIGIN", "https://keyhole-latest-production.up.railway.app"
