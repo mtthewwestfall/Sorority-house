@@ -619,7 +619,17 @@ KEYHOLE_DEFAULT_CONFIG = {
 }
 # Paid Keyhole purchases add this many message credits. Unused credits stay on the
 # account and stack with the next purchase. The client never reports this number.
-KEYHOLE_MESSAGES_PER_PURCHASE = 100
+# Message credits granted per Keyhole package purchase (scales with tier).
+KEYHOLE_MESSAGES_PER_PACKAGE = {
+    "intro": 50,      # 15 min
+    "quick": 50,      # 15 min
+    "standard": 100,  # 30 min
+    "extended": 150,  # 45 min
+    "long": 175,      # 55 min
+    "premium": 200,   # 60 min
+    "marathon": 250,  # 75 min
+}
+KEYHOLE_MESSAGES_PER_PURCHASE = 100  # fallback for unknown packages
 # Passcodes that used to unlock the VIP bedroom with no payment. They never grant access.
 VIP_CHEAT_CODES = frozenset({"KEY-VIP-ROOM", "KEY-VIP", "VIP-ROOM", "VIP", "MEMBER"})
 
@@ -7570,7 +7580,7 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                 RETURNING text_balance, message_credits, webcam_minutes_left, video_replies_left,
                           fresh_videos_left, pic_credits, paid_keyhole_purchases
             """, (add_text, add_webcam, add_video_replies, add_fresh_videos,
-                  KEYHOLE_MESSAGES_PER_PURCHASE, user_id))
+                  KEYHOLE_MESSAGES_PER_PACKAGE.get(pkg, KEYHOLE_MESSAGES_PER_PURCHASE), user_id))
             updated = cur.fetchone()
             conn.commit()
             return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
