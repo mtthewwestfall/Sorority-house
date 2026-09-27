@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover
 
 from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto,
                       KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update,
-                      WebAppInfo)
+                      WebAppInfo, BotCommand)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -1153,7 +1153,22 @@ def main():
     except RuntimeError as exc:
         raise SystemExit(f"{exc}")
 
-    app = Application.builder().token(token).build()
+    async def _post_init(app: Application) -> None:
+        # Slash-command menu shown when users tap "/" in Telegram.
+        await app.bot.set_my_commands([
+            BotCommand("menu", "Open Chloe's room & show packages"),
+            BotCommand("models", "See who's available"),
+            BotCommand("preview", "Watch a live preview"),
+            BotCommand("shows", "Upcoming & live shows"),
+            BotCommand("upgrade", "WebCam show packages"),
+            BotCommand("history", "Your chat history"),
+            BotCommand("state", "Your session status"),
+            BotCommand("login", "Log in to your account"),
+            BotCommand("signup", "Create an account"),
+            BotCommand("help", "How this works"),
+        ])
+
+    app = Application.builder().token(token).post_init(_post_init).build()
     app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, on_group))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
