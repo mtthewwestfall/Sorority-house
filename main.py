@@ -7798,7 +7798,9 @@ def admin_grant_keyhole_package(body: AdminGrantPackageIn):
         conn = db()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT user_id FROM users WHERE lower(email)=lower(%s)",
+                cur.execute("""SELECT u.user_id FROM users u
+                               JOIN accounts a ON a.user_id=u.user_id
+                               WHERE lower(a.email)=lower(%s)""",
                             (body.email.strip(),))
                 row = cur.fetchone()
                 if not row:
