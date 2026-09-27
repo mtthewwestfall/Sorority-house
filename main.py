@@ -621,6 +621,7 @@ KEYHOLE_DEFAULT_CONFIG = {
 # account and stack with the next purchase. The client never reports this number.
 # Message credits granted per Keyhole package purchase (scales with tier).
 KEYHOLE_MESSAGES_PER_PACKAGE = {
+    "mini": 30,       # 10 min
     "intro": 50,      # 15 min
     "quick": 50,      # 15 min
     "standard": 100,  # 30 min
@@ -7530,6 +7531,10 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                 add_video_replies = int(cfg.get("intro_video_replies", 20))
                 add_text = int(cfg.get("intro_text_included", 100))
                 cur.execute("UPDATE users SET intro_bought = intro_bought + 1 WHERE user_id=%s", (user_id,))
+            elif pkg == "mini":
+                add_webcam = 10
+                add_video_replies = 15
+                add_text = 30
             elif pkg == "quick":
                 add_webcam = int(cfg.get("quick_webcam_minutes", 15))
                 add_video_replies = int(cfg.get("quick_video_replies", 35))

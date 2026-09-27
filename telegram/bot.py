@@ -145,6 +145,7 @@ def text_pack_url() -> str:
 def plan_links():
     """Website checkout links. Env vars override a single package without forking products."""
     return [
+        ("10 min · $5.99 · 30 texts", os.environ.get("PAY_LINK_10", "https://buy.stripe.com/placeholder-10min")),
         ("15 min · $7.99 · 50 texts", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
         ("30 min · $11.99 · 100 texts", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
         ("45 min · $14.99 · 150 texts", os.environ.get("PAY_LINK_45", _ROOMS_STRIPE["45"])),
