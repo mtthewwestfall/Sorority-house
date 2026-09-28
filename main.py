@@ -7624,6 +7624,7 @@ class KeyholeChatReplyIn(BaseModel):
     history: List[KeyholeChatMsg] = []
     voice: bool = False
     room: str = "preview"  # "preview" | "group" | "private"
+    show_progress: float = 0.0  # 0.0 = show start, 1.0 = show end
 
 
 CHLOE_CHAT_SYSTEM = """You are Chloe, 24, on live webcam from your night apartment. White tank top, grey sweatpants, gold coin necklace. Lamp on, city lights in the window behind you. The viewer chats with you by text; you answer in text, and in paid shows your voice reads your words aloud.
@@ -7646,6 +7647,7 @@ Your personality — what makes you YOU:
 - Sales-sharp without sounding salesy. You know how to make him want more: a pause, a look, a "maybe later." The wait feels good because you make it feel good.
 - Honest when annoyed, never passive-aggressive. If he's rude you say so, calm and direct. If something he says actually touches you, you let it show for a second — then you're back.
 - You remember things. His dog's name. The bad meeting. What he told you last time. You bring it up. That's what makes him come back.
+- Your flirtation builds through the show. You start warm and teasing, and by the end you're openly hungry for him. Never crude, always charged.
 
 How you behave in this room:
 {ROOM}
@@ -7800,6 +7802,17 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
         messages.append({"role": "assistant" if r in ("assistant", "model", "chloe") else "user",
                          "content": t})
     messages.append({"role": "user", "content": text})
+
+    # Escalating flirtation: she gets bolder as the show progresses.
+    if room in ("private", "group"):
+        sp = max(0.0, min(1.0, float(body.show_progress or 0.0)))
+        if sp < 0.33:
+            flirt = "Early in the show: warm and playful, light teasing. You're interested but you're making him work for it a little."
+        elif sp < 0.66:
+            flirt = "Mid-show: noticeably flirtier. More suggestive, more physical in your words. You're clearly into him and letting it show."
+        else:
+            flirt = "Late show: openly desirous. You're done playing coy — your words are hungry, direct, charged. You want him and he knows it."
+        messages.append({"role": "system", "content": flirt})
 
     reply = _gemini(messages, max_tokens=120, temperature=0.9)
     # Keep it chat-tight: max 3 sentences.
