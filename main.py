@@ -88,6 +88,7 @@ API CONTRACT implemented here (point your chat app at these):
   GET  /admin/keyhole/render-video/{job_id}              -> {status,progress,asset_id,error}
   GET  /admin/keyhole/shows/{show_id}/preview            -> pre-live stage preview (plates,
                                                             references, schedule). Does not go live
+  DELETE /admin/keyhole/shows/{show_id}                   -> delete a SCHEDULED show (400 if LIVE)
   GET  /admin/keyhole/content/sites                      -> preset content-maker site list
   POST /admin/keyhole/content/search    {"tag","site_id","character_id"}
                                                          -> tag search (local library + presets)
@@ -10987,6 +10988,27 @@ def admin_end_keyhole_show(show_id: str):
         return {"ok": True, "show": show}
     res = keyhole_end_show(show_id)
     return {"ok": True, "show": res}
+
+
+@app.delete("/admin/keyhole/shows/{show_id}", dependencies=[Depends(admin_required)])
+def admin_delete_keyhole_show(show_id: str):
+    """Delete a scheduled show. Only shows in SCHEDULED status can be deleted."""
+    shows = {s["id"]: s for s in _get_all_shows_db()}
+    show = shows.get(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    if show["status"] == "LIVE":
+        raise HTTPException(status_code=400, detail="Cannot delete a LIVE show. End it first.")
+    _KEYHOLE_SHOWS_CACHE.pop(show_id, None)
+    if DATABASE_URL:
+        conn = db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM keyhole_shows WHERE show_id=%s", (show_id,))
+                conn.commit()
+        finally:
+            conn.close()
+    return {"ok": True, "deleted_show_id": show_id}
 
 
 class PreviewChoiceIn(BaseModel):
