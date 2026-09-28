@@ -10531,8 +10531,8 @@ def _save_show_db(show: Dict[str, Any]) -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO keyhole_shows (
-                    show_id, id, show_type, customer, customer_id, "character", character_id, status, scheduled_at, price, details, description, viewer_count, preview_url, sanitized_preview_url, preview_approved, preview_status, published_telegram, published_website, is_demo, ticket_url, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    show_id, id, show_type, customer, customer_id, "character", character_id, status, scheduled_at, price, details, description, viewer_count, preview_url, sanitized_preview_url, preview_approved, preview_status, published_telegram, published_website, is_demo, ticket_url, duration_minutes, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (show_id) DO UPDATE SET
                     id = EXCLUDED.id,
                     show_type = EXCLUDED.show_type,
@@ -10554,6 +10554,7 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                     published_website = EXCLUDED.published_website,
                     is_demo = EXCLUDED.is_demo,
                     ticket_url = EXCLUDED.ticket_url,
+                    duration_minutes = EXCLUDED.duration_minutes,
                     updated_at = now()
             """, (
                 sid,
@@ -10576,7 +10577,8 @@ def _save_show_db(show: Dict[str, Any]) -> None:
                 show.get("published_telegram", False),
                 show.get("published_website", False),
                 show.get("is_demo", False),
-                show.get("ticket_url", "")
+                show.get("ticket_url", ""),
+                int(show.get("duration_minutes") or 0)
             ))
             conn.commit()
     finally:
@@ -10599,12 +10601,22 @@ class CreatePublicShowIn(BaseModel):
     price: Optional[str] = "$4.99"
     details: Optional[str] = ""
     ticket_url: Optional[str] = ""
+    duration_minutes: Optional[int] = 30
 
 
 @app.post("/admin/keyhole/shows/create-public", dependencies=[Depends(admin_required)])
 def admin_create_public_show(body: CreatePublicShowIn):
     show_id = f"pub_{int(time.time()*1000)}_{secrets.token_hex(4)}"
     char = (body.character or "Chloe").strip()
+    # Group shows are capped at 30 minutes.
+    try:
+        duration = int(body.duration_minutes or 30)
+    except (TypeError, ValueError):
+        duration = 30
+    duration = max(1, min(30, duration))
+    # Group tickets go through the $4.99 public pay link unless the admin
+    # explicitly set a different ticket URL for this show.
+    ticket_url = (body.ticket_url or "").strip() or _public_pay_link()
     show = {
         "id": show_id,
         "show_id": show_id,
@@ -10618,6 +10630,7 @@ def admin_create_public_show(body: CreatePublicShowIn):
         "price": body.price or "$4.99",
         "details": body.details or "",
         "description": body.details or "",
+        "duration_minutes": duration,
         "viewer_count": 0,
         "preview_url": "",
         "sanitized_preview_url": "",
@@ -10626,7 +10639,7 @@ def admin_create_public_show(body: CreatePublicShowIn):
         "published_telegram": False,
         "published_website": False,
         "is_demo": False,
-        "ticket_url": (body.ticket_url or "").strip(),
+        "ticket_url": ticket_url,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -11140,13 +11153,16 @@ def user_keyhole_list_shows():
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT show_id, show_type, character_id, title, description, price, scheduled_at, status, created_at, ticket_url
+                SELECT show_id, show_type, character_id, title, description, price, scheduled_at, status, created_at, ticket_url, duration_minutes
                 FROM keyhole_shows
                 WHERE show_type='public' AND status IN ('SCHEDULED', 'LIVE', 'ENDED', 'PUBLISHED')
                 ORDER BY CASE WHEN status='LIVE' THEN 1 WHEN status='SCHEDULED' THEN 2 ELSE 3 END, scheduled_at ASC
                 LIMIT 50
             """)
             shows = [dict(r) for r in cur.fetchall()]
+            for s in shows:
+                # Older shows predate ticket_url: fall back to the $4.99 public pay link.
+                s["ticket_url"] = s.get("ticket_url") or _public_pay_link()
             return {"ok": True, "shows": shows}
     finally:
         conn.close()
@@ -11167,7 +11183,7 @@ def user_keyhole_get_show(show_id: str):
         "scheduled_at": show.get("scheduled_at"),
         "status": show.get("status"),
         "created_at": show.get("created_at"),
-        "ticket_url": show.get("ticket_url") or ""
+        "ticket_url": show.get("ticket_url") or _public_pay_link()
     }
     return {"ok": True, "show": public_show}
 
