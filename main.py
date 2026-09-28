@@ -513,8 +513,8 @@ def _text_only_variant() -> Dict[str, str]:
 
 def _text_only_cart_url() -> str:
     """Cart permalink for the Text-Only pack, e.g.
-    https://lockeddoorai.myshopify.com/cart/44898187903066:1"""
-    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1"
+    https://lockeddoorai.myshopify.com/cart/44898187903066:1?channel=web"""
+    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1?channel=web"
 WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
@@ -585,7 +585,7 @@ KEYHOLE_DEFAULT_CONFIG = {
     "intro_price": 5.99,          # 10-minute starter, one per account for life
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
-    "intro_text_included": 70,
+    "intro_text_included": 100,
     "intro_lifetime_cap": 1,
     "quick_price": 7.99,
     "quick_webcam_minutes": 15,
@@ -1166,13 +1166,14 @@ PROHIBITED_COMPANION_PATTERNS = [
     r"\bincest\b",
     r"\bpedophil\b"
 ]
+# OPTIMIZATION (Bolt ⚡): Pre-compiled combined regex pattern for content safety check to avoid recompilation and list iteration overhead
+_PROHIBITED_COMPANION_RE = re.compile("|".join(PROHIBITED_COMPANION_PATTERNS), re.IGNORECASE)
 
 def check_companion_content_safety(*texts: str):
     """Rejects prohibited sexual violence content plainly and without lecture."""
-    combined = " ".join(t for t in texts if t).lower()
-    for pattern in PROHIBITED_COMPANION_PATTERNS:
-        if re.search(pattern, combined):
-            raise HTTPException(status_code=400, detail="Description contains prohibited content.")
+    combined = " ".join(t for t in texts if t)
+    if _PROHIBITED_COMPANION_RE.search(combined):
+        raise HTTPException(status_code=400, detail="Description contains prohibited content.")
 
 
 # How each milestone reads on the shared 0-100 trust meter (for display only).
@@ -2312,9 +2313,13 @@ def kept_needed(girl, target):
 _STOP = {"the", "a", "an", "is", "are", "her", "she", "his", "he", "and", "or", "not",
          "of", "to", "in", "it", "that", "with", "you", "your", "never", "always"}
 
+# OPTIMIZATION (Bolt ⚡): Pre-compiled regexes to eliminate regex recompilation on text parsing
+_WORD_RE = re.compile(r"[a-z0-9']+")
+_ALPHA_RE = re.compile(r"[a-z]+")
+
 
 def _words(s):
-    return {w for w in re.findall(r"[a-z0-9']+", s.casefold()) if w not in _STOP}
+    return {w for w in _WORD_RE.findall(s.casefold()) if w not in _STOP}
 
 
 def _canonical(item, canon):
@@ -2350,7 +2355,7 @@ def _negated(s):
     """Whether a phrase asserts the negative. Read from the raw text, because _words
     drops 'not' and 'never' as noise - which they are for matching, and are not for
     meaning: 'afraid of dogs' and 'not afraid of dogs' are the same fact, flipped."""
-    toks = re.findall(r"[a-z]+", s.casefold().replace("'", ""))
+    toks = _ALPHA_RE.findall(s.casefold().replace("'", ""))
     return sum(1 for t in toks if t in _NEG) % 2 == 1
 
 
@@ -7595,13 +7600,14 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                 SET webcam_minutes_left = webcam_minutes_left + %s,
                     video_replies_left = video_replies_left + %s,
                     fresh_videos_left = fresh_videos_left + %s,
+                    text_balance = text_balance + %s,
                     message_credits = message_credits + %s + preview_message_credits,
                     preview_message_credits = 0,
                     paid_keyhole_purchases = paid_keyhole_purchases + 1
                 WHERE user_id=%s
                 RETURNING text_balance, message_credits, webcam_minutes_left, video_replies_left,
                           fresh_videos_left, pic_credits, paid_keyhole_purchases
-            """, (add_webcam, add_video_replies, add_fresh_videos,
+            """, (add_webcam, add_video_replies, add_fresh_videos, add_text,
                   KEYHOLE_MESSAGES_PER_PACKAGE.get(pkg, KEYHOLE_MESSAGES_PER_PURCHASE), user_id))
             updated = cur.fetchone()
             conn.commit()
@@ -10460,7 +10466,27 @@ def admin_set_keyhole_config(body: KeyholeConfigIn):
 _KEYHOLE_SHOWS_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
+_DEFAULT_DEMO_SHOW = {
+    "id": "pub_default_1",
+    "show_id": "pub_default_1",
+    "show_type": "public",
+    "character": "Chloe",
+    "character_id": "chloe",
+    "status": "SCHEDULED",
+    "price": 4.99,
+    "title": "Public WebCam Lounge Show with Chloe",
+    "details": "Special Live Show",
+    "scheduled_at": "Tonight — 9:00 PM",
+    "viewer_count": 0,
+    "preview_approved": False,
+    "published_telegram": False,
+    "published_website": False,
+}
+
+
 def _get_all_shows_db() -> List[Dict[str, Any]]:
+    if not _KEYHOLE_SHOWS_CACHE and not DATABASE_URL:
+        _save_show_db(_DEFAULT_DEMO_SHOW)
     if not DATABASE_URL:
         return list(_KEYHOLE_SHOWS_CACHE.values())
     conn = db()
@@ -10500,10 +10526,14 @@ def _get_all_shows_db() -> List[Dict[str, Any]]:
         conn.close()
 
 
+# OPTIMIZATION (Bolt ⚡): Pre-compiled regex for price coercion
+_PRICE_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
 def _coerce_show_price(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
-    m = re.search(r"\d+(?:\.\d+)?", str(value or ""))
+    m = _PRICE_RE.search(str(value or ""))
     return round(float(m.group(0)), 2) if m else 0.0
 
 
@@ -10583,6 +10613,47 @@ def _save_show_db(show: Dict[str, Any]) -> None:
             conn.commit()
     finally:
         conn.close()
+
+
+class DemoSimulateIn(BaseModel):
+    action: str
+
+
+@app.post("/admin/keyhole/shows/demo-simulate", dependencies=[Depends(admin_required)])
+def admin_demo_simulate(body: DemoSimulateIn):
+    if body.action == "reset":
+        _KEYHOLE_SHOWS_CACHE.clear()
+        if DATABASE_URL:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM keyhole_shows WHERE is_demo = TRUE OR show_id LIKE 'priv_demo_%' OR customer_id = 'demo_user'")
+                    conn.commit()
+            finally:
+                conn.close()
+        shows = _get_all_shows_db()
+        return {"ok": True, "shows": shows}
+    elif body.action == "private_request":
+        show_id = f"priv_demo_{int(time.time()*1000)}"
+        show = {
+            "id": show_id,
+            "show_id": show_id,
+            "show_type": "private",
+            "customer": "demo_user",
+            "customer_id": "demo_user",
+            "character": "Chloe",
+            "character_id": "chloe",
+            "status": "READY",
+            "is_demo": True,
+            "price": 19.99,
+            "preview_approved": False,
+            "published_telegram": False,
+            "published_website": False,
+        }
+        _save_show_db(show)
+        shows = _get_all_shows_db()
+        return {"ok": True, "shows": shows}
+    return {"ok": True, "shows": _get_all_shows_db()}
 
 
 @app.get("/admin/keyhole/shows", dependencies=[Depends(admin_required)])

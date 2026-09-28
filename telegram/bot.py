@@ -86,7 +86,7 @@ KEYHOLE_ASSET_ORIGIN = os.environ.get(
 ).rstrip("/")
 
 # Chloe-only for now (Bailey hidden, mirrors website)
-ALLOWED_MODELS = {"chloe"}
+ALLOWED_MODELS = {"chloe", "bailey"}
 
 # Same character photos as the Keyhole rooms.html doors and main.py
 # KEYHOLE_DOOR_AVATARS. Filenames are per-character (chloe-1.jpg is Chloe,
@@ -128,7 +128,7 @@ def text_pack_url() -> str:
     configured variant id when the storefront cannot be reached."""
     if _TEXT_CACHE["url"] and time.time() - _TEXT_CACHE["at"] < 300:
         return _TEXT_CACHE["url"]
-    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1"
+    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1?channel=web"
     if requests is not None:
         try:
             r = requests.get(f"{_TEXT_STORE.rstrip('/')}/products/{_TEXT_HANDLE}.js",
@@ -136,7 +136,7 @@ def text_pack_url() -> str:
             if r.status_code == 200:
                 variants = [v for v in (r.json().get("variants") or []) if v.get("available", True)]
                 if variants:
-                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1"
+                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1?channel=web"
         except Exception:
             pass
     _TEXT_CACHE.update({"url": url, "at": time.time()})
@@ -146,9 +146,12 @@ def text_pack_url() -> str:
 def plan_links():
     """Website checkout links. Env vars override a single package without forking products."""
     return [
-        ("10 min · $5.99 · messages included", os.environ.get("PAY_LINK_10", "https://buy.stripe.com/9B69AM0Ur38HchN0ZrdjO0a")),
-        ("15 min · $7.99 · messages included", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
-        ("30 min · $11.99 · messages included", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
+        ("15 min · $7.99", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
+        ("30 min · $11.99 · 100 texts", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
+        ("45 min · $14.99 · 100 texts", os.environ.get("PAY_LINK_45", _ROOMS_STRIPE["45"])),
+        ("55 min · $17.99", os.environ.get("PAY_LINK_55", _ROOMS_STRIPE["55"])),
+        ("60 min · $19.99", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
+        ("75 min · $23.99", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
         ("Public Lounge · $4.99", os.environ.get("PAY_LINK_PUBLIC", _PUBLIC_LOUNGE_LINK)),
         ("300 texts · $5.99", os.environ.get("PAY_LINK_TEXT", text_pack_url())),
     ]
