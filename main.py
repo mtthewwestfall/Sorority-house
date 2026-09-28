@@ -541,7 +541,7 @@ STRIPE_SIG_TOLERANCE_S = 300
 AFFITOR_PROGRAM_ID = os.environ.get("AFFITOR_PROGRAM_ID", "1083")
 TELEGRAM_BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 # $4.99 public lounge. Same default the Telegram bot uses for PAY_LINK_PUBLIC.
-PAY_LINK_PUBLIC = os.environ.get("PAY_LINK_PUBLIC", "https://buy.stripe.com/6oUfZh1jradL0he4098AE00")
+PAY_LINK_PUBLIC = os.environ.get("PAY_LINK_PUBLIC", "https://buy.stripe.com/28EfZafPldNlbdJfUldjO0b")
 
 
 # ---------------------------------------------------------------------------
