@@ -151,7 +151,14 @@ API CONTRACT implemented here (point your chat app at these):
                                                             binds the customer to that account and,
                                                             once payment_status is paid, upgrades
                                                             it (needs STRIPE_API_KEY);
-                                                            subscription deleted/unpaid -> visitor
+                                                            subscription deleted/unpaid -> visitor.
+                                                            Keyhole Founders subscriptions ride the
+                                                            same webhook on their own lane: a
+                                                            client_reference_id of khsub_<user_id>
+                                                            grants the monthly minutes/messages
+                                                            top-up for the Stripe-verified amount
+                                                            (999c = sub9, 1999c = sub19); renewals
+                                                            re-top-up, deleted -> tier cleared
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
                                                             webhook after a $0.99 charge)
@@ -1378,6 +1385,10 @@ def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS message_credits INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS preview_message_credits INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_keyhole_purchases INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS keyhole_sub_tier TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS keyhole_sub_status TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS keyhole_sub_stripe_id TEXT NOT NULL DEFAULT '';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS keyhole_sub_period_end TIMESTAMPTZ;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_pool TEXT NOT NULL DEFAULT '';
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_sessions_bought_this_month INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS text_only_bought_this_month INTEGER NOT NULL DEFAULT 0;
@@ -1414,6 +1425,15 @@ def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 ALTER TABLE keyhole_payments ADD COLUMN IF NOT EXISTS granted BOOLEAN NOT NULL DEFAULT FALSE;
+                -- Keyhole subscription billing events, granted once each (initial
+                -- checkout + every renewal invoice). PK on the Stripe event id.
+                CREATE TABLE IF NOT EXISTS keyhole_sub_invoices (
+                    invoice_id      TEXT PRIMARY KEY,
+                    user_id         TEXT NOT NULL,
+                    subscription_id TEXT NOT NULL DEFAULT '',
+                    tier            TEXT NOT NULL DEFAULT '',
+                    granted_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
                 -- distinct days the user actually talked to her at the current stage;
                 -- existing rows are seeded from the chat log (days after the stage moved)
                 ALTER TABLE relationships ADD COLUMN IF NOT EXISTS stage_days INTEGER;
@@ -8210,7 +8230,8 @@ def keyhole_me(user=Depends(current_user)):
         with conn.cursor() as cur:
             cur.execute("""SELECT webcam_minutes_left, text_balance, message_credits, preview_message_credits,
                                   video_replies_left, fresh_videos_left, intro_bought, free_preview_claimed_at,
-                                  paid_keyhole_purchases, webcam_session_started_at
+                                  paid_keyhole_purchases, webcam_session_started_at,
+                                  keyhole_sub_tier, keyhole_sub_status, keyhole_sub_period_end
                            FROM users WHERE user_id=%s""", (uid,))
             row = cur.fetchone() or {}
     finally:
@@ -8224,6 +8245,19 @@ def keyhole_me(user=Depends(current_user)):
     )
     credits = int(row.get("message_credits") or 0)
     text_balance = int(row.get("text_balance") or 0)
+    sub_tier = (row.get("keyhole_sub_tier") or "").strip()
+    sub_period_end = row.get("keyhole_sub_period_end")
+    subscription = None
+    if sub_tier:
+        alloc = next((v for v in KEYHOLE_SUBS.values() if v["tier"] == sub_tier), None)
+        subscription = {
+            "tier": sub_tier,
+            "label": (alloc or {}).get("label", ""),
+            "status": (row.get("keyhole_sub_status") or "").strip(),
+            "period_end": str(sub_period_end) if sub_period_end else None,
+            "minutes_included": (alloc or {}).get("minutes", 0),
+            "messages_included": (alloc or {}).get("messages", 0),
+        }
     return {
         "user_id": uid,
         "email": _account_email(uid),
@@ -8239,6 +8273,7 @@ def keyhole_me(user=Depends(current_user)):
         "free_preview_available": row.get("free_preview_claimed_at") is None,
         "intro_available": int(row.get("intro_bought") or 0) < int(cfg.get("intro_lifetime_cap", 1)),
         "vip_room": paid > 0,
+        "subscription": subscription,
     }
 
 
@@ -9730,6 +9765,118 @@ def _affitor_stamp(user_id: str, subscription_id: str, payment_intent_id: str) -
             print(f"[affitor] could not stamp {kind}/{obj_id}: {e}", flush=True)
 
 
+# Keyhole Founders subscriptions. The site and the Telegram bot append
+# ?client_reference_id=khsub_<user_id> to the subscription Payment Links.
+# The tier is ALWAYS verified against the amount Stripe actually charged
+# (cents) — never trusted from the ref, which the buyer could hand-edit.
+KEYHOLE_SUB_REF_PREFIX = "khsub_"
+KEYHOLE_SUBS = {
+    999:  {"tier": "sub9",  "label": "BOGO Nights",     "minutes": 30, "messages": 200},
+    1999: {"tier": "sub19", "label": "BOGO After Dark", "minutes": 90, "messages": 500},
+}
+
+
+def _keyhole_sub_for_amount(amount_cents) -> dict:
+    """Keyhole subscription tier for a charged amount in cents, or {}."""
+    try:
+        return KEYHOLE_SUBS.get(int(amount_cents or 0), {})
+    except (TypeError, ValueError):
+        return {}
+
+
+def _stripe_subscription_price_cents(subscription_id: str):
+    """(unit_amount_cents, current_period_end_unix) of a subscription's first
+    price, via STRIPE_API_KEY. Raises 503 when the key is missing or Stripe is
+    unreachable so Stripe keeps retrying the event."""
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=503,
+                            detail="STRIPE_API_KEY is required to read the subscription")
+    try:
+        r = requests.get(f"https://api.stripe.com/v1/subscriptions/{subscription_id}",
+                         auth=(STRIPE_API_KEY, ""), timeout=15)
+        if r.status_code != 200:
+            raise HTTPException(status_code=503, detail="Stripe subscription lookup failed")
+        sub = r.json()
+        items = (sub.get("items") or {}).get("data") or []
+        price = (items[0].get("price") or {}) if items else {}
+        return int(price.get("unit_amount") or 0), int(sub.get("current_period_end") or 0)
+    except (requests.RequestException, ValueError):
+        raise HTTPException(status_code=503, detail="Stripe subscription lookup failed")
+
+
+def _grant_keyhole_subscription(user_id: str, amount_cents: int, stripe_sub_id: str,
+                                period_end_unix: int, dedupe_key: str) -> dict:
+    """Grant one Keyhole subscription billing event, once (dedupe_key is the
+    Stripe invoice id, or sub:<id>:checkout for the initial checkout event).
+
+    Monthly top-up with no rollover: balances rise TO the tier allocation via
+    GREATEST, so unused subscription minutes/messages expire while separately
+    purchased minutes above the allocation are preserved. A billing event for
+    an already-current subscription period is a no-op."""
+    sub = _keyhole_sub_for_amount(amount_cents)
+    if not sub:
+        return {"ok": True, "ignored": f"unknown subscription amount {amount_cents}"}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users WHERE user_id=%s", (user_id,))
+            if cur.fetchone() is None:
+                return {"ok": True, "ignored": "unknown user"}
+            cur.execute("INSERT INTO keyhole_sub_invoices (invoice_id, user_id, subscription_id, tier)"
+                        " VALUES (%s,%s,%s,%s) ON CONFLICT (invoice_id) DO NOTHING",
+                        (dedupe_key, user_id, stripe_sub_id, sub["tier"]))
+            if cur.rowcount == 0:
+                return {"ok": True, "ignored": "already granted", "user_id": user_id}
+            period_end = None
+            if period_end_unix:
+                period_end = datetime.fromtimestamp(int(period_end_unix), tz=timezone.utc)
+            cur.execute("""
+                UPDATE users
+                SET keyhole_sub_tier = %s,
+                    keyhole_sub_status = 'active',
+                    keyhole_sub_stripe_id = %s,
+                    keyhole_sub_period_end = COALESCE(%s, keyhole_sub_period_end),
+                    webcam_minutes_left = GREATEST(webcam_minutes_left, %s),
+                    message_credits = GREATEST(message_credits, %s),
+                    paid_keyhole_purchases = paid_keyhole_purchases + 1
+                WHERE user_id=%s
+                RETURNING webcam_minutes_left, message_credits
+            """, (sub["tier"], stripe_sub_id, period_end,
+                  sub["minutes"], sub["messages"], user_id))
+            row = cur.fetchone()
+            conn.commit()
+            print(f"[keyhole-sub] granted {sub['tier']} to {user_id}: "
+                  f"{row['webcam_minutes_left']}m / {row['message_credits']} msgs", flush=True)
+            return {"ok": True, "user_id": user_id, "tier": sub["tier"],
+                    "minutes": row["webcam_minutes_left"], "messages": row["message_credits"]}
+    finally:
+        conn.close()
+
+
+def _clear_keyhole_subscription(stripe_sub_id: str) -> dict:
+    """A Keyhole subscription ended: drop the tier, keep remaining balances
+    (they drain naturally). Never touches the game tier columns."""
+    if not stripe_sub_id:
+        return {"ok": True, "ignored": "no subscription id"}
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET keyhole_sub_tier = '', keyhole_sub_status = 'canceled'
+                WHERE keyhole_sub_stripe_id = %s AND keyhole_sub_tier <> ''
+                RETURNING user_id
+            """, (stripe_sub_id,))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                print(f"[keyhole-sub] canceled {stripe_sub_id} for {row['user_id']}", flush=True)
+                return {"ok": True, "user_id": row["user_id"], "tier": ""}
+            return {"ok": True, "ignored": "not a keyhole subscription"}
+    finally:
+        conn.close()
+
+
 def _stripe_subscription_tier(subscription_id: str) -> str:
     """Tier of the price on a subscription, via STRIPE_API_KEY. Raises 503 when the key is
     missing or Stripe is unreachable so Stripe keeps retrying the event."""
@@ -9831,6 +9978,51 @@ async def stripe_webhook(request: Request):
     customer_id = obj.get("customer") if isinstance(obj.get("customer"), str) else \
         (obj.get("customer") or {}).get("id", "")
     event_at = int(event.get("created") or 0)
+
+    # --- Keyhole Founders subscriptions: own lane, never touches game tiers. ---
+    # The site / Telegram bot append client_reference_id=khsub_<user_id> to the
+    # subscription Payment Links. The tier always comes from the Stripe-verified
+    # amount, never from the ref.
+    if kind == "checkout.session.completed" and obj.get("mode") == "subscription":
+        ref = (obj.get("client_reference_id") or "").strip()
+        if ref.startswith(KEYHOLE_SUB_REF_PREFIX):
+            user_id = ref[len(KEYHOLE_SUB_REF_PREFIX):]
+            sub_id = obj.get("subscription")
+            sub_id = sub_id if isinstance(sub_id, str) else (sub_id or {}).get("id", "") or ""
+            if not user_id or not sub_id:
+                return {"ok": True, "ignored": "keyhole sub: no user or subscription"}
+            _remember_stripe_checkout(sub_id, user_id)
+            if obj.get("payment_status") != "paid":
+                # delayed payment method: invoice.paid grants when the money lands
+                return {"ok": True, "user_id": user_id, "pending": True}
+            amount_cents, period_end = _stripe_subscription_price_cents(sub_id)
+            return _grant_keyhole_subscription(user_id, amount_cents, sub_id, period_end,
+                                               f"sub:{sub_id}:checkout")
+
+    if kind == "invoice.paid":
+        sub = _stripe_invoice_subscription(obj)
+        kh_user = _user_for_stripe_checkout(sub) if sub else None
+        if kh_user and (kh_user.get("keyhole_sub_stripe_id") == sub
+                       or (kh_user.get("keyhole_sub_tier") or "") != ""):
+            # Keyhole subscription invoice: first charge or renewal.
+            if (obj.get("billing_reason") == "subscription_create"
+                    and kh_user.get("keyhole_sub_stripe_id") == sub):
+                # checkout.session.completed already granted this period
+                return {"ok": True, "user_id": kh_user["user_id"],
+                        "ignored": "initial invoice already granted"}
+            lines = (obj.get("lines") or {}).get("data") or []
+            period_end = int((lines[0].get("period") or {}).get("end") or 0) if lines else 0
+            return _grant_keyhole_subscription(kh_user["user_id"],
+                                               obj.get("amount_paid") or 0,
+                                               sub, period_end,
+                                               event.get("id") or f"sub:{sub}:{period_end}")
+
+    if kind == "customer.subscription.deleted" or \
+            (kind == "customer.subscription.updated" and obj.get("status") in ("canceled", "unpaid")):
+        cleared = _clear_keyhole_subscription(obj.get("id") or "")
+        if cleared.get("user_id"):
+            return cleared
+        # not a Keyhole subscription: fall through to the game-tier logic below
 
     if kind == "invoice.paid":
         tier = _stripe_tier_for_lines((obj.get("lines") or {}).get("data"))

@@ -113,6 +113,15 @@ _ROOMS_STRIPE = {
 }
 _PUBLIC_LOUNGE_LINK = "https://buy.stripe.com/6oUfZh1jradL0he4098AE00"
 
+# Keyhole Founders subscriptions (Stripe recurring Payment Links). The khsub_
+# prefix on client_reference_id routes the webhook to the subscription lane.
+_SUB_LINKS = [
+    ("BOGO Nights · $9.99/mo · 3 shows + 200 msgs",
+     os.environ.get("PAY_LINK_SUB9", "https://buy.stripe.com/9B67sE9qXeRp3Lh4bDdjO0c")),
+    ("BOGO After Dark · $19.99/mo · 3 shows + 500 msgs",
+     os.environ.get("PAY_LINK_SUB19", "https://buy.stripe.com/bJecMYdHd38H81xfUldjO0d")),
+]
+
 # The $5.99 Text-Only pack (300 texts, additive) rides Shopify, not Stripe.
 # The webhook (main.py) attributes the order, so the button needs no user data:
 # a plain cart permalink built from the live product JSON (variant ids change
@@ -1052,9 +1061,23 @@ def _pay_url(url: str, rec) -> str:
     return url + ("&" if "?" in url else "?") + urllib.parse.urlencode(q)
 
 
+def _sub_pay_url(url: str, rec) -> str:
+    """Subscription checkout: the khsub_ prefix routes the Stripe webhook to
+    the Keyhole subscription lane (tier is verified from the paid amount)."""
+    if not rec or not rec.get("user_id"):
+        return url
+    q = {"client_reference_id": "khsub_" + rec["user_id"]}
+    if rec.get("email"):
+        q["prefilled_email"] = rec["email"]
+    return url + ("&" if "?" in url else "?") + urllib.parse.urlencode(q)
+
+
 def _plans_markup(rec=None) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 " + label, url=_pay_url(url, rec))] for label, url in plan_links()])
+    rows = [[InlineKeyboardButton("💳 " + label, url=_pay_url(url, rec))]
+            for label, url in plan_links()]
+    rows += [[InlineKeyboardButton("🔁 " + label, url=_sub_pay_url(url, rec))]
+             for label, url in _SUB_LINKS]
+    return InlineKeyboardMarkup(rows)
 
 
 def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
@@ -1088,7 +1111,8 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.effective_message.reply_text(
         "Website sessions — same checkout as the site.\n"
         "Every show includes messages. Unused messages roll over.\n"
-        "Public lounge is $4.99.",
+        "Public lounge is $4.99.\n\n"
+        "Founders subscriptions: 3 private shows a month for less than the price of two.",
         reply_markup=_plans_markup(rec))
 
 
