@@ -1178,12 +1178,15 @@ PROHIBITED_COMPANION_PATTERNS = [
     r"\bpedophil\b"
 ]
 
+# OPTIMIZATION (Bolt ⚡): Pre-compiled combined regex object to eliminate recompilation and iteration overhead
+_PROHIBITED_COMPANION_RE = re.compile("|".join(PROHIBITED_COMPANION_PATTERNS), re.IGNORECASE)
+
+
 def check_companion_content_safety(*texts: str):
     """Rejects prohibited sexual violence content plainly and without lecture."""
     combined = " ".join(t for t in texts if t).lower()
-    for pattern in PROHIBITED_COMPANION_PATTERNS:
-        if re.search(pattern, combined):
-            raise HTTPException(status_code=400, detail="Description contains prohibited content.")
+    if _PROHIBITED_COMPANION_RE.search(combined):
+        raise HTTPException(status_code=400, detail="Description contains prohibited content.")
 
 
 # How each milestone reads on the shared 0-100 trust meter (for display only).
@@ -2357,8 +2360,14 @@ _STOP = {"the", "a", "an", "is", "are", "her", "she", "his", "he", "and", "or", 
          "of", "to", "in", "it", "that", "with", "you", "your", "never", "always"}
 
 
+# OPTIMIZATION (Bolt ⚡): Pre-compiled regex objects for hot-path text parsing and numeric coercion
+_WORD_RE = re.compile(r"[a-z0-9']+")
+_ALPHA_RE = re.compile(r"[a-z]+")
+_PRICE_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
 def _words(s):
-    return {w for w in re.findall(r"[a-z0-9']+", s.casefold()) if w not in _STOP}
+    return {w for w in _WORD_RE.findall(s.casefold()) if w not in _STOP}
 
 
 def _canonical(item, canon):
@@ -2394,7 +2403,7 @@ def _negated(s):
     """Whether a phrase asserts the negative. Read from the raw text, because _words
     drops 'not' and 'never' as noise - which they are for matching, and are not for
     meaning: 'afraid of dogs' and 'not afraid of dogs' are the same fact, flipped."""
-    toks = re.findall(r"[a-z]+", s.casefold().replace("'", ""))
+    toks = _ALPHA_RE.findall(s.casefold().replace("'", ""))
     return sum(1 for t in toks if t in _NEG) % 2 == 1
 
 
@@ -10926,7 +10935,7 @@ def _get_all_shows_db() -> List[Dict[str, Any]]:
 def _coerce_show_price(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
-    m = re.search(r"\d+(?:\.\d+)?", str(value or ""))
+    m = _PRICE_RE.search(str(value or ""))
     return round(float(m.group(0)), 2) if m else 0.0
 
 
