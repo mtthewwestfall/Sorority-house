@@ -249,7 +249,7 @@ Env vars (Railway -> Variables):
                     store + variant id. TEXT_ONLY_PRICE / TEXT_ONLY_SIZE are display
                     strings for the offer ($5.99 / 300).
   VIDEO_MODEL       Veo model behind /admin/generator/webcam
-                    (default veo-3.1-fast-generate-preview; uses VIDEO_API_KEY, else GEMINI_API_KEY).
+                    (default veo-3.1-fast-generate-preview; VIDEO_API_KEY is mandatory, no fallback to GEMINI_API_KEY).
   SOGNI_API_KEY     Sogni key behind /admin/generator/image engine=secondary (may also be
                     sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
                     SOGNI_API_URL (default https://api.sogni.ai).
@@ -13248,10 +13248,15 @@ def _sanitize_veo_prompt(prompt: str, char_id: str = "") -> str:
 
 
 def _veo_headers():
-    key = VIDEO_API_KEY or GEMINI_API_KEY  # Veo rides its own key so video spend can't drain chat
-    if not key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    return {"x-goog-api-key": key, "Content-Type": "application/json"}
+    # Veo has its OWN key and NO fallback: it must never touch the paid
+    # chat key. Google offers no free-tier Veo API, so without
+    # VIDEO_API_KEY video generation is unavailable (HTTP 500 here).
+    if not VIDEO_API_KEY:
+        raise HTTPException(status_code=500, detail="VIDEO_API_KEY not set")
+    return {
+        "x-goog-api-key": VIDEO_API_KEY,
+        "Content-Type": "application/json",
+    }
 
 
 @app.post("/admin/generator/webcam", dependencies=[Depends(admin_required)])
