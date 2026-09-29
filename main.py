@@ -1758,6 +1758,18 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS no_gos TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS behavior_mix JSONB;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS kh_site BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS kh_telegram BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS kh_companion BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE personas ADD COLUMN IF NOT EXISTS companion_voice TEXT NOT NULL DEFAULT '';
+            """)
+            # Chloe is live on all three Keyhole surfaces; Bailey stays dark
+            # until the owner enables her from the Keyhole Characters tab.
+            cur.execute("""
+                UPDATE personas
+                SET kh_site=TRUE, kh_telegram=TRUE, kh_companion=TRUE,
+                    companion_voice='liora'
+                WHERE girl='chloe'
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _apply_keyhole_door_avatars(cur)
@@ -3414,6 +3426,7 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabWebcamAcc" onclick="showWebcamAccounts()">🎥 WebCam Show Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
+<button id="tabKhChar" onclick="show('khChar')">Keyhole Characters</button>
 <button id="tabMed" onclick="show('med')">Webcam Media</button>
 <button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button>
 <button id="tabGen" onclick="show('gen')">Image Generator</button></nav>
@@ -3589,6 +3602,14 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 <div id="pedit" class="card hid"></div>
 </section>
 
+<section id="khChar" class="hid">
+<div class="card"><div class="plist" id="khlist"></div>
+<div class="row2" style="margin-top:10px"><button class="p" onclick="newKhCharacter()">+ Add a character</button></div>
+<div class="mut" style="margin-top:8px">One character, three surfaces. Tick where she appears: the Keyhole site doors, the Telegram menu, the Companion app.
+Changes are live everywhere on the next reload — no deploy. The companion voice is the xAI voice name (Chloe uses <b>liora</b>).</div></div>
+<div id="khedit" class="card hid"></div>
+</section>
+
 <section id="med" class="hid">
 <div class="grid">
   <div class="card">
@@ -3759,7 +3780,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
+const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',khChar:'tabKhChar',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -3781,7 +3802,7 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='khChar')loadKhCharacters()if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
 
 let currentKhShows = [];
 
@@ -4513,6 +4534,34 @@ async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).tr
   await api('/admin/console/girl',{method:'POST',body:JSON.stringify(body)});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
+let KHCHARS=[],KHCUR=null;
+async function loadKhCharacters(sel){try{KHCHARS=(await api('/admin/console/keyhole-characters')).characters;renderKhCharacters(sel);if(sel)editKhCharacter(KHCHARS.findIndex(c=>c.girl===sel))}catch(e){toast(e.message,true)}}
+function khFlags(c){const f=[];if(c.kh_site)f.push('Keyhole');if(c.kh_telegram)f.push('Telegram');if(c.kh_companion)f.push('Companion');return f.join(' · ')||'<span class="mut">nowhere</span>'}
+function renderKhCharacters(sel){$('#khlist').innerHTML=KHCHARS.map((c,i)=>`<button class="s${c.girl===sel?' on':''}" data-i="${i}">${esc(c.name||'(new)')}${c.active?'':' <span class="mut">(off)</span>'}</button>`).join('')}
+function newKhCharacter(){KHCHARS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',companion_voice:'liora',sort_order:100,active:true,kh_site:true,kh_telegram:true,kh_companion:true,isNew:true});renderKhCharacters();editKhCharacter(KHCHARS.length-1)}
+function editKhCharacter(i){const c=KHCHARS[i];if(!c)return;KHCUR=c;document.querySelectorAll('#khlist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#khedit');el.classList.remove('hid');
+ el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(c.girl||'New character')}</h3>${c.active?'':'<span class="pill open">off</span>'}</div>
+ <div class="row2">${c.isNew?`<label>Slug <input id="khSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
+ <label>Name <input id="khName" value="${esc(c.name)}"></label>
+ <label>Door title <input id="khTitle" value="${esc(c.door_title)}" style="min-width:200px"></label>
+ <label>Order <input id="khOrder" type="number" min=0 max=9999 value="${c.sort_order}" style="width:90px"></label></div>
+ <div class="row2"><label style="flex:1">Avatar URL <input id="khAvatar" value="${esc(c.avatar_url)}" style="width:100%"></label>
+ <label>Companion voice <input id="khVoice" value="${esc(c.companion_voice||'liora')}" style="width:140px"></label></div>
+ <div class="row2"><label><input id="khSite" type="checkbox"${c.kh_site?' checked':''}> Keyhole site</label>
+ <label><input id="khTg" type="checkbox"${c.kh_telegram?' checked':''}> Telegram</label>
+ <label><input id="khComp" type="checkbox"${c.kh_companion?' checked':''}> Companion app</label>
+ <label><input id="khActive" type="checkbox"${c.active?' checked':''}> Active</label></div>
+ <label class="mut">Door blurb</label><textarea id="khBlurb" style="min-height:60px">${esc(c.blurb)}</textarea>
+ <label class="mut">Personality (her character doc — drives chat on every surface)</label>
+ <textarea id="khDoc" style="min-height:260px;font-family:ui-monospace,monospace">${esc(c.persona)}</textarea>
+ <div class="row2"><button class="p" data-girl="${esc(c.girl)}" onclick="saveKhCharacter(this.dataset.girl)">Save</button>
+ ${c.isNew?'':`<button class="s" onclick="setKhActive('${esc(c.girl)}',${c.active?'false':'true'})">${c.active?'Turn off':'Turn on'}</button>`}
+ <span class="mut">Shows on: ${khFlags(c)}</span></div>`}
+async function saveKhCharacter(girl){const slug=( $('#khSlug')?$('#khSlug').value:girl).trim().toLowerCase();
+ try{const body={girl:slug,name:$('#khName').value,door_title:$('#khTitle').value,blurb:$('#khBlurb').value,avatar_url:$('#khAvatar').value,persona:$('#khDoc').value,companion_voice:$('#khVoice').value,sort_order:+$('#khOrder').value,active:$('#khActive').checked,kh_site:$('#khSite').checked,kh_telegram:$('#khTg').checked,kh_companion:$('#khComp').checked};
+ await api('/admin/console/keyhole-character',{method:'POST',body:JSON.stringify(body)});toast('Saved — live on all three surfaces');loadKhCharacters(slug)}catch(e){toast(e.message,true)}}
+async function setKhActive(girl,active){if(!active&&!confirm('Turn '+girl+' off everywhere? Her chats are kept.'))return;
+ try{await api('/admin/console/keyhole-character/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on':'Off everywhere');loadKhCharacters(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
  a.download='maplehollow-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
@@ -4816,6 +4865,22 @@ class AdminGirlIn(BaseModel):
     personality_traits: str = ""
     no_gos: str = ""
     media_library: Any = []
+
+
+class KeyholeCharacterIn(BaseModel):
+    """A Keyhole character: persona row plus which of the three surfaces show her."""
+    girl: str
+    name: str
+    persona: str
+    door_title: str = ""
+    blurb: str = ""
+    avatar_url: str = ""
+    companion_voice: str = "liora"
+    sort_order: int = 100
+    active: bool = True
+    kh_site: bool = True
+    kh_telegram: bool = True
+    kh_companion: bool = True
 
 
 @app.on_event("startup")
@@ -10678,6 +10743,99 @@ def admin_console_girl_active(girl: str, active: bool = True):
     if not found:
         raise HTTPException(status_code=404, detail="Unknown girl slug")
     return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/admin/console/keyhole-characters", dependencies=[Depends(admin_required)])
+def admin_list_keyhole_characters():
+    """Every persona with its Keyhole surface flags, for the admin tab."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT girl, name, door_title, blurb, avatar_url, persona,
+                       companion_voice, sort_order, active,
+                       kh_site, kh_telegram, kh_companion
+                FROM personas ORDER BY sort_order, girl
+            """)
+            return {"characters": cur.fetchall()}
+    finally:
+        conn.close()
+
+
+@app.post("/admin/console/keyhole-character", dependencies=[Depends(admin_required)])
+def admin_upsert_keyhole_character(body: KeyholeCharacterIn):
+    """Add a character or rewrite one: persona plus Keyhole surface flags.
+    The site, Telegram and Companion read this live — no deploy needed."""
+    girl = body.girl.strip().lower()
+    if not _SLUG_RE.match(girl):
+        raise HTTPException(status_code=400,
+                            detail="slug must be lowercase letters, digits, - or _ (2-31 chars)")
+    if not body.name.strip() or not body.persona.strip():
+        raise HTTPException(status_code=400, detail="name and persona are required")
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO personas (girl, name, door_title, persona, blurb,
+                                      avatar_url, companion_voice, sort_order, active,
+                                      kh_site, kh_telegram, kh_companion)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (girl) DO UPDATE
+                SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
+                    persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
+                    avatar_url=EXCLUDED.avatar_url,
+                    companion_voice=EXCLUDED.companion_voice,
+                    sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
+                    kh_site=EXCLUDED.kh_site, kh_telegram=EXCLUDED.kh_telegram,
+                    kh_companion=EXCLUDED.kh_companion
+            """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
+                  body.blurb.strip(), body.avatar_url.strip(),
+                  body.companion_voice.strip() or "liora",
+                  max(0, min(9999, int(body.sort_order))), bool(body.active),
+                  bool(body.kh_site), bool(body.kh_telegram), bool(body.kh_companion)))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "girl": girl}
+
+
+@app.post("/admin/console/keyhole-character/{girl}/active", dependencies=[Depends(admin_required)])
+def admin_keyhole_character_active(girl: str, active: bool = True):
+    """Turn a character off everywhere (or back on). Chats are kept."""
+    girl = girl.strip().lower()
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE personas SET active=%s WHERE girl=%s RETURNING girl",
+                        (bool(active), girl))
+            found = cur.fetchone()
+            conn.commit()
+    finally:
+        conn.close()
+    if not found:
+        raise HTTPException(status_code=404, detail="Unknown character slug")
+    return {"ok": True, "girl": girl, "active": bool(active)}
+
+
+@app.get("/keyhole/characters")
+def keyhole_characters():
+    """Public: characters visible on Keyhole surfaces. Each surface filters by
+    its own flag (kh_site / kh_telegram / kh_companion). No auth."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT girl, name, door_title, blurb, avatar_url, persona,
+                       companion_voice, sort_order,
+                       kh_site, kh_telegram, kh_companion
+                FROM personas
+                WHERE active AND (kh_site OR kh_telegram OR kh_companion)
+                ORDER BY sort_order, girl
+            """)
+            chars = cur.fetchall()
+    finally:
+        conn.close()
+    return {"characters": chars}
 
 
 @app.get("/admin/keyhole/config", dependencies=[Depends(admin_required)])
