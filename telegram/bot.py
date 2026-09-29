@@ -113,6 +113,12 @@ _ROOMS_STRIPE = {
 }
 _PUBLIC_LOUNGE_LINK = "https://buy.stripe.com/6oUfZh1jradL0he4098AE00"
 
+# Companion AI app launcher. Website subscriptions were discontinued 2026-09-29
+# (zero active subscribers), so the old BOGO _SUB_LINKS are gone. Set
+# COMPANION_APP_URL to the companion app's live URL and the menu gains a
+# "Companion AI" room button that opens it.
+COMPANION_APP_URL = os.environ.get("COMPANION_APP_URL", "").strip()
+
 # Keyhole Founders subscriptions (Stripe recurring Payment Links). The khsub_
 # prefix on client_reference_id routes the webhook to the subscription lane.
 _SUB_LINKS = [
@@ -1088,6 +1094,10 @@ def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💳 WebCam Show Packages", callback_data="menu:upgrade")],
         [InlineKeyboardButton("🌐 KEYHOLE Web Lounge", url=SITE_URL + "/community-cam.html")],
     ]
+    if COMPANION_APP_URL:
+        # Companion AI room: opens the companion app (PWA/APK landing).
+        rows.append([InlineKeyboardButton("💬 Companion AI — open the app",
+                                          url=COMPANION_APP_URL)])
     if signed_in:
         rows.append([InlineKeyboardButton("📹 Chat with Chloe", callback_data="menu:models")])
     return InlineKeyboardMarkup(rows)
