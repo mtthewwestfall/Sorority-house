@@ -249,7 +249,7 @@ Env vars (Railway -> Variables):
                     store + variant id. TEXT_ONLY_PRICE / TEXT_ONLY_SIZE are display
                     strings for the offer ($5.99 / 300).
   VIDEO_MODEL       Veo model behind /admin/generator/webcam
-                    (default veo-3.1-fast-generate-preview; uses GEMINI_API_KEY).
+                    (default veo-3.1-fast-generate-preview; uses VIDEO_API_KEY, else GEMINI_API_KEY).
   SOGNI_API_KEY     Sogni key behind /admin/generator/image engine=secondary (may also be
                     sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
                     SOGNI_API_URL (default https://api.sogni.ai).
@@ -361,6 +361,7 @@ from character_engine import CharacterEngine
 # ---------------------------------------------------------------------------
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+VIDEO_API_KEY = os.environ.get("VIDEO_API_KEY", "")  # Veo video key; chat/images stay on GEMINI_API_KEY
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
@@ -13247,9 +13248,10 @@ def _sanitize_veo_prompt(prompt: str, char_id: str = "") -> str:
 
 
 def _veo_headers():
-    if not GEMINI_API_KEY:
+    key = VIDEO_API_KEY or GEMINI_API_KEY  # Veo rides its own key so video spend can't drain chat
+    if not key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
-    return {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+    return {"x-goog-api-key": key, "Content-Type": "application/json"}
 
 
 @app.post("/admin/generator/webcam", dependencies=[Depends(admin_required)])
