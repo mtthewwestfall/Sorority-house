@@ -526,6 +526,10 @@ WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+# Companion app -> Keyhole free-show grants (2026-09-29). The companion
+# server's Stripe webhook calls POST /internal/companion-show-grant with this
+# secret in the X-Grant-Secret header. Refuses with 503 until set.
+COMPANION_GRANT_SECRET = os.environ.get("COMPANION_GRANT_SECRET", "")
 # Keyhole session packages sell through NexaPay Payment Links; /webhooks/nexapay grants the
 # package named in the payment's metadata/SKU to the buyer (user_id in metadata, else email).
 NEXAPAY_WEBHOOK_SECRET = os.environ.get("NEXAPAY_WEBHOOK_SECRET", "")
@@ -1409,6 +1413,14 @@ def init_db():
                     subscription_id TEXT PRIMARY KEY,
                     user_id     TEXT NOT NULL REFERENCES users(user_id),
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                -- companion subscription -> free monthly Keyhole show minutes.
+                -- grant_key is idempotent per billing cycle.
+                CREATE TABLE IF NOT EXISTS companion_show_grants (
+                    grant_key  TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL REFERENCES users(user_id),
+                    minutes    INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE TABLE IF NOT EXISTS picture_payments (
                     payment_id TEXT PRIMARY KEY,
@@ -9914,6 +9926,57 @@ def _stripe_tier_for_lines(lines) -> str:
         if tier and tier_rank(tier) > tier_rank(best):
             best = tier
     return best
+
+
+@app.post("/internal/companion-show-grant")
+async def companion_show_grant(request: Request):
+    """Companion server -> Keyhole: credit the free monthly private-show
+    minutes that come with a companion subscription (basic 10 / plus 15 /
+    VIP 30). Shared-secret auth via X-Grant-Secret. Idempotent per grant_key.
+    Tops webcam_minutes_left UP TO the grant (GREATEST) so separately
+    purchased minutes above it are preserved; no purchase caps are touched."""
+    if not COMPANION_GRANT_SECRET:
+        raise HTTPException(status_code=503, detail="COMPANION_GRANT_SECRET must be set")
+    if not hmac.compare_digest(request.headers.get("x-grant-secret", ""), COMPANION_GRANT_SECRET):
+        raise HTTPException(status_code=401, detail="bad grant secret")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad JSON")
+    email = (body.get("email") or "").strip()
+    try:
+        minutes = int(body.get("minutes") or 0)
+    except (ValueError, TypeError):
+        minutes = 0
+    grant_key = (body.get("grant_key") or "").strip()
+    if not email or minutes <= 0 or not grant_key:
+        raise HTTPException(status_code=400, detail="email, minutes, grant_key required")
+    try:
+        user = _user_for_email(email)
+    except HTTPException:
+        print(f"[companion-grant] no keyhole account for {email}", flush=True)
+        return {"ok": True, "ignored": "no keyhole account for email"}
+    user_id = user["user_id"]
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO companion_show_grants (grant_key, user_id, minutes)"
+                " VALUES (%s,%s,%s) ON CONFLICT (grant_key) DO NOTHING",
+                (grant_key, user_id, minutes))
+            if cur.rowcount == 0:
+                return {"ok": True, "duplicate": True, "user_id": user_id}
+            cur.execute(
+                "UPDATE users SET webcam_minutes_left = GREATEST(webcam_minutes_left, %s)"
+                " WHERE user_id = %s RETURNING webcam_minutes_left",
+                (minutes, user_id))
+            row = cur.fetchone()
+            conn.commit()
+            print(f"[companion-grant] {minutes}m -> {user_id} ({grant_key})", flush=True)
+            return {"ok": True, "user_id": user_id,
+                    "webcam_minutes_left": row["webcam_minutes_left"]}
+    finally:
+        conn.close()
 
 
 @app.post("/webhooks/nexapay")
