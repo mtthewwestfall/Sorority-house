@@ -56,11 +56,13 @@ class TestSpendCascadeShared(unittest.TestCase):
 
     def test_text_balance_spends_before_tier_cap(self):
         cur = _FakeCursor(text_left={"text_balance": 299})
-        self.assertEqual(main.spend_one_message(cur, "u1", limit=2), 299)
+        remaining, pool = main.spend_one_message(cur, "u1", limit=2)
+        self.assertEqual((remaining, pool), (299, "text"))
 
     def test_credits_spent_before_text_balance(self):
         cur = _FakeCursor(credits_left={"message_credits": 10}, text_left={"text_balance": 299})
-        self.assertEqual(main.spend_one_message(cur, "u1", limit=2), 10)
+        remaining, pool = main.spend_one_message(cur, "u1", limit=2)
+        self.assertEqual((remaining, pool), (10, "credits"))
 
     def test_preview_spends_first_while_playing(self):
         pools = {"free_preview_claimed_at": "t", "paid_keyhole_purchases": 0,
@@ -68,7 +70,8 @@ class TestSpendCascadeShared(unittest.TestCase):
                  "preview_message_credits": 50}
         cur = _FakeCursor(pools=pools, preview_left={"preview_message_credits": 49},
                           credits_left={"message_credits": 10}, text_left={"text_balance": 299})
-        self.assertEqual(main.spend_one_message(cur, "u1", limit=2), 49)
+        remaining, pool = main.spend_one_message(cur, "u1", limit=2)
+        self.assertEqual((remaining, pool), (49, "preview"))
 
     def test_tier_cap_402_when_no_balances(self):
         from fastapi.exceptions import HTTPException
@@ -80,7 +83,8 @@ class TestSpendCascadeShared(unittest.TestCase):
 
     def test_tier_cap_counts_down(self):
         cur = _FakeCursor(tier_row={"msg_used": 1})
-        self.assertEqual(main.spend_one_message(cur, "u1", limit=2), 1)
+        remaining, pool = main.spend_one_message(cur, "u1", limit=2)
+        self.assertEqual((remaining, pool), (1, "tier"))
 
 
 class TestCompanionPoolParity(unittest.TestCase):
@@ -118,6 +122,80 @@ class TestCompanionPoolParity(unittest.TestCase):
                 main._companion_preflight(user, 7)
         self.assertEqual(ctx.exception.status_code, 402)
         self.assertEqual(ctx.exception.detail, "out_of_messages")
+
+
+class TestKeyholeChatReplyRefund(unittest.TestCase):
+    """keyhole_chat_reply must hand the reserved message back when Gemini fails
+    before producing text, refunding the exact pool charged (not whatever
+    last_message_pool happens to hold)."""
+
+    class _Conn:
+        def __init__(self, cur):
+            self._cur = cur
+            self.commits = 0
+
+        def cursor(self):
+            return self._cur
+
+        def commit(self):
+            self.commits += 1
+
+        def close(self):
+            pass
+
+    def _reply_conn(self, **kwargs):
+        cur = _FakeCursor(**kwargs)
+        return self._Conn(cur), cur
+
+    def test_gemini_failure_refunds_charged_pool(self):
+        conn, cur = self._reply_conn(credits_left={"message_credits": 9})
+        user = {"user_id": "u1", "tier": "visitor"}
+        body = main.KeyholeChatReplyIn(message="hey", character="chloe", room="preview")
+        with patch.object(main, "db", return_value=conn), \
+             patch.object(main, "_gemini", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                main.keyhole_chat_reply(body, user)
+        stmts = " | ".join(cur.executed)
+        # spent from paid credits, refunded to paid credits
+        self.assertIn("message_credits = message_credits - 1", stmts)
+        self.assertIn("message_credits = message_credits + 1", stmts)
+        self.assertEqual(conn.commits, 2)  # spend commit + refund commit
+
+    def test_successful_reply_does_not_refund(self):
+        conn, cur = self._reply_conn(credits_left={"message_credits": 9})
+        user = {"user_id": "u1", "tier": "visitor"}
+        body = main.KeyholeChatReplyIn(message="hey", character="chloe", room="preview")
+        with patch.object(main, "db", return_value=conn), \
+             patch.object(main, "_gemini", return_value="Hey you."):
+            out = main.keyhole_chat_reply(body, user)
+        self.assertTrue(out["ok"])
+        stmts = " | ".join(cur.executed)
+        self.assertNotIn("+ 1", stmts)  # no refund UPDATE ran
+
+    def test_voice_failure_after_text_does_not_refund(self):
+        conn, cur = self._reply_conn(credits_left={"message_credits": 9})
+        user = {"user_id": "u1", "tier": "visitor"}
+        body = main.KeyholeChatReplyIn(message="hey", character="chloe", room="preview",
+                                       voice=True)
+        with patch.object(main, "db", return_value=conn), \
+             patch.object(main, "_gemini", return_value="Hey you."), \
+             patch.object(main, "_chloe_voice_mp3", side_effect=RuntimeError("voice down")):
+            out = main.keyhole_chat_reply(body, user)
+        self.assertTrue(out["ok"])  # text still delivered
+        self.assertNotIn("audio", out)
+        stmts = " | ".join(cur.executed)
+        self.assertNotIn("+ 1", stmts)  # no refund: text was delivered
+
+    def test_refund_message_pool_targets_each_pool(self):
+        for pool, col in (("preview", "preview_message_credits"),
+                          ("credits", "message_credits"),
+                          ("text", "text_balance"),
+                          ("tier", "msg_used")):
+            conn, cur = self._reply_conn()
+            with patch.object(main, "db", return_value=conn):
+                main.refund_message_pool("u1", pool)
+            stmts = " | ".join(cur.executed)
+            self.assertIn(col, stmts, pool)
 
 
 if __name__ == "__main__":

@@ -2734,11 +2734,14 @@ def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
         conn.close()
 
 
-def spend_one_message(cur, user_id: str, limit: int) -> int:
+def spend_one_message(cur, user_id: str, limit: int):
     """Reserve one message atomically: preview balance while the free preview is
     playing, then paid message credits (roll over), then package text_balance,
-    then the tier's monthly cap. Returns remaining AFTER this turn, or raises
-    402 out_of_messages. Refunds go through refund_message() (same pool order)."""
+    then the tier's monthly cap. Returns (remaining AFTER this turn, pool
+    charged), or raises 402 out_of_messages. The pool is returned so callers can
+    refund to the exact pool captured at reservation time instead of relying on
+    last_message_pool, which a concurrent turn could overwrite. Refunds go
+    through refund_message_pool() (same pool order)."""
     cur.execute("""
         SELECT preview_message_credits, message_credits, paid_keyhole_purchases,
                free_preview_claimed_at, webcam_minutes_left, webcam_session_started_at
@@ -2752,6 +2755,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         and int(pools.get("preview_message_credits") or 0) > 0
     )
     remaining = None
+    pool = None
     if preview_playing:
         cur.execute("""
             UPDATE users
@@ -2763,6 +2767,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         spent = cur.fetchone()
         if spent:
             remaining = int(spent["preview_message_credits"])
+            pool = "preview"
     if remaining is None:
         cur.execute("""
             UPDATE users
@@ -2774,6 +2779,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         spent = cur.fetchone()
         if spent:
             remaining = int(spent["message_credits"])
+            pool = "credits"
     if remaining is None:
         cur.execute("""
             UPDATE users
@@ -2785,6 +2791,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         balance_used = cur.fetchone()
         if balance_used:
             remaining = int(balance_used["text_balance"])
+            pool = "text"
     if remaining is None:
         cur.execute("""
             UPDATE users SET msg_used = msg_used + 1, last_message_pool = 'tier'
@@ -2795,7 +2802,8 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         if got is None:
             raise HTTPException(status_code=402, detail="out_of_messages")
         remaining = max(0, limit - int(got["msg_used"]))
-    return remaining
+        pool = "tier"
+    return remaining, pool
 
 
 def chat_preflight(user, girl_raw):
@@ -2813,7 +2821,7 @@ def chat_preflight(user, girl_raw):
     conn = db()
     try:
         with conn.cursor() as cur:
-            remaining = spend_one_message(cur, user["user_id"], limit)
+            remaining, _pool = spend_one_message(cur, user["user_id"], limit)
             conn.commit()
     finally:
         conn.close()
@@ -2824,15 +2832,13 @@ def chat_preflight(user, girl_raw):
         raise
 
 
-def refund_message(user_id):
-    """Hand back the message reserved by chat_preflight when she never answered.
-    The pool that was charged is last_message_pool, written in the same UPDATE."""
+def refund_message_pool(user_id, pool):
+    """Hand back a message reserved by spend_one_message to the exact pool it
+    was charged from. Takes the pool captured at reservation time, so a
+    concurrent turn can't divert the refund by overwriting last_message_pool."""
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
-            row = cur.fetchone() or {}
-            pool = (row.get("last_message_pool") or "")
             if pool == "preview":
                 cur.execute("""UPDATE users SET preview_message_credits = preview_message_credits + 1,
                                last_message_pool='' WHERE user_id=%s""", (user_id,))
@@ -2848,6 +2854,20 @@ def refund_message(user_id):
             conn.commit()
     finally:
         conn.close()
+
+
+def refund_message(user_id):
+    """Hand back the message reserved by chat_preflight when she never answered.
+    The pool that was charged is last_message_pool, written in the same UPDATE."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone() or {}
+            pool = (row.get("last_message_pool") or "")
+    finally:
+        conn.close()
+    refund_message_pool(user_id, pool)
 
 
 
@@ -6282,7 +6302,7 @@ def _companion_preflight(user, companion_id: int):
 
             # Same pool order as girl chat: preview, paid credits, package
             # text_balance, then the tier cap. Raises 402 out_of_messages.
-            remaining = spend_one_message(cur, uid, limit)
+            remaining, _pool = spend_one_message(cur, uid, limit)
 
             # Update real-days tracking on companion
             today = _today()
@@ -7892,11 +7912,13 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
         room = "preview"
 
     # Spend one message credit before generating. Raises 402 if out of messages.
+    # The pool charged is captured so a failure refunds the exact pool, even
+    # if a concurrent turn overwrote last_message_pool in the meantime.
     limit = TIERS.get(user.get("tier"), TIERS["visitor"])["limit"]
     conn = db()
     try:
         with conn.cursor() as cur:
-            spend_one_message(cur, user["user_id"], limit)
+            _remaining, pool = spend_one_message(cur, user["user_id"], limit)
         conn.commit()
     finally:
         conn.close()
@@ -7922,7 +7944,13 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
             flirt = "Late show: openly desirous. You're done playing coy — your words are hungry, direct, charged. You want him and he knows it."
         messages.append({"role": "system", "content": flirt})
 
-    reply = _gemini(messages, max_tokens=120, temperature=0.9)
+    try:
+        reply = _gemini(messages, max_tokens=120, temperature=0.9)
+    except Exception:
+        # Gemini failed before any text reply existed: hand the reserved
+        # message back to the exact pool it was charged from.
+        refund_message_pool(user["user_id"], pool)
+        raise
     # Keep it chat-tight: max 3 sentences.
     parts = re.split(r'(?<=[.!?])\s+', reply.strip())
     reply = " ".join(parts[:3]).strip()
@@ -7933,7 +7961,8 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
         # Chloe's configured voice (xAI Liora, ElevenLabs fallback) for preview
         # and paid chat. Preview voice is intentionally not gated; the message
         # allowance remains the gate for preview usage. Text survives a voice
-        # failure: the reply still goes out, it just plays no audio.
+        # failure: the reply still goes out, it just plays no audio — so a
+        # voice failure after the text was produced never triggers a refund.
         import base64 as _b64
         try:
             result["audio"] = _b64.b64encode(_chloe_voice_mp3(reply)).decode("ascii")
