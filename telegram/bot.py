@@ -85,8 +85,35 @@ KEYHOLE_ASSET_ORIGIN = os.environ.get(
     "KEYHOLE_ASSET_ORIGIN", "https://keyhole-latest-production.up.railway.app"
 ).rstrip("/")
 
-# Chloe-only for now (Bailey hidden, mirrors website)
-ALLOWED_MODELS = {"chloe"}
+# Keyhole Characters (admin console): the live Telegram cast.
+# The owner ticks "Telegram" per character; the bot refreshes from
+# GET /keyhole/characters (public) every few minutes. Fallback is Chloe.
+_KH_CHARS = {"at": 0.0, "chars": []}
+_KH_CHARS_TTL = 300.0
+
+
+def _keyhole_characters():
+    import time
+    now = time.monotonic()
+    if now - _KH_CHARS["at"] < _KH_CHARS_TTL and _KH_CHARS["chars"]:
+        return _KH_CHARS["chars"]
+    chars = []
+    try:
+        r = _get("/keyhole/characters", timeout=10)
+        if r.status_code == 200:
+            chars = [c for c in (r.json().get("characters") or []) if c.get("kh_telegram")]
+    except Exception:
+        chars = []
+    if chars:
+        _KH_CHARS["at"] = now
+        _KH_CHARS["chars"] = chars
+    return _KH_CHARS["chars"] or [{"girl": "chloe", "name": "Chloe"}]
+
+
+def _allowed_models():
+    """Slugs the owner enabled for Telegram in the admin console."""
+    return {str(c.get("girl") or "").strip().lower()
+            for c in _keyhole_characters() if c.get("girl")}
 
 # Same character photos as the Keyhole rooms.html doors and main.py
 # KEYHOLE_DOOR_AVATARS. Filenames are per-character (chloe-1.jpg is Chloe,
@@ -312,20 +339,17 @@ def _signup(email, password, display_name):
 
 
 def _webcam_roster(girls):
-    """Chloe then Bailey, each with the Keyhole door photo Telegram should send.
+    """Models the owner enabled for Telegram (admin console), in admin order.
 
-    A model missing from the house roster is still listed. Other residents are
-    dropped. Stored portraits that are not already that girl's door file are
-    replaced so a house-relative path cannot show the wrong picture.
+    `girls` (house roster) is kept for signature compatibility but unused:
+    the Keyhole Characters endpoint is the source of truth now.
     """
-    by_slug = {}
-    for g in girls or []:
-        slug = (g.get("girl") or "").strip().lower()
-        if slug in ALLOWED_MODELS:
-            by_slug[slug] = g
     out = []
-    for slug in ("chloe", "bailey"):
-        g = dict(by_slug.get(slug) or {})
+    for c in _keyhole_characters():
+        slug = str(c.get("girl") or "").strip().lower()
+        if not slug:
+            continue
+        g = dict(c)
         g["girl"] = slug
         g["name"] = g.get("name") or slug.capitalize()
         g["avatar_url"] = _portrait_url(g)
@@ -349,7 +373,7 @@ def _fetch_state(token):
 
 
 def _fetch_history(token, girl):
-    if girl not in ALLOWED_MODELS:
+    if girl not in _allowed_models():
         return []
     r = _get(f"/history?girl={girl}", token=token)
     if r.status_code != 200:
@@ -358,7 +382,7 @@ def _fetch_history(token, girl):
 
 
 def _send_chat(token, girl, message, voice=True, history=None):
-    if girl not in ALLOWED_MODELS:
+    if girl not in _allowed_models():
         raise BackendError("Only Chloe and Bailey are available on the WebCam show.")
     # Chloe uses the new Keyhole endpoint with Liora voice + updated personality.
     # Bailey stays on the legacy /chat endpoint.
@@ -380,7 +404,7 @@ def _send_chat(token, girl, message, voice=True, history=None):
 
 
 def _send_audit(token, girl):
-    if girl not in ALLOWED_MODELS:
+    if girl not in _allowed_models():
         raise BackendError("Audit is only available for Chloe and Bailey.")
     r = _post("/audit", {"girl": girl}, token=token, timeout=150)
     if r.status_code != 200:
@@ -404,7 +428,7 @@ def _fetch_keyhole_shows(token=None):
 
 
 def _request_private_show(token, character_id):
-    if character_id.lower() not in ALLOWED_MODELS:
+    if character_id.lower() not in _allowed_models():
         raise BackendError("Private shows are only available for Chloe and Bailey.")
     r = _post("/keyhole/shows/private/request", {"character_id": character_id.lower()}, token=token)
     if r.status_code != 200:
@@ -469,7 +493,7 @@ def _cmd_args(update) -> list:
 
 def _active_model(rec) -> str | None:
     slug = (rec or {}).get("active_girl")
-    if slug and slug.lower() in ALLOWED_MODELS:
+    if slug and slug.lower() in _allowed_models():
         return slug.lower()
     return None
 
@@ -499,7 +523,7 @@ async def _ensure_session(update, force: bool = False):
         return None
     created = sess.pop("created", False)
     active = (rec or {}).get("active_girl")
-    if active not in ALLOWED_MODELS:
+    if active not in _allowed_models():
         active = None
     store.set(update.effective_chat.id, **sess, active_girl=active)
     if created:
@@ -659,7 +683,7 @@ async def _send_portrait(update, g, caption: str) -> bool:
 
 async def _send_preview(update, slug: str, token: str | None = None) -> None:
     sl = slug.strip().lower()
-    if sl not in ALLOWED_MODELS:
+    if sl not in _allowed_models():
         await _txt(update, "Live preview is available for Chloe and Bailey.")
         return
 
@@ -796,7 +820,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     open_btns = []
     for g in roster:
         slug = g["girl"]
-        if slug in ALLOWED_MODELS:
+        if slug in _allowed_models():
             label = f"📹 {g.get('name', slug.title())} · Live WebCam"
             open_btns.append([InlineKeyboardButton(label, callback_data=f"girl:{slug}")])
             await _send_portrait(update, g, f"📹 {g.get('name', slug.title())}")
@@ -808,8 +832,9 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def _open_girl(update, slug) -> None:
     sl = slug.strip().lower()
-    if sl not in ALLOWED_MODELS:
-        await _txt(update, "Only Chloe and Bailey are available on the WebCam show right now. Use /models to connect!")
+    if sl not in _allowed_models():
+        names = ", ".join(_girl_name([], s) for s in sorted(_allowed_models())) or "Chloe"
+        await _txt(update, f"Available right now: {names}. Use /models to connect!")
         return
 
     try:
@@ -840,7 +865,7 @@ async def cmd_girl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     args = _cmd_args(update)
     if not args:
-        await _txt(update, "Usage: /model <chloe|bailey>")
+        await _txt(update, "Usage: /model <name>  (see /models for who's live)")
         return
     await _open_girl(update, args[0])
 
@@ -851,10 +876,10 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     rec = store.get(update.effective_chat.id)
     slug = _active_model(rec)
     args = _cmd_args(update)
-    if args and args[0].lower() in ALLOWED_MODELS:
+    if args and args[0].lower() in _allowed_models():
         slug = args[0].lower()
     if not slug:
-        await _txt(update, "Select a model first: /models or /model <chloe|bailey>")
+        await _txt(update, "Select a model first: /models or /model <name>")
         return
     await _send_preview(update, slug, token=(rec or {}).get("token"))
 
@@ -891,7 +916,7 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     rec = store.get(update.effective_chat.id)
     slug = _active_model(rec)
     if not slug:
-        await _txt(update, "Select a model first: /models or /model <chloe|bailey>")
+        await _txt(update, "Select a model first: /models or /model <name>")
         return
     try:
         history = await _call(update, fetch_history, slug)
@@ -914,7 +939,7 @@ async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     rec = store.get(update.effective_chat.id)
     slug = _active_model(rec)
     if not slug:
-        await _txt(update, "Select a model first: /models or /model <chloe|bailey>")
+        await _txt(update, "Select a model first: /models or /model <name>")
         return
     await _txt(update, f"Compiling profile audit for {slug.capitalize()}…")
     try:
@@ -1099,7 +1124,7 @@ def _menu_markup(signed_in: bool) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton("💬 Companion AI — open the app",
                                           url=COMPANION_APP_URL)])
     if signed_in:
-        rows.append([InlineKeyboardButton("📹 Chat with Chloe", callback_data="menu:models")])
+        rows.append([InlineKeyboardButton("📹 Chat with the models", callback_data="menu:models")])
     return InlineKeyboardMarkup(rows)
 
 
