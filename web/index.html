@@ -2589,35 +2589,28 @@ const PRESET_FACES = {
       if (abortStream()) resyncRemaining(++turnSeq, shownRemaining());
     }
 
-    let voiceAudio = null;
-    let voiceObjectUrl = null;
-    async function speakReplyText(text) {
+    function speakReplyText(text) {
+      // Free client-side voice (2026-09-30): the browser reads her reply
+      // aloud. No server hop, no API key, no per-message cost.
       if (!text || !isLoggedIn()) return;
       try {
-        const response = await fetch(API_BASE_URL + '/tts', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ text: text }),
-        });
-        if (!response.ok) return;
-        const blob = await response.blob();
-        if (voiceAudio) {
-          try { voiceAudio.pause(); } catch (e) {}
-        }
-        if (voiceObjectUrl) URL.revokeObjectURL(voiceObjectUrl);
-        voiceObjectUrl = URL.createObjectURL(blob);
-        voiceAudio = new Audio(voiceObjectUrl);
-        voiceAudio.onended = () => {
-          if (voiceObjectUrl) URL.revokeObjectURL(voiceObjectUrl);
-          voiceObjectUrl = null;
-        };
-        try { await voiceAudio.play(); } catch (e) {
-          // Some mobile browsers require an explicit user gesture for playback.
-        }
+        if (!('speechSynthesis' in window)) return;
+        window.speechSynthesis.cancel();   // never talk over herself
+        const u = new SpeechSynthesisUtterance(text);
+        const vs = window.speechSynthesis.getVoices();
+        const pick = vs.find(v => /^en/i.test(v.lang) &&
+          /female|samantha|zira|jenny|aria|google us english/i.test(v.name))
+          || vs.find(v => /^en/i.test(v.lang));
+        if (pick) u.voice = pick;
+        u.rate = 1.02;
+        window.speechSynthesis.speak(u);
       } catch (e) {
-        // Text chat continues normally if voice generation is unavailable.
+        // Text chat continues normally if voice is unavailable.
       }
     }
+    // Warm up the voice list (loads async in some browsers) so the first
+    // reply already gets a decent pick.
+    try { if ('speechSynthesis' in window) window.speechSynthesis.getVoices(); } catch (e) {}
 
     let streamSupported = true;
     async function streamReply(message, typing) {
