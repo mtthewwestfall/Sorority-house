@@ -131,32 +131,207 @@
 
       <div class="crossroads">
         <div class="crossroads-inner">
-          
           <div class="crossroads-copy">
             <h2>Standing at the crossroads</h2>
-            <p>Four ways into town, four kinds of people. The sign's been here longer than anyone admits. Choose where you walk first — you can't be everywhere at once.</p>
+            <p>Four ways into town, four kinds of people. Explore the map below or pick a corner to see who hangs out there and start a conversation.</p>
           </div>
         </div>
       </div>
 
+      <!-- Interactive Town Map -->
+      <section id="town-map-section" style="margin-bottom: 40px; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 24px;">
+        <h2 style="color: var(--gold); font-size: 1.5rem; margin: 0 0 6px;">Interactive Town Map</h2>
+        <p style="color: var(--muted); margin: 0 0 20px; font-size: 0.95rem;">Select a region on the map to see its hangouts and live residents.</p>
+
+        <div style="display: grid; grid-template-columns: minmax(280px, 1fr) 1.2fr; gap: 24px; align-items: start;" id="map-layout-grid">
+          <!-- SVG Map Canvas -->
+          <div style="position: relative; background: rgba(0,0,0,0.3); border: 1px solid var(--line); border-radius: 16px; padding: 16px; min-height: 320px; display: flex; flex-direction: column; justify-content: space-between;">
+            <svg viewBox="0 0 400 320" style="width: 100%; height: 100%; position: absolute; inset: 0; pointer-events: none;" aria-hidden="true">
+              <line x1="100" y1="80" x2="300" y2="80" stroke="rgba(138,125,107,0.3)" stroke-width="2" stroke-dasharray="4" />
+              <line x1="100" y1="240" x2="300" y2="240" stroke="rgba(138,125,107,0.3)" stroke-width="2" stroke-dasharray="4" />
+              <line x1="100" y1="80" x2="100" y2="240" stroke="rgba(138,125,107,0.3)" stroke-width="2" stroke-dasharray="4" />
+              <line x1="300" y1="80" x2="300" y2="240" stroke="rgba(138,125,107,0.3)" stroke-width="2" stroke-dasharray="4" />
+              <line x1="100" y1="80" x2="300" y2="240" stroke="rgba(138,125,107,0.2)" stroke-width="1.5" />
+              <line x1="300" y1="80" x2="100" y2="240" stroke="rgba(138,125,107,0.2)" stroke-width="1.5" />
+              <circle cx="200" cy="160" r="18" fill="rgba(30,33,30,0.9)" stroke="var(--gold)" stroke-width="2" />
+              <text x="200" y="164" text-anchor="middle" fill="var(--white)" font-size="10" font-weight="bold">HUB</text>
+            </svg>
+
+            <div style="position: relative; z-index: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; height: 100%;">
+              <!-- Westfall Node -->
+              <button type="button" class="map-node active" data-area="westfall" style="background: rgba(30,33,30,0.85); border: 2px solid var(--gold); border-radius: 12px; padding: 12px; color: var(--white); cursor: pointer; text-align: left; transition: all 0.2s;">
+                <div style="font-size: 0.75rem; color: var(--gold); font-weight: bold; text-transform: uppercase;">Northwest</div>
+                <div style="font-size: 1.1rem; font-weight: bold;">Westfall</div>
+                <div style="font-size: 0.78rem; color: var(--muted); margin-top: 2px;">Storefronts & Diner</div>
+              </button>
+
+              <!-- Pellegrin Node -->
+              <button type="button" class="map-node" data-area="pellegrin" style="background: rgba(30,33,30,0.85); border: 1px solid var(--line); border-radius: 12px; padding: 12px; color: var(--white); cursor: pointer; text-align: left; transition: all 0.2s;">
+                <div style="font-size: 0.75rem; color: var(--gold); font-weight: bold; text-transform: uppercase;">Northeast</div>
+                <div style="font-size: 1.1rem; font-weight: bold;">Pellegrin</div>
+                <div style="font-size: 0.78rem; color: var(--muted); margin-top: 2px;">Cabins & Pines</div>
+              </button>
+
+              <!-- Umina Node -->
+              <button type="button" class="map-node" data-area="umina" style="background: rgba(30,33,30,0.85); border: 1px solid var(--line); border-radius: 12px; padding: 12px; color: var(--white); cursor: pointer; text-align: left; transition: all 0.2s; margin-top: 60px;">
+                <div style="font-size: 0.75rem; color: var(--gold); font-weight: bold; text-transform: uppercase;">Southwest</div>
+                <div style="font-size: 1.1rem; font-weight: bold;">Umina</div>
+                <div style="font-size: 0.78rem; color: var(--muted); margin-top: 2px;">Creekside & Water</div>
+              </button>
+
+              <!-- Muse Node -->
+              <button type="button" class="map-node" data-area="muse" style="background: rgba(30,33,30,0.85); border: 1px solid var(--line); border-radius: 12px; padding: 12px; color: var(--white); cursor: pointer; text-align: left; transition: all 0.2s; margin-top: 60px;">
+                <div style="font-size: 0.75rem; color: var(--gold); font-weight: bold; text-transform: uppercase;">Southeast</div>
+                <div style="font-size: 1.1rem; font-weight: bold;">Muse</div>
+                <div style="font-size: 0.78rem; color: var(--muted); margin-top: 2px;">Edge of Town</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Region Detail & Live Residents -->
+          <div id="map-area-detail" style="background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 16px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <h3 id="area-title" style="margin: 0 0 4px; color: var(--gold); font-size: 1.4rem;">Westfall</h3>
+                <p id="area-desc" style="margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.5;">Storefronts, the diner, the post office. First hellos.</p>
+              </div>
+              <a id="area-link" href="areas/westfall.html" class="button" style="padding: 8px 14px; font-size: 0.82rem; white-space: nowrap;">Explore Area Page &rarr;</a>
+            </div>
+
+            <h4 style="margin: 18px 0 10px; font-size: 0.9rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold);">Residents & Hangouts</h4>
+            <div id="map-residents-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px;">
+              <div style="color: var(--muted); font-size: 0.88rem;">Loading residents...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div class="areas">
         <a class="area-card" href="areas/westfall.html">
-          <img src="assets/corner-westfall.jpg" alt="The Acropolis over Westfall" />
+          <img src="assets/corner-westfall.jpg" alt="The Acropolis over Westfall" loading="lazy" decoding="async" width="320" height="170" />
           <div class="area-body"><strong>Westfall</strong><span>Storefronts, the diner, the post office. First hellos.</span></div>
         </a>
         <a class="area-card" href="areas/pellegrin.html">
-          <img src="assets/corner-pellegrin.jpg" alt="Meteora over Pellegrin" />
+          <img src="assets/corner-pellegrin.jpg" alt="Meteora over Pellegrin" loading="lazy" decoding="async" width="320" height="170" />
           <div class="area-body"><strong>Pellegrin</strong><span>Cabins tucked back in the trees. The quiet ones.</span></div>
         </a>
         <a class="area-card" href="areas/umina.html">
-          <img src="assets/corner-umina.jpg" alt="The Sacred Way at Umina" />
+          <img src="assets/corner-umina.jpg" alt="The Sacred Way at Umina" loading="lazy" decoding="async" width="320" height="170" />
           <div class="area-body"><strong>Umina</strong><span>Houses along the water. People who've been here longest.</span></div>
         </a>
         <a class="area-card" href="areas/muse.html">
-          <img src="assets/corner-muse.jpg" alt="The Tholos of Athena at Muse" />
+          <img src="assets/corner-muse.jpg" alt="The Tholos of Athena at Muse" loading="lazy" decoding="async" width="320" height="170" />
           <div class="area-body"><strong>Muse</strong><span>The edge of town. The ones still deciding whether to stay.</span></div>
         </a>
       </div>
+
+      <script>
+        (function() {
+          const areaData = {
+            westfall: {
+              title: "Westfall",
+              desc: "Storefronts, the diner, the post office. First hellos and morning coffee.",
+              link: "areas/westfall.html",
+              knownGirls: ["matt", "billy", "brittany", "piper", "ty", "veronica", "ryan", "bailey", "sarah", "chloe", "lila", "sable"]
+            },
+            pellegrin: {
+              title: "Pellegrin",
+              desc: "Cabins tucked back in the trees. Woodsmoke, pine needles, and the quiet ones.",
+              link: "areas/pellegrin.html",
+              knownGirls: ["dakota", "darwin", "zoe", "willow", "bailey", "sarah", "harlan", "odette"]
+            },
+            umina: {
+              title: "Umina",
+              desc: "Houses along the water. Creekside residents who've been here longest.",
+              link: "areas/umina.html",
+              knownGirls: ["dean", "kristen", "anna", "bailey", "sarah", "bram", "fenwick"]
+            },
+            muse: {
+              title: "Muse",
+              desc: "The edge of town out past Mill Road. The ones still deciding whether to stay.",
+              link: "areas/muse.html",
+              knownGirls: ["sasha", "jordan", "mia", "bailey", "sarah", "ivo", "nell", "maren"]
+            }
+          };
+
+          const TOWN_API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
+          let activeAreaKey = "westfall";
+          let rosterGirls = [];
+
+          const titleEl = document.getElementById('area-title');
+          const descEl = document.getElementById('area-desc');
+          const linkEl = document.getElementById('area-link');
+          const gridEl = document.getElementById('map-residents-grid');
+          const nodeBtns = document.querySelectorAll('.map-node');
+
+          function escapeHtml(str) {
+            return String(str || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+          }
+
+          function renderArea(key) {
+            activeAreaKey = key;
+            const data = areaData[key] || areaData.westfall;
+            titleEl.textContent = data.title;
+            descEl.textContent = data.desc;
+            linkEl.href = data.link;
+
+            nodeBtns.forEach(btn => {
+              const isMatch = btn.dataset.area === key;
+              btn.style.borderColor = isMatch ? 'var(--gold)' : 'var(--line)';
+              btn.style.borderWidth = isMatch ? '2px' : '1px';
+              btn.style.boxShadow = isMatch ? '0 0 12px rgba(138,125,107,0.3)' : 'none';
+            });
+
+            // Filter roster characters for this area
+            const filtered = rosterGirls.filter(g => {
+              const girlId = (g.girl || '').toLowerCase();
+              return data.knownGirls.includes(girlId);
+            });
+
+            const displayGirls = filtered;
+
+            if (!displayGirls.length) {
+              gridEl.innerHTML = '<div style="color: var(--muted); font-size: 0.88rem;">No residents found in this corner yet.</div>';
+              return;
+            }
+
+            gridEl.innerHTML = displayGirls.map(g => {
+              const name = escapeHtml(g.name || g.girl);
+              const title = escapeHtml(g.door_title || g.tier_label || 'Resident');
+              const avatar = escapeHtml(g.avatar_url || 'assets/dakota.jpg');
+              const girlId = escapeHtml(g.girl || '');
+              return `
+                <a href="index.html#door-${girlId}" style="display: flex; flex-direction: column; align-items: center; text-align: center; background: rgba(30,33,30,0.6); border: 1px solid var(--line); border-radius: 12px; padding: 10px; text-decoration: none; color: var(--white); transition: transform 0.2s, border-color 0.2s;">
+                  <img src="${avatar}" alt="${name}" loading="lazy" decoding="async" width="56" height="56" style="width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 1px solid var(--gold); margin-bottom: 6px;" />
+                  <strong style="font-size: 0.88rem; color: var(--gold); display: block;">${name}</strong>
+                  <span style="font-size: 0.72rem; color: var(--muted); font-style: italic;">${title}</span>
+                  <span style="margin-top: 6px; font-size: 0.72rem; color: var(--white); background: #556357; padding: 2px 8px; border-radius: 999px;">Chat &rarr;</span>
+                </a>
+              `;
+            }).join('');
+          }
+
+          nodeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+              renderArea(btn.dataset.area);
+            });
+          });
+
+          // Fetch live /roster data
+          fetch(TOWN_API_BASE_URL + '/roster')
+            .then(res => res.ok ? res.json() : Promise.reject(res))
+            .then(data => {
+              if (data && Array.isArray(data.girls)) {
+                rosterGirls = data.girls;
+              }
+              renderArea(activeAreaKey);
+            })
+            .catch(err => {
+              console.warn('[Town Map] Could not fetch live roster, fallback to local roster:', err);
+              renderArea(activeAreaKey);
+            });
+        })();
+      </script>
 
       <div class="kiss-feature">
         <img src="assets/darwin-kissed.webp" alt="Dakota and Zoe kissing Darwin on the cheeks in the pines" />

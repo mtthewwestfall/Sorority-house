@@ -166,7 +166,7 @@
     .door-art img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
     .door-art img.is-broken { display: none; }
     .door-card.locked .door-art { filter: grayscale(1) brightness(.5); transform: scale(1.06); }
-    .door-card.locked::after { content: "TRUST NOT EARNED"; position: absolute; top: 126px; left: 0; right: 0; text-align: center; color: var(--gold); letter-spacing: .24em; font-size: .78rem; font-weight: 700; }
+    .door-card.locked::after { content: "EARN TRUST TO UNLOCK"; position: absolute; top: 110px; left: 16px; right: 16px; text-align: center; color: var(--gold); background: rgba(21,23,21,0.85); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; letter-spacing: .15em; font-size: .75rem; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
     .door-card.neighbor::after,
     .door-card.locked[data-min-tier="neighbor"]::after { content: "NEIGHBOR EXCLUSIVE"; }
     .door-copy { padding: 25px 25px 28px; }
@@ -736,27 +736,27 @@
           <button class="rl-car-arrow rl-car-prev" type="button" aria-label="Previous residents">‹</button>
           <div class="rl-carousel" id="doors-grid">
             <article id="door-dakota" class="door-card open" data-girl="dakota" data-min-tier="visitor" data-name="Dakota" data-title="The gatekeeper" data-avatar="assets/dakota.jpg?v=4">
-              <div class="door-art" data-initial="D"><img src="assets/dakota.jpg?v=4" alt="Portrait of Dakota" loading="lazy" /></div>
+              <div class="door-art" data-initial="D"><img src="assets/dakota.jpg?v=4" alt="Portrait of Dakota" loading="eager" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" /></div>
               <div class="door-copy"><div class="door-name">Dakota</div><div class="door-title">The gatekeeper</div><p>Small-town, down-to-earth, and quietly strong. Dakota is naturally funny and genuinely warm — but trust is earned slowly.</p><span class="door-cta">Talk to Dakota →</span></div>
             </article>
             <article id="door-zoe" class="door-card open" data-girl="zoe" data-min-tier="visitor" data-name="Zoe" data-title="The mirage" data-avatar="assets/zoe.jpg?v=4">
-              <div class="door-art" data-initial="Z"><img src="assets/zoe.jpg?v=4" alt="Portrait of Zoe" loading="lazy" /></div>
+              <div class="door-art" data-initial="Z"><img src="assets/zoe.jpg?v=4" alt="Portrait of Zoe" loading="eager" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" /></div>
               <div class="door-copy"><div class="door-name">Zoe</div><div class="door-title">The mirage</div><p>Beautiful, intelligent, and impossible to read at first. Look past the polish and you might earn the version nobody else gets.</p><span class="door-cta">Talk to Zoe →</span></div>
             </article>
             <article id="door-willow" class="door-card open" data-girl="willow" data-min-tier="visitor" data-name="Willow" data-title="The quiet lock" data-avatar="assets/willow.jpg?v=4">
-              <div class="door-art" data-initial="W"><img src="assets/willow.jpg?v=4" alt="Willow's portrait" loading="lazy" /></div>
+              <div class="door-art" data-initial="W"><img src="assets/willow.jpg?v=4" alt="Willow's portrait" loading="lazy" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" /></div>
               <div class="door-copy"><div class="door-name">Willow</div><div class="door-title">The quiet lock</div><p>Soft-spoken and observant. Willow notices everything but reveals very little until she feels safe.</p><span class="door-cta">Talk to Willow →</span></div>
             </article>
             <article id="door-brittany" class="door-card open" data-girl="brittany" data-min-tier="visitor" data-name="Brittany" data-title="The sweet trap" data-avatar="assets/brittany.jpg?v=3">
-              <div class="door-art" data-initial="B"><img src="assets/brittany.jpg?v=3" alt="Brittany's portrait" loading="lazy" /></div>
+              <div class="door-art" data-initial="B"><img src="assets/brittany.jpg?v=3" alt="Brittany's portrait" loading="lazy" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" /></div>
               <div class="door-copy"><div class="door-name">Brittany</div><div class="door-title">The sweet trap</div><p>Warm, charming, and instantly easy to like. If you want the real Brittany, get past the sunshine she gives everyone else.</p><span class="door-cta">Talk to Brittany →</span></div>
             </article>
             <article id="door-sasha" class="door-card open" data-girl="sasha" data-min-tier="visitor" data-name="Sasha" data-title="The wildcard" data-avatar="assets/sasha.webp?v=3">
-              <div class="door-art" data-initial="S"><img src="assets/sasha.webp?v=3" alt="Sasha's portrait" loading="lazy" /></div>
+              <div class="door-art" data-initial="S"><img src="assets/sasha.webp?v=3" alt="Sasha's portrait" loading="lazy" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" /></div>
               <div class="door-copy"><div class="door-name">Sasha</div><div class="door-title">The wildcard</div><p>Sharp, restless, and always three steps ahead. Keep up with her chaos without losing your nerve.</p><span class="door-cta">Talk to Sasha →</span></div>
             </article>
             <article id="door-piper" class="door-card open" data-girl="piper" data-min-tier="visitor" data-name="Piper" data-title="The closed book" data-avatar="assets/piper.jpg?v=4">
-              <div class="door-art" data-initial="P"><img src="assets/piper.jpg?v=4" alt="Piper's portrait" loading="lazy" /></div>
+              <div class="door-art" data-initial="P"><img src="assets/piper.jpg?v=4" alt="Piper's portrait" loading="lazy" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" /></div>
               <div class="door-copy"><div class="door-name">Piper</div><div class="door-title">The closed book</div><p>Composed, watchful, and impossible to rush. Say something true instead of something clever.</p><span class="door-cta">Talk to Piper →</span></div>
             </article>
             <article id="door-veronica" class="door-card open" data-girl="veronica" data-min-tier="visitor" data-name="Veronica" data-title="The host" data-avatar="assets/veronica.webp?v=3">
@@ -1686,43 +1686,124 @@ const PRESET_FACES = {
       } catch (_) { /* history is a nicety; the chat still works without it */ }
     }
 
+    function showChatError(message) {
+      if (chat) chat.classList.add('is-open');
+      document.body.classList.add('chat-locked');
+      if (chatLog) {
+        addMessage('error', message);
+      } else {
+        alert(message);
+      }
+    }
+
+    function showLockedDoorGuidance(characterName) {
+      if (chat) chat.classList.add('is-open');
+      document.body.classList.add('chat-locked');
+      if (!chatLog) return;
+      chatLog.innerHTML = '';
+      addMessage('note', (characterName || 'This character') + '\'s door is currently locked.');
+      addMessage('her', 'Trust with ' + (characterName || 'this character') + ' is earned over time through daily conversations and relationship rapport across town.');
+
+      const nudgeDiv = document.createElement('div');
+      nudgeDiv.className = 'msg note';
+      nudgeDiv.style.marginTop = '12px';
+      nudgeDiv.innerHTML = '<strong style="color: var(--gold); font-size: 0.95rem;">Start with an open door:</strong><br><span style="font-size: 0.85rem; color: var(--muted);">Begin talking with an open resident now to build your town trust:</span>';
+
+      const btnWrap = document.createElement('div');
+      btnWrap.style.display = 'flex';
+      btnWrap.style.gap = '8px';
+      btnWrap.style.flexWrap = 'wrap';
+      btnWrap.style.marginTop = '10px';
+
+      ['dakota', 'zoe', 'chloe'].forEach(girlKey => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'button';
+        btn.style.padding = '6px 14px';
+        btn.style.fontSize = '0.8rem';
+        btn.textContent = 'Talk to ' + girlKey.charAt(0).toUpperCase() + girlKey.slice(1);
+        btn.onclick = () => {
+          const openCard = document.getElementById('door-' + girlKey) || document.querySelector('.door-card[data-girl="' + girlKey + '"]');
+          if (openCard) {
+            openCard.classList.remove('locked');
+            openCard.classList.add('open');
+            openChat(openCard);
+          }
+        };
+        btnWrap.appendChild(btn);
+      });
+
+      nudgeDiv.appendChild(btnWrap);
+      chatLog.appendChild(nudgeDiv);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
     let lockedScrollY = 0;
     async function openChat(card) {
-      if (!isLoggedIn() && !(await ensureDemoSession())) {
-        addMessage('error', 'Could not start the demo. Try again in a moment.');
-        return;
+      try {
+        if (!card || !card.dataset || !card.dataset.girl) {
+          const errDetail = card ? (card.dataset ? 'missing data-girl' : 'no dataset') : 'card element is null';
+          console.error('[Roster Click Failure] openChat received invalid card:', errDetail, card);
+          showChatError('Could not open chat: Character information is missing.');
+          return;
+        }
+
+        if (!isLoggedIn() && !(await ensureDemoSession())) {
+          console.error('[Roster Click Failure] ensureDemoSession failed for girl:', card.dataset.girl);
+          showChatError('Could not start demo session. Please refresh and try again.');
+          return;
+        }
+
+        if (card.classList.contains('locked')) {
+          console.warn('[Roster Click Warning] Attempted to open locked character:', card.dataset.girl);
+          showLockedDoorGuidance(card.dataset.name || card.dataset.girl);
+          return;
+        }
+
+        abortStreamAndResync();
+        currentCompanionId = null;
+        currentGirl = card.dataset.girl;
+
+        const nameEl = document.getElementById('chat-name');
+        if (nameEl) nameEl.textContent = card.dataset.name || card.dataset.girl;
+
+        const titleEl = document.getElementById('chat-title');
+        if (titleEl) titleEl.textContent = card.dataset.title || '';
+
+        const avatar = document.getElementById('chat-avatar');
+        if (avatar) {
+          avatar.classList.remove('is-broken');
+          avatar.src = card.dataset.avatar || '';
+          avatar.alt = card.dataset.name || card.dataset.girl;
+        }
+
+        const actionsBar = document.getElementById('companion-actions-bar');
+        const photoBtn = document.getElementById('chat-photo-btn');
+        const auditBtn = document.getElementById('chat-audit-btn');
+        if (actionsBar) actionsBar.hidden = true;
+        if (photoBtn) photoBtn.hidden = false;
+        if (auditBtn) auditBtn.hidden = false;
+
+        chatLog.innerHTML = '';
+        receipt = null;
+        lastStampAt = 0;
+        addMessage('note', 'Trust earned. Say hi.');
+        loadHistory(currentGirl).then(() => showSavedAudit(card.dataset.girl)).catch(err => {
+          console.warn('[Roster Chat] loadHistory warning:', err);
+        });
+        loadPictureStatus();
+        chat.classList.add('is-open');
+        lockedScrollY = window.scrollY;
+        document.body.classList.add('chat-locked');
+        appliedVvh = appliedTop = -1;
+        applyChatViewport();
+        chatInput.value = '';
+        growChatInput();
+        chatInput.focus();
+      } catch (err) {
+        console.error('[Roster Click Exception] openChat failed:', err, card);
+        showChatError('Error opening chat: ' + (err.message || 'An unexpected error occurred.'));
       }
-      abortStreamAndResync();
-      currentCompanionId = null;
-      currentGirl = card.dataset.girl;
-      document.getElementById('chat-name').textContent = card.dataset.name;
-      document.getElementById('chat-title').textContent = card.dataset.title;
-      const avatar = document.getElementById('chat-avatar');
-      avatar.classList.remove('is-broken');
-      avatar.src = card.dataset.avatar;
-      avatar.alt = card.dataset.name;
-
-      const actionsBar = document.getElementById('companion-actions-bar');
-      const photoBtn = document.getElementById('chat-photo-btn');
-      const auditBtn = document.getElementById('chat-audit-btn');
-      if (actionsBar) actionsBar.hidden = true;
-      if (photoBtn) photoBtn.hidden = false;
-      if (auditBtn) auditBtn.hidden = false;
-
-      chatLog.innerHTML = '';
-      receipt = null;
-      lastStampAt = 0;
-      addMessage('note', 'Trust earned. Say hi.');
-      loadHistory(currentGirl).then(() => showSavedAudit(card.dataset.girl));
-      loadPictureStatus();
-      chat.classList.add('is-open');
-      lockedScrollY = window.scrollY;
-      document.body.classList.add('chat-locked');
-      appliedVvh = appliedTop = -1;
-      applyChatViewport();
-      chatInput.value = '';
-      growChatInput();
-      chatInput.focus();
     }
 
     function closeChat() {
@@ -1748,19 +1829,19 @@ const PRESET_FACES = {
     // out on each one makes the panel visibly step through intermediate sizes. So every
     // event only re-arms one timer, and the panel is written exactly once, after the
     // viewport has been still for a moment, and only if the numbers actually changed.
-    const FIT_QUIET_MS = 120;
     let fitTimer = 0;
     let settleTimer = 0;
     let appliedVvh = -1;
     let appliedTop = -1;
     const mobileChat = window.matchMedia('(max-width: 620px)');
     function applyChatViewport() {
-      fitTimer = 0;
       if (!chat.classList.contains('is-open') || !window.visualViewport) return;
       if (!mobileChat.matches) {
         if (appliedVvh !== -1 || appliedTop !== -1) {
           chat.style.transform = '';
           chat.style.removeProperty('--vvh');
+          const panel = chat.querySelector('.chat-panel');
+          if (panel) panel.style.removeProperty('height');
           appliedVvh = appliedTop = -1;
         }
         return;
@@ -1769,25 +1850,33 @@ const PRESET_FACES = {
       const vvh = Math.round(vv.height);
       const top = Math.round(vv.offsetTop);
       if (vvh === appliedVvh && top === appliedTop) return;
-      const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+      const wasPinned = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 60;
       appliedVvh = vvh;
       appliedTop = top;
       chat.style.setProperty('--vvh', `${vvh}px`);
+      const panel = chat.querySelector('.chat-panel');
+      if (panel) panel.style.height = `${vvh}px`;
       chat.style.transform = top ? `translateY(${top}px)` : '';
       if (window.scrollY) window.scrollTo(0, 0);
-      if (wasPinned) chatLog.scrollTop = chatLog.scrollHeight;
+      if (wasPinned || document.activeElement === chatInput) {
+        chatLog.scrollTop = chatLog.scrollHeight;
+      }
     }
     function fitChatToViewport() {
       if (!chat.classList.contains('is-open') || !window.visualViewport) return;
-      clearTimeout(fitTimer);
-      fitTimer = setTimeout(applyChatViewport, FIT_QUIET_MS);
+      applyChatViewport();
     }
-    // Safari sometimes fires no viewport event at all around focus/blur; one late
-    // fallback fit after the keyboard animation has certainly finished covers that.
-    // It is a no-op when the resize/scroll path already applied the same numbers.
     function settleChatViewport() {
-      clearTimeout(settleTimer);
-      settleTimer = setTimeout(fitChatToViewport, 500);
+      applyChatViewport();
+      setTimeout(applyChatViewport, 50);
+      setTimeout(applyChatViewport, 150);
+      setTimeout(applyChatViewport, 300);
+      setTimeout(() => {
+        if (chatLog) chatLog.scrollTop = chatLog.scrollHeight;
+        if (chatInput && document.activeElement === chatInput) {
+          try { chatInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+        }
+      }, 100);
     }
     chatInput.addEventListener('focus', settleChatViewport);
     chatInput.addEventListener('blur', settleChatViewport);
@@ -1847,15 +1936,16 @@ const PRESET_FACES = {
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     }
     function renderRoster(girls) {
-      doorsGrid.innerHTML = girls.map((g) => {
+      doorsGrid.innerHTML = girls.map((g, idx) => {
         const name = escapeHtml(g.name || g.girl);
         const avatar = escapeHtml(g.avatar_url);
+        const loadingAttr = idx < 2 ? 'eager' : 'lazy';
         return '<article id="door-' + escapeHtml(g.girl) + '" class="door-card open" data-girl="' + escapeHtml(g.girl) + '"' +
           ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
           ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
           ' data-avatar="' + avatar + '">' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
-          (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
+          (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" loading="' + loadingAttr + '" decoding="async" sizes="(max-width: 620px) 100vw, (max-width: 900px) 50vw, 320px" width="320" height="285" />' : '') + '</div>' +
           '<div class="door-copy">' +
           '<div class="door-name">' + name + '</div>' +
           '<div class="door-title">' + escapeHtml(g.role_title) + '</div>' +
@@ -2216,8 +2306,19 @@ const PRESET_FACES = {
 
     // Delegated so cards rendered from /roster are clickable too.
     doorsGrid.addEventListener('click', (event) => {
-      const card = event.target.closest('.door-card[data-girl]');
-      if (card) openChat(card);
+      try {
+        const card = event.target.closest('.door-card');
+        if (!card) return;
+        if (!card.dataset || !card.dataset.girl) {
+          console.error('[Roster Click Failure] Door card clicked but missing data-girl attribute:', event.target, card);
+          showChatError('Unable to open chat for this character card.');
+          return;
+        }
+        openChat(card);
+      } catch (err) {
+        console.error('[Roster Click Exception] Event handling failed:', err);
+        showChatError('Error handling card click: ' + (err.message || 'Please try again.'));
+      }
     });
 
     const companionContainer = document.getElementById('companion-card-container');
