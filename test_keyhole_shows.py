@@ -262,11 +262,12 @@ class TestKeyholeWebcamBackend(unittest.TestCase):
         self.assertIn("preview_message_credits", sqls)
         self.assertIn("paid_keyhole_purchases = paid_keyhole_purchases + 1", sqls)
 
+    @patch("main._has_account", return_value=True)
     @patch("main.get_relationship", return_value={"summary": ""})
     @patch("main.check_keyhole_session_active")
     @patch("main.girl_open", return_value=True)
     @patch("main.db")
-    def test_preview_messages_spend_before_paid_credits(self, mock_db, _open, _session, _rel):
+    def test_preview_messages_spend_before_paid_credits(self, mock_db, _open, _session, _rel, _acct):
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_db.return_value = mock_conn

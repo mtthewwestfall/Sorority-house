@@ -2298,8 +2298,8 @@ const PRESET_FACES = {
     // Pictures: paid tiers start with a free allotment; visitors have 0 by design
     // (signup ploy). Packs add credits. The + button is always there; /image is
     // checked each time a chat opens.
-    if (chatPhotoBtn) chatPhotoBtn.hidden = false;
-    if (chatAuditBtn) chatAuditBtn.hidden = false;
+    chatPhotoBtn.hidden = false;
+    chatAuditBtn.hidden = false;
     async function loadPictureStatus() {
       if (!isLoggedIn()) return;
       const token = getToken();
@@ -2358,7 +2358,7 @@ const PRESET_FACES = {
       chatLog.appendChild(picSheet);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
-    if (chatPhotoBtn) chatPhotoBtn.addEventListener('click', () => {
+    chatPhotoBtn.addEventListener('click', () => {
       if ((!currentGirl && !currentCompanionId) || chatPhotoBtn.disabled) return;
       closeAuditSheet();
       if (picSheet) { closePicSheet(); return; }
@@ -2399,7 +2399,7 @@ const PRESET_FACES = {
       chatLog.appendChild(auditSheet);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
-    if (chatAuditBtn) chatAuditBtn.addEventListener('click', () => {
+    chatAuditBtn.addEventListener('click', () => {
       if (currentCompanionId) {
         requestCompanionAudit(currentCompanionId);
         return;
@@ -2613,6 +2613,17 @@ const PRESET_FACES = {
         if (!(await showTextPackOffer('error'))) addMessage('error', 'You are out of messages. Check back soon.');
         return true;
       }
+      if (response.status === 403) {
+        const data = await response.json().catch(() => null);
+        typing.remove();
+        if (errText(data, '') === 'account_required') {
+          addMessage('note', 'Make a free account or sign in to chat with her.');
+          openAuth('signup', 'Make a free account or sign in to keep talking.');
+        } else {
+          addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
+        }
+        return true;
+      }
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => null);
         typing.remove();
@@ -2690,6 +2701,9 @@ const PRESET_FACES = {
         handleUnauthorized();
       } else if (response.status === 402 && errText(data, '') === 'out_of_messages') {
         if (!(await showTextPackOffer('error'))) addMessage('error', 'You are out of messages. Check back soon.');
+      } else if (response.status === 403 && errText(data, '') === 'account_required') {
+        addMessage('note', 'Make a free account or sign in to chat with her.');
+        openAuth('signup', 'Make a free account or sign in to keep talking.');
       } else if (!response.ok || !data || data.ok === false) {
         addMessage('error', errText(data, 'She did not answer. Try again in a moment.'));
       } else {

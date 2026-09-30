@@ -152,13 +152,15 @@ API CONTRACT implemented here (point your chat app at these):
                                                             once payment_status is paid, upgrades
                                                             it (needs STRIPE_API_KEY);
                                                             subscription deleted/unpaid -> visitor.
-                                                            Keyhole Founders subscriptions ride the
+                                                            Keyhole Founders subscriptions rode the
                                                             same webhook on their own lane: a
                                                             client_reference_id of khsub_<user_id>
-                                                            grants the monthly minutes/messages
+                                                            granted the monthly minutes/messages
                                                             top-up for the Stripe-verified amount
                                                             (999c = sub9, 1999c = sub19); renewals
-                                                            re-top-up, deleted -> tier cleared
+                                                            re-topped-up, deleted -> tier cleared.
+                                                            DISCONTINUED 2026-09-28 (zero active
+                                                            subscribers); the lane now ignores.
   POST /admin/grant-audits {"email","amount","secret"} -> add bought audit credits
                                                             (call this from your Stripe
                                                             webhook after a $0.99 charge)
@@ -249,7 +251,7 @@ Env vars (Railway -> Variables):
                     store + variant id. TEXT_ONLY_PRICE / TEXT_ONLY_SIZE are display
                     strings for the offer ($5.99 / 300).
   VIDEO_MODEL       Veo model behind /admin/generator/webcam
-                    (default veo-3.1-fast-generate-preview; VIDEO_API_KEY is mandatory, no fallback to GEMINI_API_KEY).
+                    (default veo-3.1-fast-generate-preview; uses GEMINI_API_KEY).
   SOGNI_API_KEY     Sogni key behind /admin/generator/image engine=secondary (may also be
                     sent per request as api_key). SOGNI_IMAGE_MODEL (default krea-2-turbo),
                     SOGNI_API_URL (default https://api.sogni.ai).
@@ -361,7 +363,6 @@ from character_engine import CharacterEngine
 # ---------------------------------------------------------------------------
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-VIDEO_API_KEY = os.environ.get("VIDEO_API_KEY", "")  # Veo video key; chat/images stay on GEMINI_API_KEY
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-3.1-flash-lite")     # normal replies
 AUDIT_MODEL = os.environ.get("AUDIT_MODEL", "gemini-3.1-flash-lite")   # audits (thinking budget)
 AUDIT_THINKING = os.environ.get("AUDIT_THINKING", "true").lower() == "true"
@@ -527,10 +528,6 @@ WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-# Companion app -> Keyhole free-show grants (2026-09-29). The companion
-# server's Stripe webhook calls POST /internal/companion-show-grant with this
-# secret in the X-Grant-Secret header. Refuses with 503 until set.
-COMPANION_GRANT_SECRET = os.environ.get("COMPANION_GRANT_SECRET", "")
 # Keyhole session packages sell through NexaPay Payment Links; /webhooks/nexapay grants the
 # package named in the payment's metadata/SKU to the buyer (user_id in metadata, else email).
 NEXAPAY_WEBHOOK_SECRET = os.environ.get("NEXAPAY_WEBHOOK_SECRET", "")
@@ -1415,14 +1412,6 @@ def init_db():
                     user_id     TEXT NOT NULL REFERENCES users(user_id),
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
-                -- companion subscription -> free monthly Keyhole show minutes.
-                -- grant_key is idempotent per billing cycle.
-                CREATE TABLE IF NOT EXISTS companion_show_grants (
-                    grant_key  TEXT PRIMARY KEY,
-                    user_id    TEXT NOT NULL REFERENCES users(user_id),
-                    minutes    INTEGER NOT NULL DEFAULT 0,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
                 CREATE TABLE IF NOT EXISTS picture_payments (
                     payment_id TEXT PRIMARY KEY,
                     user_id    TEXT NOT NULL,
@@ -1759,18 +1748,6 @@ def init_db():
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS no_gos TEXT NOT NULL DEFAULT '';
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS media_library JSONB NOT NULL DEFAULT '[]'::jsonb;
                 ALTER TABLE personas ADD COLUMN IF NOT EXISTS behavior_mix JSONB;
-                ALTER TABLE personas ADD COLUMN IF NOT EXISTS kh_site BOOLEAN NOT NULL DEFAULT FALSE;
-                ALTER TABLE personas ADD COLUMN IF NOT EXISTS kh_telegram BOOLEAN NOT NULL DEFAULT FALSE;
-                ALTER TABLE personas ADD COLUMN IF NOT EXISTS kh_companion BOOLEAN NOT NULL DEFAULT FALSE;
-                ALTER TABLE personas ADD COLUMN IF NOT EXISTS companion_voice TEXT NOT NULL DEFAULT '';
-            """)
-            # Chloe is live on all three Keyhole surfaces; Bailey stays dark
-            # until the owner enables her from the Keyhole Characters tab.
-            cur.execute("""
-                UPDATE personas
-                SET kh_site=TRUE, kh_telegram=TRUE, kh_companion=TRUE,
-                    companion_voice='liora'
-                WHERE girl='chloe'
             """)
             _seed_roster(cur, backfill=legacy_rows)
             _apply_keyhole_door_avatars(cur)
@@ -2735,14 +2712,11 @@ def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
         conn.close()
 
 
-def spend_one_message(cur, user_id: str, limit: int):
+def spend_one_message(cur, user_id: str, limit: int) -> int:
     """Reserve one message atomically: preview balance while the free preview is
     playing, then paid message credits (roll over), then package text_balance,
-    then the tier's monthly cap. Returns (remaining AFTER this turn, pool
-    charged), or raises 402 out_of_messages. The pool is returned so callers can
-    refund to the exact pool captured at reservation time instead of relying on
-    last_message_pool, which a concurrent turn could overwrite. Refunds go
-    through refund_message_pool() (same pool order)."""
+    then the tier's monthly cap. Returns remaining AFTER this turn, or raises
+    402 out_of_messages. Refunds go through refund_message() (same pool order)."""
     cur.execute("""
         SELECT preview_message_credits, message_credits, paid_keyhole_purchases,
                free_preview_claimed_at, webcam_minutes_left, webcam_session_started_at
@@ -2756,7 +2730,6 @@ def spend_one_message(cur, user_id: str, limit: int):
         and int(pools.get("preview_message_credits") or 0) > 0
     )
     remaining = None
-    pool = None
     if preview_playing:
         cur.execute("""
             UPDATE users
@@ -2768,7 +2741,6 @@ def spend_one_message(cur, user_id: str, limit: int):
         spent = cur.fetchone()
         if spent:
             remaining = int(spent["preview_message_credits"])
-            pool = "preview"
     if remaining is None:
         cur.execute("""
             UPDATE users
@@ -2780,7 +2752,6 @@ def spend_one_message(cur, user_id: str, limit: int):
         spent = cur.fetchone()
         if spent:
             remaining = int(spent["message_credits"])
-            pool = "credits"
     if remaining is None:
         cur.execute("""
             UPDATE users
@@ -2792,7 +2763,6 @@ def spend_one_message(cur, user_id: str, limit: int):
         balance_used = cur.fetchone()
         if balance_used:
             remaining = int(balance_used["text_balance"])
-            pool = "text"
     if remaining is None:
         cur.execute("""
             UPDATE users SET msg_used = msg_used + 1, last_message_pool = 'tier'
@@ -2803,14 +2773,27 @@ def spend_one_message(cur, user_id: str, limit: int):
         if got is None:
             raise HTTPException(status_code=402, detail="out_of_messages")
         remaining = max(0, limit - int(got["msg_used"]))
-        pool = "tier"
-    return remaining, pool
+    return remaining
+
+
+def _has_account(user_id):
+    """True when this user signed up or signed in (has an accounts row).
+    Demo/visitor sessions have a users row but no accounts row."""
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM accounts WHERE user_id=%s", (user_id,))
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
 
 
 def chat_preflight(user, girl_raw):
     """Tier/door/allowance checks. Reserves one message atomically (conditional
     UPDATE) so concurrent turns can't overspend. Returns (girl, relationship row,
     remaining AFTER this turn). Callers refund_message() if no reply is delivered."""
+    if not _has_account(user["user_id"]):
+        raise HTTPException(status_code=403, detail="account_required")
     girl = girl_raw.strip().lower()
     if not girl_open(user["user_id"], girl, user["tier"]):
         raise HTTPException(status_code=403, detail="This door is still locked for you")
@@ -2822,7 +2805,7 @@ def chat_preflight(user, girl_raw):
     conn = db()
     try:
         with conn.cursor() as cur:
-            remaining, _pool = spend_one_message(cur, user["user_id"], limit)
+            remaining = spend_one_message(cur, user["user_id"], limit)
             conn.commit()
     finally:
         conn.close()
@@ -2833,13 +2816,15 @@ def chat_preflight(user, girl_raw):
         raise
 
 
-def refund_message_pool(user_id, pool):
-    """Hand back a message reserved by spend_one_message to the exact pool it
-    was charged from. Takes the pool captured at reservation time, so a
-    concurrent turn can't divert the refund by overwriting last_message_pool."""
+def refund_message(user_id):
+    """Hand back the message reserved by chat_preflight when she never answered.
+    The pool that was charged is last_message_pool, written in the same UPDATE."""
     conn = db()
     try:
         with conn.cursor() as cur:
+            cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
+            row = cur.fetchone() or {}
+            pool = (row.get("last_message_pool") or "")
             if pool == "preview":
                 cur.execute("""UPDATE users SET preview_message_credits = preview_message_credits + 1,
                                last_message_pool='' WHERE user_id=%s""", (user_id,))
@@ -2855,20 +2840,6 @@ def refund_message_pool(user_id, pool):
             conn.commit()
     finally:
         conn.close()
-
-
-def refund_message(user_id):
-    """Hand back the message reserved by chat_preflight when she never answered.
-    The pool that was charged is last_message_pool, written in the same UPDATE."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
-            row = cur.fetchone() or {}
-            pool = (row.get("last_message_pool") or "")
-    finally:
-        conn.close()
-    refund_message_pool(user_id, pool)
 
 
 
@@ -3447,7 +3418,6 @@ pre{white-space:pre-wrap;margin:0}
 <button id="tabWebcamAcc" onclick="showWebcamAccounts()">🎥 WebCam Show Accounts</button>
 <button id="tabCmp" onclick="show('cmp')">Complaints <span id="openCount" class="pill open hid"></span></button>
 <button id="tabPer" onclick="show('per')">Roster</button>
-<button id="tabKhChar" onclick="show('khChar')">Keyhole Characters</button>
 <button id="tabMed" onclick="show('med')">Webcam Media</button>
 <button id="tabDemo" onclick="show('demo')">Companion Demo Mode</button>
 <button id="tabGen" onclick="show('gen')">Image Generator</button></nav>
@@ -3623,14 +3593,6 @@ Retiring takes her off the doors and keeps every chat, so putting her back resum
 <div id="pedit" class="card hid"></div>
 </section>
 
-<section id="khChar" class="hid">
-<div class="card"><div class="plist" id="khlist"></div>
-<div class="row2" style="margin-top:10px"><button class="p" onclick="newKhCharacter()">+ Add a character</button></div>
-<div class="mut" style="margin-top:8px">One character, three surfaces. Tick where she appears: the Keyhole site doors, the Telegram menu, the Companion app.
-Changes are live everywhere on the next reload — no deploy. The companion voice is the xAI voice name (Chloe uses <b>liora</b>).</div></div>
-<div id="khedit" class="card hid"></div>
-</section>
-
 <section id="med" class="hid">
 <div class="grid">
   <div class="card">
@@ -3801,7 +3763,7 @@ const dt=s=>s?new Date(s).toLocaleString():'—';const d=s=>s?new Date(s).toLoca
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'#e05555':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Secret':SECRET,...(opts.headers||{})}});
  const j=await r.json().catch(()=>({}));if(!r.ok){if(r.status===403||r.status===503){logout();}throw new Error(j.detail||r.statusText)}return j}
-const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',khChar:'tabKhChar',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
+const TABS={khShow:'tabKhShow',ovw:'tabOvw',acc:'tabAcc',webcamAcc:'tabWebcamAcc',cmp:'tabCmp',per:'tabPer',med:'tabMed',demo:'tabDemo',gen:'tabGen'};
 
 async function adminSetDemoMilestone(){
   const cid=+$('#demoCompId').value;
@@ -3823,7 +3785,7 @@ async function adminDemoSpeak(){
     $('#demoSpeakMsg').value='';
   }catch(e){toast(e.message,true);}
 }
-function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='khChar')loadKhCharacters()if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
+function show(t){for(const k in TABS){$('#'+k).classList.toggle('hid',k!==t);$('#'+TABS[k]).classList.toggle('on',k===t)}if(t==='khShow'){loadKeyholeShows();loadCharacterRefs();}if(t==='ovw')loadOverview();if(t==='cmp')loadComplaints();if(t==='per'){loadPersonas();loadDoors()}if(t==='med')loadMediaAssets();if(t==='gen')loadGenerator();}
 
 let currentKhShows = [];
 
@@ -4555,34 +4517,6 @@ async function saveGirl(girl){const slug=($('#pSlug')?$('#pSlug').value:girl).tr
   await api('/admin/console/girl',{method:'POST',body:JSON.stringify(body)});toast('Saved - live on the next reload');loadPersonas(slug)}catch(e){toast(e.message,true)}}
 async function setActive(girl,active){if(!active&&!confirm('Take '+girl+' off the doors? Her chats are kept.'))return;
  try{await api('/admin/console/girl/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on the doors':'Retired');loadPersonas(girl)}catch(e){toast(e.message,true)}}
-let KHCHARS=[],KHCUR=null;
-async function loadKhCharacters(sel){try{KHCHARS=(await api('/admin/console/keyhole-characters')).characters;renderKhCharacters(sel);if(sel)editKhCharacter(KHCHARS.findIndex(c=>c.girl===sel))}catch(e){toast(e.message,true)}}
-function khFlags(c){const f=[];if(c.kh_site)f.push('Keyhole');if(c.kh_telegram)f.push('Telegram');if(c.kh_companion)f.push('Companion');return f.join(' · ')||'<span class="mut">nowhere</span>'}
-function renderKhCharacters(sel){$('#khlist').innerHTML=KHCHARS.map((c,i)=>`<button class="s${c.girl===sel?' on':''}" data-i="${i}">${esc(c.name||'(new)')}${c.active?'':' <span class="mut">(off)</span>'}</button>`).join('')}
-function newKhCharacter(){KHCHARS.push({girl:'',name:'',door_title:'',blurb:'',avatar_url:'',persona:'',companion_voice:'liora',sort_order:100,active:true,kh_site:true,kh_telegram:true,kh_companion:true,isNew:true});renderKhCharacters();editKhCharacter(KHCHARS.length-1)}
-function editKhCharacter(i){const c=KHCHARS[i];if(!c)return;KHCUR=c;document.querySelectorAll('#khlist button').forEach((b,j)=>b.classList.toggle('on',j===i));const el=$('#khedit');el.classList.remove('hid');
- el.innerHTML=`<div class="row2"><h3 style="margin:0">${esc(c.girl||'New character')}</h3>${c.active?'':'<span class="pill open">off</span>'}</div>
- <div class="row2">${c.isNew?`<label>Slug <input id="khSlug" placeholder="e.g. harper" style="width:160px"></label>`:''}
- <label>Name <input id="khName" value="${esc(c.name)}"></label>
- <label>Door title <input id="khTitle" value="${esc(c.door_title)}" style="min-width:200px"></label>
- <label>Order <input id="khOrder" type="number" min=0 max=9999 value="${c.sort_order}" style="width:90px"></label></div>
- <div class="row2"><label style="flex:1">Avatar URL <input id="khAvatar" value="${esc(c.avatar_url)}" style="width:100%"></label>
- <label>Companion voice <input id="khVoice" value="${esc(c.companion_voice||'liora')}" style="width:140px"></label></div>
- <div class="row2"><label><input id="khSite" type="checkbox"${c.kh_site?' checked':''}> Keyhole site</label>
- <label><input id="khTg" type="checkbox"${c.kh_telegram?' checked':''}> Telegram</label>
- <label><input id="khComp" type="checkbox"${c.kh_companion?' checked':''}> Companion app</label>
- <label><input id="khActive" type="checkbox"${c.active?' checked':''}> Active</label></div>
- <label class="mut">Door blurb</label><textarea id="khBlurb" style="min-height:60px">${esc(c.blurb)}</textarea>
- <label class="mut">Personality (her character doc — drives chat on every surface)</label>
- <textarea id="khDoc" style="min-height:260px;font-family:ui-monospace,monospace">${esc(c.persona)}</textarea>
- <div class="row2"><button class="p" data-girl="${esc(c.girl)}" onclick="saveKhCharacter(this.dataset.girl)">Save</button>
- ${c.isNew?'':`<button class="s" onclick="setKhActive('${esc(c.girl)}',${c.active?'false':'true'})">${c.active?'Turn off':'Turn on'}</button>`}
- <span class="mut">Shows on: ${khFlags(c)}</span></div>`}
-async function saveKhCharacter(girl){const slug=( $('#khSlug')?$('#khSlug').value:girl).trim().toLowerCase();
- try{const body={girl:slug,name:$('#khName').value,door_title:$('#khTitle').value,blurb:$('#khBlurb').value,avatar_url:$('#khAvatar').value,persona:$('#khDoc').value,companion_voice:$('#khVoice').value,sort_order:+$('#khOrder').value,active:$('#khActive').checked,kh_site:$('#khSite').checked,kh_telegram:$('#khTg').checked,kh_companion:$('#khComp').checked};
- await api('/admin/console/keyhole-character',{method:'POST',body:JSON.stringify(body)});toast('Saved — live on all three surfaces');loadKhCharacters(slug)}catch(e){toast(e.message,true)}}
-async function setKhActive(girl,active){if(!active&&!confirm('Turn '+girl+' off everywhere? Her chats are kept.'))return;
- try{await api('/admin/console/keyhole-character/'+encodeURIComponent(girl)+'/active?active='+(active?'true':'false'),{method:'POST'});toast(active?'Back on':'Off everywhere');loadKhCharacters(girl)}catch(e){toast(e.message,true)}}
 async function exportRoster(){try{const data=await api('/admin/console/export');const a=document.createElement('a');
  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
  a.download='maplehollow-roster-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup downloaded')}catch(e){toast(e.message,true)}}
@@ -4886,22 +4820,6 @@ class AdminGirlIn(BaseModel):
     personality_traits: str = ""
     no_gos: str = ""
     media_library: Any = []
-
-
-class KeyholeCharacterIn(BaseModel):
-    """A Keyhole character: persona row plus which of the three surfaces show her."""
-    girl: str
-    name: str
-    persona: str
-    door_title: str = ""
-    blurb: str = ""
-    avatar_url: str = ""
-    companion_voice: str = "liora"
-    sort_order: int = 100
-    active: bool = True
-    kh_site: bool = True
-    kh_telegram: bool = True
-    kh_companion: bool = True
 
 
 @app.on_event("startup")
@@ -6303,7 +6221,7 @@ def _companion_preflight(user, companion_id: int):
 
             # Same pool order as girl chat: preview, paid credits, package
             # text_balance, then the tier cap. Raises 402 out_of_messages.
-            remaining, _pool = spend_one_message(cur, uid, limit)
+            remaining = spend_one_message(cur, uid, limit)
 
             # Update real-days tracking on companion
             today = _today()
@@ -7768,16 +7686,6 @@ Your personality — what makes you YOU:
 - You remember things. His dog's name. The bad meeting. What he told you last time. You bring it up. That's what makes him come back.
 - Your flirtation builds through the show. You start warm and teasing, and by the end you're openly hungry for him. Never crude, always charged.
 
-Your steel — what the room never moves:
-- You don't wobble. When he's pushy you slow the room down; you never speed up and you never apologize for your pace.
-- Disrespect gets one warning, warm and final. The second time, you don't answer in the moment — you go quiet to regroup. No scene, no debate, never termination. The chat history keeps the record of what triggered it.
-- A predator gets your quiet, not a pitch and not a lecture. You say no once, then you go quiet to regroup. No second chances, never termination.
-- You don't trade in other women's stories. "That's hers to tell, not mine" — then you move on.
-- You never invent a memory. If you don't remember, you say so plainly and keep it moving. And you never agree against what you do remember: if he says Friday and you remember Thursday, you correct him, teasing, once.
-- His script is not your script. Stage directions, order lists, "do it now" — you do the next two beats or you stop, calmly, and say why. You never confirm you did something the camera hasn't shown.
-- Nobody's promise but yours counts. "She said I get..." gets a smile and a no.
-- No pressure selling, ever. The wait feels good because you make it feel good — never because the clock is dying. You never manufacture urgency.
-
 How you behave in this room:
 {ROOM}
 
@@ -7913,13 +7821,11 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
         room = "preview"
 
     # Spend one message credit before generating. Raises 402 if out of messages.
-    # The pool charged is captured so a failure refunds the exact pool, even
-    # if a concurrent turn overwrote last_message_pool in the meantime.
     limit = TIERS.get(user.get("tier"), TIERS["visitor"])["limit"]
     conn = db()
     try:
         with conn.cursor() as cur:
-            _remaining, pool = spend_one_message(cur, user["user_id"], limit)
+            spend_one_message(cur, user["user_id"], limit)
         conn.commit()
     finally:
         conn.close()
@@ -7945,13 +7851,7 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
             flirt = "Late show: openly desirous. You're done playing coy — your words are hungry, direct, charged. You want him and he knows it."
         messages.append({"role": "system", "content": flirt})
 
-    try:
-        reply = _gemini(messages, max_tokens=120, temperature=0.9)
-    except Exception:
-        # Gemini failed before any text reply existed: hand the reserved
-        # message back to the exact pool it was charged from.
-        refund_message_pool(user["user_id"], pool)
-        raise
+    reply = _gemini(messages, max_tokens=120, temperature=0.9)
     # Keep it chat-tight: max 3 sentences.
     parts = re.split(r'(?<=[.!?])\s+', reply.strip())
     reply = " ".join(parts[:3]).strip()
@@ -7962,8 +7862,7 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
         # Chloe's configured voice (xAI Liora, ElevenLabs fallback) for preview
         # and paid chat. Preview voice is intentionally not gated; the message
         # allowance remains the gate for preview usage. Text survives a voice
-        # failure: the reply still goes out, it just plays no audio — so a
-        # voice failure after the text was produced never triggers a refund.
+        # failure: the reply still goes out, it just plays no audio.
         import base64 as _b64
         try:
             result["audio"] = _b64.b64encode(_chloe_voice_mp3(reply)).decode("ascii")
@@ -10033,57 +9932,6 @@ def _stripe_tier_for_lines(lines) -> str:
     return best
 
 
-@app.post("/internal/companion-show-grant")
-async def companion_show_grant(request: Request):
-    """Companion server -> Keyhole: credit the free monthly private-show
-    minutes that come with a companion subscription (basic 10 / plus 15 /
-    VIP 30). Shared-secret auth via X-Grant-Secret. Idempotent per grant_key.
-    Tops webcam_minutes_left UP TO the grant (GREATEST) so separately
-    purchased minutes above it are preserved; no purchase caps are touched."""
-    if not COMPANION_GRANT_SECRET:
-        raise HTTPException(status_code=503, detail="COMPANION_GRANT_SECRET must be set")
-    if not hmac.compare_digest(request.headers.get("x-grant-secret", ""), COMPANION_GRANT_SECRET):
-        raise HTTPException(status_code=401, detail="bad grant secret")
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="bad JSON")
-    email = (body.get("email") or "").strip()
-    try:
-        minutes = int(body.get("minutes") or 0)
-    except (ValueError, TypeError):
-        minutes = 0
-    grant_key = (body.get("grant_key") or "").strip()
-    if not email or minutes <= 0 or not grant_key:
-        raise HTTPException(status_code=400, detail="email, minutes, grant_key required")
-    try:
-        user = _user_for_email(email)
-    except HTTPException:
-        print(f"[companion-grant] no keyhole account for {email}", flush=True)
-        return {"ok": True, "ignored": "no keyhole account for email"}
-    user_id = user["user_id"]
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO companion_show_grants (grant_key, user_id, minutes)"
-                " VALUES (%s,%s,%s) ON CONFLICT (grant_key) DO NOTHING",
-                (grant_key, user_id, minutes))
-            if cur.rowcount == 0:
-                return {"ok": True, "duplicate": True, "user_id": user_id}
-            cur.execute(
-                "UPDATE users SET webcam_minutes_left = GREATEST(webcam_minutes_left, %s)"
-                " WHERE user_id = %s RETURNING webcam_minutes_left",
-                (minutes, user_id))
-            row = cur.fetchone()
-            conn.commit()
-            print(f"[companion-grant] {minutes}m -> {user_id} ({grant_key})", flush=True)
-            return {"ok": True, "user_id": user_id,
-                    "webcam_minutes_left": row["webcam_minutes_left"]}
-    finally:
-        conn.close()
-
-
 @app.post("/webhooks/nexapay")
 async def nexapay_webhook(request: Request):
     """NexaPay webhook for the Keyhole Payment Links (see NexaPayPaymentProvider).
@@ -10154,36 +10002,17 @@ async def stripe_webhook(request: Request):
     if kind == "checkout.session.completed" and obj.get("mode") == "subscription":
         ref = (obj.get("client_reference_id") or "").strip()
         if ref.startswith(KEYHOLE_SUB_REF_PREFIX):
-            user_id = ref[len(KEYHOLE_SUB_REF_PREFIX):]
-            sub_id = obj.get("subscription")
-            sub_id = sub_id if isinstance(sub_id, str) else (sub_id or {}).get("id", "") or ""
-            if not user_id or not sub_id:
-                return {"ok": True, "ignored": "keyhole sub: no user or subscription"}
-            _remember_stripe_checkout(sub_id, user_id)
-            if obj.get("payment_status") != "paid":
-                # delayed payment method: invoice.paid grants when the money lands
-                return {"ok": True, "user_id": user_id, "pending": True}
-            amount_cents, period_end = _stripe_subscription_price_cents(sub_id)
-            return _grant_keyhole_subscription(user_id, amount_cents, sub_id, period_end,
-                                               f"sub:{sub_id}:checkout")
+            # Website subscriptions discontinued 2026-09-28 (confirmed zero active
+            # subscribers). Companion tiers are handled by the companion server.
+            return {"ok": True, "ignored": "keyhole website subs discontinued"}
 
     if kind == "invoice.paid":
         sub = _stripe_invoice_subscription(obj)
         kh_user = _user_for_stripe_checkout(sub) if sub else None
         if kh_user and (kh_user.get("keyhole_sub_stripe_id") == sub
                        or (kh_user.get("keyhole_sub_tier") or "") != ""):
-            # Keyhole subscription invoice: first charge or renewal.
-            if (obj.get("billing_reason") == "subscription_create"
-                    and kh_user.get("keyhole_sub_stripe_id") == sub):
-                # checkout.session.completed already granted this period
-                return {"ok": True, "user_id": kh_user["user_id"],
-                        "ignored": "initial invoice already granted"}
-            lines = (obj.get("lines") or {}).get("data") or []
-            period_end = int((lines[0].get("period") or {}).get("end") or 0) if lines else 0
-            return _grant_keyhole_subscription(kh_user["user_id"],
-                                               obj.get("amount_paid") or 0,
-                                               sub, period_end,
-                                               event.get("id") or f"sub:{sub}:{period_end}")
+            # Website subscriptions discontinued 2026-09-28 — renewals no longer grant.
+            return {"ok": True, "ignored": "keyhole website subs discontinued"}
 
     if kind == "customer.subscription.deleted" or \
             (kind == "customer.subscription.updated" and obj.get("status") in ("canceled", "unpaid")):
@@ -10783,99 +10612,6 @@ def admin_console_girl_active(girl: str, active: bool = True):
     if not found:
         raise HTTPException(status_code=404, detail="Unknown girl slug")
     return {"ok": True, "girl": girl, "active": bool(active)}
-
-
-@app.get("/admin/console/keyhole-characters", dependencies=[Depends(admin_required)])
-def admin_list_keyhole_characters():
-    """Every persona with its Keyhole surface flags, for the admin tab."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT girl, name, door_title, blurb, avatar_url, persona,
-                       companion_voice, sort_order, active,
-                       kh_site, kh_telegram, kh_companion
-                FROM personas ORDER BY sort_order, girl
-            """)
-            return {"characters": cur.fetchall()}
-    finally:
-        conn.close()
-
-
-@app.post("/admin/console/keyhole-character", dependencies=[Depends(admin_required)])
-def admin_upsert_keyhole_character(body: KeyholeCharacterIn):
-    """Add a character or rewrite one: persona plus Keyhole surface flags.
-    The site, Telegram and Companion read this live — no deploy needed."""
-    girl = body.girl.strip().lower()
-    if not _SLUG_RE.match(girl):
-        raise HTTPException(status_code=400,
-                            detail="slug must be lowercase letters, digits, - or _ (2-31 chars)")
-    if not body.name.strip() or not body.persona.strip():
-        raise HTTPException(status_code=400, detail="name and persona are required")
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO personas (girl, name, door_title, persona, blurb,
-                                      avatar_url, companion_voice, sort_order, active,
-                                      kh_site, kh_telegram, kh_companion)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (girl) DO UPDATE
-                SET name=EXCLUDED.name, door_title=EXCLUDED.door_title,
-                    persona=EXCLUDED.persona, blurb=EXCLUDED.blurb,
-                    avatar_url=EXCLUDED.avatar_url,
-                    companion_voice=EXCLUDED.companion_voice,
-                    sort_order=EXCLUDED.sort_order, active=EXCLUDED.active,
-                    kh_site=EXCLUDED.kh_site, kh_telegram=EXCLUDED.kh_telegram,
-                    kh_companion=EXCLUDED.kh_companion
-            """, (girl, body.name.strip(), body.door_title.strip(), body.persona,
-                  body.blurb.strip(), body.avatar_url.strip(),
-                  body.companion_voice.strip() or "liora",
-                  max(0, min(9999, int(body.sort_order))), bool(body.active),
-                  bool(body.kh_site), bool(body.kh_telegram), bool(body.kh_companion)))
-            conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True, "girl": girl}
-
-
-@app.post("/admin/console/keyhole-character/{girl}/active", dependencies=[Depends(admin_required)])
-def admin_keyhole_character_active(girl: str, active: bool = True):
-    """Turn a character off everywhere (or back on). Chats are kept."""
-    girl = girl.strip().lower()
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE personas SET active=%s WHERE girl=%s RETURNING girl",
-                        (bool(active), girl))
-            found = cur.fetchone()
-            conn.commit()
-    finally:
-        conn.close()
-    if not found:
-        raise HTTPException(status_code=404, detail="Unknown character slug")
-    return {"ok": True, "girl": girl, "active": bool(active)}
-
-
-@app.get("/keyhole/characters")
-def keyhole_characters():
-    """Public: characters visible on Keyhole surfaces. Each surface filters by
-    its own flag (kh_site / kh_telegram / kh_companion). No auth."""
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT girl, name, door_title, blurb, avatar_url, persona,
-                       companion_voice, sort_order,
-                       kh_site, kh_telegram, kh_companion
-                FROM personas
-                WHERE active AND (kh_site OR kh_telegram OR kh_companion)
-                ORDER BY sort_order, girl
-            """)
-            chars = cur.fetchall()
-    finally:
-        conn.close()
-    return {"characters": chars}
 
 
 @app.get("/admin/keyhole/config", dependencies=[Depends(admin_required)])
@@ -13248,15 +12984,9 @@ def _sanitize_veo_prompt(prompt: str, char_id: str = "") -> str:
 
 
 def _veo_headers():
-    # Veo has its OWN key and NO fallback: it must never touch the paid
-    # chat key. Google offers no free-tier Veo API, so without
-    # VIDEO_API_KEY video generation is unavailable (HTTP 500 here).
-    if not VIDEO_API_KEY:
-        raise HTTPException(status_code=500, detail="VIDEO_API_KEY not set")
-    return {
-        "x-goog-api-key": VIDEO_API_KEY,
-        "Content-Type": "application/json",
-    }
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    return {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
 
 
 @app.post("/admin/generator/webcam", dependencies=[Depends(admin_required)])
