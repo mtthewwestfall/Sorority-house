@@ -21,3 +21,16 @@
   to = "https://keyhole-latest-production.up.railway.app/:splat"
   status = 200
   force = true
+
+# God's Greek admin console lives on the backend: proxy /admin there.
+[[redirects]]
+  from = "/admin"
+  to = "https://sorority-house-production-aeb5.up.railway.app/admin"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/admin/*"
+  to = "https://sorority-house-production-aeb5.up.railway.app/admin/:splat"
+  status = 200
+  force = true
