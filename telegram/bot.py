@@ -531,6 +531,11 @@ async def _ensure_session(update, force: bool = False):
              "📹 Welcome to KEYHOLE Live WebCam Show — your account is open!\n"
              "Your Telegram id is your instant pass.\n\n"
              "Already have a web account? Use /login <email> <password> to link it.")
+        # Chloe's opener for a brand-new Telegram user who hasn't messaged yet
+        # (user's words, 2026-09-30).
+        await _txt(update,
+             "Well hello there handsome, did it hurt when you fell from "
+             "heaven? What should I call my angel.")
     return store.get(update.effective_chat.id)
 
 
