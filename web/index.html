@@ -2426,8 +2426,8 @@ const PRESET_FACES = {
     // Pictures: paid tiers start with a free allotment; visitors have 0 by design
     // (signup ploy). Packs add credits. The + button is always there; /image is
     // checked each time a chat opens.
-    chatPhotoBtn.hidden = false;
-    chatAuditBtn.hidden = false;
+    if (chatPhotoBtn) chatPhotoBtn.hidden = false;
+    if (chatAuditBtn) chatAuditBtn.hidden = false;
     async function loadPictureStatus() {
       if (!isLoggedIn()) return;
       const token = getToken();
@@ -2486,7 +2486,7 @@ const PRESET_FACES = {
       chatLog.appendChild(picSheet);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
-    chatPhotoBtn.addEventListener('click', () => {
+    if (chatPhotoBtn) chatPhotoBtn.addEventListener('click', () => {
       if ((!currentGirl && !currentCompanionId) || chatPhotoBtn.disabled) return;
       closeAuditSheet();
       if (picSheet) { closePicSheet(); return; }
@@ -2527,7 +2527,7 @@ const PRESET_FACES = {
       chatLog.appendChild(auditSheet);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
-    chatAuditBtn.addEventListener('click', () => {
+    if (chatAuditBtn) chatAuditBtn.addEventListener('click', () => {
       if (currentCompanionId) {
         requestCompanionAudit(currentCompanionId);
         return;
