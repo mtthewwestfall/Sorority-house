@@ -6802,22 +6802,26 @@ DEFAULT_CHARACTER_REFERENCES = {
 _CHARACTER_REFS_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-def _get_house_rule(key: str, default: str = "") -> str:
-    if not DATABASE_URL:
-        return default
+def _get_house_rules(keys: List[str]) -> Dict[str, str]:
+    """Batch-fetches multiple house rules in a single SQL query to prevent DB connection churn."""
+    if not DATABASE_URL or not keys:
+        return {}
     try:
         conn = db()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT value FROM house_rules WHERE key = %s", (key,))
-                row = cur.fetchone()
-                if row:
-                    return row["value"]
+                cur.execute("SELECT key, value FROM house_rules WHERE key = ANY(%s)", (list(keys),))
+                return {row["key"]: row["value"] for row in cur.fetchall() if row.get("key")}
         finally:
             conn.close()
     except Exception:
         pass
-    return default
+    return {}
+
+
+def _get_house_rule(key: str, default: str = "") -> str:
+    rules = _get_house_rules([key])
+    return rules.get(key, default)
 
 
 def _set_house_rule(key: str, value: str) -> bool:
@@ -6867,9 +6871,13 @@ def get_character_references(character_id: str) -> Dict[str, Any]:
     default_appearance = mem_refs.get("current_appearance") or DEFAULT_CHARACTER_REFERENCES[cid]["current_appearance"]
     default_private = mem_refs.get("private_references") or DEFAULT_CHARACTER_REFERENCES[cid]["private_references"]
 
-    master = _get_house_rule(f"ref_master_{cid}") or default_master
-    appearance = _get_house_rule(f"ref_appearance_{cid}") or default_appearance
-    private_raw = _get_house_rule(f"ref_private_{cid}")
+    # Bolt: Batch query character reference house rules in 1 SQL query to eliminate 2 sequential DB connection opens/closes (~66.7% reduction)
+    ref_keys = [f"ref_master_{cid}", f"ref_appearance_{cid}", f"ref_private_{cid}"]
+    rules = _get_house_rules(ref_keys)
+
+    master = rules.get(f"ref_master_{cid}") or default_master
+    appearance = rules.get(f"ref_appearance_{cid}") or default_appearance
+    private_raw = rules.get(f"ref_private_{cid}")
     if private_raw:
         try:
             private_refs = json.loads(private_raw)
