@@ -1,8 +1,8 @@
 // Service worker for the installed house: it only ever caches the shell that is
 // shipped with the site. Conversations, the roster and everything else the API
 // answers are left alone, so an installed copy can never show a stale girl or a
-// stale message. Bump SHELL on every shell change to retire the old copy.
-const SHELL = 'house-shell-v21';
+// stale message. Bump CACHE on every shell change to retire the old copy.
+const CACHE = 'house-shell-v22';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -17,7 +17,7 @@ const SHELL_FILES = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting())
   );
 });
 self.addEventListener('activate', (event) => {
@@ -37,6 +37,14 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE).then((c) => c.put(event.request, copy)).catch(() => {});
       }
       return res;
-    }).catch(() => caches.match(event.request).then((hit) => hit || caches.match('/')))
+    }).catch(() =>
+      // Offline: serve the cached shell. The final fetch() re-attempt guarantees
+      // respondWith never resolves undefined (which Safari reports as the
+      // cryptic "Returned response is null") — a true offline just shows the
+      // browser's normal offline page instead.
+      caches.match(event.request).then(
+        (hit) => hit || caches.match('/').then((fb) => fb || fetch(event.request))
+      )
+    )
   );
 });
