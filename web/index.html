@@ -478,7 +478,6 @@
 .rl-brand img { border-radius: 8px; display: block; }
 .rl-nav { display: flex; gap: 28px; }
 .rl-nav a { color: #c9c2b4; text-decoration: none; font-size: .95rem; }
-.rl-nav a.rl-nav-godtown { font-family: 'Times New Roman', Times, serif; letter-spacing: .18em; }
 .rl-nav a:hover { color: #E9E2D7; }
 .rl-topbar-actions { display: flex; align-items: center; gap: 14px; }
 .rl-nav-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
@@ -595,6 +594,14 @@
 .rl-checklist li { color: #c9c2b4; font-size: .95rem; line-height: 1.5; padding: 11px 0 11px 30px; position: relative; border-bottom: 1px solid rgba(233,226,215,.07); }
 .rl-checklist li::before { content: '✓'; position: absolute; left: 4px; top: 11px; color: #8A7D6B; font-weight: 700; }
 
+/* ---------- more apps ---------- */
+.rl-apps-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; max-width: 920px; }
+.rl-app { background: #1E211E; border: 1px solid rgba(233,226,215,.09); border-radius: 18px; padding: 36px 32px 32px; display: flex; flex-direction: column; }
+.rl-app h3 { margin: 0 0 10px; font-size: 1.4rem; color: #E9E2D7; font-weight: 600; font-family: var(--serif); }
+.rl-app p { color: #a9a294; font-size: .95rem; line-height: 1.6; margin: 0 0 24px; flex: 1; }
+.rl-app .rl-btn { align-self: flex-start; }
+@media (max-width: 700px) { .rl-apps-grid { grid-template-columns: 1fr; } }
+
 /* ---------- footer ---------- */
 .rl-footer { border-top: 1px solid rgba(233,226,215,.09); padding: 66px 0 28px; margin-top: 10px; background: #121411; }
 .rl-footer-grid { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 40px; margin-bottom: 46px; }
@@ -692,7 +699,6 @@
         <a href="#why">Why it works</a>
         <a href="#plans">Membership</a>
         <a href="#merch">Merch</a>
-        <a href="https://web-production-ae547.up.railway.app" target="_blank" rel="noopener" class="rl-nav-godtown">God's Town</a>
       </nav>
       <div class="rl-topbar-actions">
         <img id="nav-avatar" class="rl-nav-avatar" alt="Your avatar" hidden />
@@ -917,6 +923,27 @@
         </div>
       </div>
     </section>
+    <section id="apps" class="rl-section">
+      <div class="wrap">
+        <p class="rl-eyebrow">Beyond God's Greek</p>
+        <div class="rl-section-head">
+          <h2>She's not only here.</h2>
+          <p class="rl-section-sub">Chloe has her own place — take her home, or watch her live.</p>
+        </div>
+        <div class="rl-apps-grid">
+          <article class="rl-app">
+            <h3>Take Chloe Home</h3>
+            <p>She remembers everything, and she texts you first. Try her for $0.99 — 100 messages.</p>
+            <a class="rl-btn rl-btn-primary" href="https://companion.lockeddoor.ai" target="_blank" rel="noopener">Take her home →</a>
+          </article>
+          <article class="rl-app">
+            <h3>Watch Her Live</h3>
+            <p>Private webcam shows with Chloe — free 5-minute preview, one-on-one sessions, and group shows every Friday.</p>
+            <a class="rl-btn rl-btn-ghost" href="https://keyhole.lockeddoor.ai" target="_blank" rel="noopener">Enter the rooms →</a>
+          </article>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="rl-footer">
@@ -935,6 +962,8 @@
           <a href="#plans">Membership</a>
           <a href="#merch">Merch</a>
           <a href="town.html">Town guide</a>
+          <a href="https://companion.lockeddoor.ai" target="_blank" rel="noopener">Take Chloe Home</a>
+          <a href="https://keyhole.lockeddoor.ai" target="_blank" rel="noopener">Watch Her Live</a>
         </nav>
         <nav class="rl-footer-col" aria-label="Account">
           <h4>Account</h4>
