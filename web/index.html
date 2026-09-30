@@ -1840,6 +1840,8 @@ const PRESET_FACES = {
         if (appliedVvh !== -1 || appliedTop !== -1) {
           chat.style.transform = '';
           chat.style.removeProperty('--vvh');
+          const panel = chat.querySelector('.chat-panel');
+          if (panel) panel.style.removeProperty('height');
           appliedVvh = appliedTop = -1;
         }
         return;

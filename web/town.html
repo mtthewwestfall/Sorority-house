@@ -254,6 +254,7 @@
             }
           };
 
+          const TOWN_API_BASE_URL = "https://sorority-house-production-aeb5.up.railway.app";
           let activeAreaKey = "westfall";
           let rosterGirls = [];
 
@@ -287,7 +288,7 @@
               return data.knownGirls.includes(girlId);
             });
 
-            const displayGirls = filtered.length > 0 ? filtered : rosterGirls.slice(0, 6);
+            const displayGirls = filtered;
 
             if (!displayGirls.length) {
               gridEl.innerHTML = '<div style="color: var(--muted); font-size: 0.88rem;">No residents found in this corner yet.</div>';
@@ -317,7 +318,7 @@
           });
 
           // Fetch live /roster data
-          fetch('/roster')
+          fetch(TOWN_API_BASE_URL + '/roster')
             .then(res => res.ok ? res.json() : Promise.reject(res))
             .then(data => {
               if (data && Array.isArray(data.girls)) {
