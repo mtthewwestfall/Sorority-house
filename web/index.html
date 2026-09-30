@@ -2560,36 +2560,6 @@ const PRESET_FACES = {
       if (abortStream()) resyncRemaining(++turnSeq, shownRemaining());
     }
 
-    let voiceAudio = null;
-    let voiceObjectUrl = null;
-    async function speakReplyText(text) {
-      if (!text || !isLoggedIn()) return;
-      try {
-        const response = await fetch(API_BASE_URL + '/tts', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ text: text }),
-        });
-        if (!response.ok) return;
-        const blob = await response.blob();
-        if (voiceAudio) {
-          try { voiceAudio.pause(); } catch (e) {}
-        }
-        if (voiceObjectUrl) URL.revokeObjectURL(voiceObjectUrl);
-        voiceObjectUrl = URL.createObjectURL(blob);
-        voiceAudio = new Audio(voiceObjectUrl);
-        voiceAudio.onended = () => {
-          if (voiceObjectUrl) URL.revokeObjectURL(voiceObjectUrl);
-          voiceObjectUrl = null;
-        };
-        try { await voiceAudio.play(); } catch (e) {
-          // Some mobile browsers require an explicit user gesture for playback.
-        }
-      } catch (e) {
-        // Text chat continues normally if voice generation is unavailable.
-      }
-    }
-
     let streamSupported = true;
     async function streamReply(message, typing) {
       const girl = currentGirl;
@@ -2646,7 +2616,7 @@ const PRESET_FACES = {
         } else if (event === 'done') {
           showRemaining(data.remaining);
           if (data.picture_due) requestPicture();
-          if (bubble && bubble.textContent) speakReplyText(bubble.textContent);
+
         } else if (event === 'error') {
           failed = data.detail || 'She did not answer. Try again in a moment.';
         }
@@ -2711,7 +2681,6 @@ const PRESET_FACES = {
         addMessage('her', data.reply);
         showRemaining(data.remaining);
         if (data.picture_due) requestPicture();
-        speakReplyText(data.reply);
       }
     }
 
