@@ -9,3 +9,7 @@
 ## 2026-09-12 - N+1 Persona Difficulty DB Lookups in Roster Loops
 **Learning:** `roster()` returns persona rows containing the `difficulty` column, but calling `difficulty_for(girl)` inside `GET /roster` and `GET /state` loops opens and closes N sequential DB connections (`SELECT difficulty FROM personas WHERE girl=%s`) for N roster items. Using pre-fetched `r.get("difficulty")` or `row.get("difficulty")` in roster iterations and backing `difficulty_for()` with an in-memory TTL dictionary cache eliminates N DB queries per request (reducing DB connection opens from N+1 down to 1 for `/roster`).
 **Action:** Always check if iteration items already contain the needed attribute before calling individual lookup helpers, and add in-memory TTL caching to single-entity getter functions called in hot paths.
+
+## 2026-09-12 - In-Memory TTL Caching for Keyhole House Rules Config
+**Learning:** `get_keyhole_config()` was called across 14+ endpoints/helpers per user request, opening a new psycopg2 connection and querying `house_rules WHERE key LIKE 'kh_%'` every time. Adding an in-memory 60s TTL cache with shallow-copy returns and explicit invalidation in `admin_set_keyhole_config()` cuts database queries on config lookups by >99.9% (reducing per-call latency from ~5-20ms to 0.0007ms).
+**Action:** When global/dynamic configuration is backed by database tables, wrap getter lookups with an in-memory TTL dictionary cache and invalidate upon write endpoints.
