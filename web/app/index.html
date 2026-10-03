@@ -158,6 +158,19 @@
       background: var(--panel); box-shadow: var(--shadow); transition: transform .25s ease, border-color .25s ease;
     }
     .door-card:hover { transform: translateY(-6px); border-color: rgba(85,99,87,.66); }
+    .castle-banner {
+      position: absolute; inset: 0; z-index: 0;
+      background-size: cover; background-position: center;
+      opacity: 0.35; pointer-events: none;
+    }
+    .castle-banner span {
+      position: absolute; right: 10px; bottom: 6px;
+      font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase;
+      color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    .chat-head { position: relative; overflow: hidden; }
+    .chat-head > *:not(.castle-banner):not(.chat-close) { position: relative; z-index: 1; }
+    .chat-head > .chat-close { z-index: 2; }
     .door-art {
       position: relative; height: 285px; overflow: hidden; display: grid; place-items: center;
       background: radial-gradient(circle at 50% 35%, rgba(233,226,215,.12), rgba(138,125,107,0) 60%), linear-gradient(160deg, #242824, #1E211E);
@@ -1029,6 +1042,7 @@
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
     <div class="chat-panel">
       <div class="chat-head">
+        <div class="castle-banner" id="castle-banner" hidden><span id="castle-name"></span></div>
         <button class="chat-close" id="chat-close" type="button" aria-label="Back">&lsaquo;</button>
         <img id="chat-avatar" src="" alt="" />
         <div class="who">
@@ -1618,6 +1632,17 @@ const PRESET_FACES = {
       avatar.classList.remove('is-broken');
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
+      const castleBanner = document.getElementById('castle-banner');
+      if (castleBanner) {
+        if (card.dataset.castle) {
+          castleBanner.style.backgroundImage = 'url(' + card.dataset.castle + ')';
+          document.getElementById('castle-name').textContent = card.dataset.castleName || '';
+          castleBanner.hidden = false;
+        } else {
+          castleBanner.hidden = true;
+          castleBanner.style.backgroundImage = '';
+        }
+      }
 
       const actionsBar = document.getElementById('companion-actions-bar');
       const photoBtn = document.getElementById('chat-photo-btn');
@@ -1764,7 +1789,21 @@ const PRESET_FACES = {
       return String(text == null ? '' : text).replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     }
-    const ROMAN_SLUGS = new Set(['harlan','ivo','lila','nell','sable','bram','odette','fenwick','maren','tobias','prudence','anselm','delia','imogen','rufus','hazel']);
+    const ROMAN_SLUGS = new Set(['harlan','ivo','lila','nell','sable','bram','odette','fenwick','maren','tobias','prudence','anselm','delia','imogen','rufus','hazel','minerva','diana','venus','vesta','jupiter','mars']);
+    const GOD_CASTLES = {
+      athena: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      artemis: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      aphrodite: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      persephone: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      zeus: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      apollo: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      minerva: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      diana: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      venus: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      vesta: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      jupiter: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      mars: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+    };
     function renderRoster(girls) {
       doorsGrid.innerHTML = girls.map((g) => {
         const name = escapeHtml(g.name || g.girl);
@@ -1777,7 +1816,8 @@ const PRESET_FACES = {
         const card = '<article id="door-' + escapeHtml(g.girl) + '" class="door-card open" data-girl="' + escapeHtml(g.girl) + '"' +
           ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
           ' data-name="' + name + '" data-title="' + escapeHtml(g.door_title) + '"' +
-          ' data-avatar="' + avatar + '">' +
+          ' data-avatar="' + avatar + '"' +
+          (GOD_CASTLES[g.girl] ? ' data-castle="' + GOD_CASTLES[g.girl].img + '" data-castle-name="' + escapeHtml(GOD_CASTLES[g.girl].name) + '"' : '') + '>' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
           (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
           '<div class="door-copy">' +
@@ -2172,6 +2212,8 @@ const PRESET_FACES = {
         document.getElementById('chat-name').textContent = comp.first_name;
         document.getElementById('chat-title').textContent = titleText;
 
+        const castleBanner = document.getElementById('castle-banner');
+        if (castleBanner) { castleBanner.hidden = true; castleBanner.style.backgroundImage = ''; }
         const avatar = document.getElementById('chat-avatar');
         avatar.classList.remove('is-broken');
         avatar.src = comp.portrait_url ? (comp.portrait_url.startsWith('data:') ? comp.portrait_url : 'data:image/png;base64,' + comp.portrait_url) : '';

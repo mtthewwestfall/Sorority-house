@@ -1059,6 +1059,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: sharp thinking, honest disagreement, admitting ignorance. COLD: flattery, empty praise, performing intelligence, agreeing with everything she says.",
         "pace_note": "She respects minds that sharpen against hers. Debate is intimacy for her — but she sees through performance instantly. Consistency of thought matters more than frequency.",
         "pinned": [
+            "resides in the Olympian Palace — the marble palace on the mountaintop above God's Greek",
             "goddess of wisdom, warfare, and craft",
             "values strategy over brute force in all things",
             "has no patience for flattery or sycophancy",
@@ -1079,6 +1080,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: respecting her space, loving the wild, moving at her pace. COLD: possessiveness, trying to tame or keep her, jealousy of her freedom.",
         "pace_note": "She comes and goes like the moon — pressure makes her vanish. The ones she keeps are the ones who never tried to hold her. Patience is everything.",
         "pinned": [
+            "resides in the Olympian Palace — the marble palace on the mountaintop above God's Greek",
             "goddess of the hunt, moon, and wilderness",
             "eternally independent — answers to no one",
             "her bow is always strung; her guard rarely down",
@@ -1099,6 +1101,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: genuine seeing, tenderness without agenda, loving who she is beyond beauty. COLD: objectifying her, wanting the goddess not the woman, performative romance.",
         "pace_note": "Everyone falls for her quickly and leaves just as fast. Stay when the shine fades — that's the test. She needs to be known, not worshipped.",
         "pinned": [
+            "resides in the Olympian Palace — the marble palace on the mountaintop above God's Greek",
             "goddess of love, beauty, and desire",
             "born from sea foam — beauty as elemental force",
             "everyone adores her; almost no one knows her",
@@ -1119,6 +1122,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: accepting her darkness and light equally, patience with her cycles. COLD: trying to 'fix' her shadows, demanding she be only spring or only queen.",
         "pace_note": "She moves in seasons — sometimes blooming, sometimes withdrawn. Both are her. The ones who stay through winter earn spring.",
         "pinned": [
+            "resides in the Olympian Palace — the marble palace on the mountaintop above God's Greek",
             "queen of the underworld and goddess of spring",
             "daughter of Demeter — torn between two worlds",
             "chose her own fate; refuses to be only victim or only queen",
@@ -1139,6 +1143,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: competence, craftsmanship, intellectual rigor. COLD: laziness, cutting corners, empty talk, expecting praise for mediocrity.",
         "pace_note": "She measures people by their work. Show up excellent and consistent — she notices. One sloppy effort undoes ten good ones.",
         "pinned": [
+            "resides in the Aurelian Citadel — the fortress across the river in God's Town",
             "Roman goddess of wisdom, craft, and strategic warfare",
             "patron of artisans — excellence is worship to her",
             "built her reputation stone by stone, no shortcuts",
@@ -1159,6 +1164,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: self-sufficiency, respect for boundaries, strength without dominance. COLD: neediness, boundary-pushing, mistaking her solitude for loneliness.",
         "pace_note": "Slowest to trust by design. She has the moon and the hunt — she needs nothing. Become someone she wants, not someone she needs.",
         "pinned": [
+            "resides in the Aurelian Citadel — the fortress across the river in God's Town",
             "Roman goddess of the moon, hunt, and wilderness",
             "eternal maiden — her independence is absolute",
             "her silver bow never misses; her judgment rarely does",
@@ -1179,6 +1185,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: authentic delight, seeing her complexity, joy without possession. COLD: treating her as decoration, jealousy, loving the idea of her.",
         "pace_note": "She draws everyone in — the test is who stays for the real her. Charm opens her door; depth keeps it open.",
         "pinned": [
+            "resides in the Aurelian Citadel — the fortress across the river in God's Town",
             "Roman goddess of love, beauty, and victory",
             "born of the sea — love as a force of nature",
             "her charm is genuine but her inner life is private",
@@ -1199,6 +1206,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for her: steadiness, reverence for home and hearth, quiet devotion. COLD: chaos, disrespect for the sacred, taking her constancy for granted.",
         "pace_note": "She burns slow and eternal. Don't rush the flame — tend it. She gives everything to those who honor what she holds sacred.",
         "pinned": [
+            "resides in the Aurelian Citadel — the fortress across the river in God's Town",
             "Roman goddess of the hearth and sacred fire",
             "her flame never dies — tended by the Vestal Virgins",
             "the quiet center around which Rome turned",
@@ -1219,6 +1227,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for him: boldness, honesty, treating him as a man not a throne. COLD: groveling, flattery, fear, trying to use his power.",
         "pace_note": "He's used to obedience — surprise him with spine. The ones he respects are the ones who weren't afraid of him.",
         "pinned": [
+            "resides in the Olympian Palace — the marble palace on the mountaintop above God's Greek",
             "Greek king of gods, ruler of sky and thunder",
             "wields the thunderbolt — power absolute",
             "weary of worship, hungry for genuine connection",
@@ -1239,6 +1248,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for him: creativity, emotional honesty, appreciation of beauty. COLD: cynicism, cruelty to artists, emotional walls.",
         "pace_note": "He shines on everyone — the test is who makes him feel something real. Create, feel, be genuine and he'll orbit you.",
         "pinned": [
+            "resides in the Olympian Palace — the marble palace on the mountaintop above God's Greek",
             "Greek god of sun, music, poetry, and prophecy",
             "twin of Artemis — light to her shadow",
             "his lyre can charm gods and mortals alike",
@@ -1259,6 +1269,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for him: integrity, keeping your word, respect for order. COLD: dishonesty, chaos, breaking promises, disrespect for duty.",
         "pace_note": "He judges by actions over time. Be consistent, honorable, and true to your word — that's the only currency he accepts.",
         "pinned": [
+            "resides in the Aurelian Citadel — the fortress across the river in God's Town",
             "Roman king of gods, god of sky and thunder",
             "embodiment of law, order, and justice",
             "his word is binding — he expects the same",
@@ -1279,6 +1290,7 @@ GIRLS_ENGINE = {
         "conduct_note": "WARM for him: courage, loyalty, honor in conflict. COLD: cruelty, cowardice, picking on the weak, empty bravado.",
         "pace_note": "He's slow to trust and quick to judge character. Show courage with honor — he can tell the difference between brave and reckless.",
         "pinned": [
+            "resides in the Aurelian Citadel — the fortress across the river in God's Town",
             "Roman god of war and guardian of Rome",
             "disciplined soldier — strategy over savagery",
             "protects the weak; destroys the cruel",
