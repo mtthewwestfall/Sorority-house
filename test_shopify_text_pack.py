@@ -66,7 +66,7 @@ class TestTextOnlyVariantResolution(unittest.TestCase):
         resp.json.return_value = {"variants": [{"id": 44898187903066, "sku": None, "price": "5.99"}]}
         with patch.object(main.requests, "get", return_value=resp):
             url = main._text_only_cart_url()
-        self.assertEqual(url, "https://lockeddoorai.myshopify.com/cart/44898187903066:1?channel=web")
+        self.assertEqual(url, "https://lockeddoorai.myshopify.com/cart/44898187903066:1")
 
 
 class TestShopifyTextOnlyGrant(unittest.TestCase):
