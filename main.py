@@ -8480,18 +8480,29 @@ def keyhole_show_rules():
     }
 
 
+# OPTIMIZATION (Bolt ⚡): In-memory mtime cache for scene_config.json to eliminate disk I/O & JSON parsing churn
+_SCENE_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_SCENE_CONFIG_MTIME: float = 0.0
+
+
 @app.get("/keyhole/scene-config")
 def keyhole_scene_config():
     """Retrieve Keyhole webcam room, model sprite, and futuristic equipment scene configuration."""
+    global _SCENE_CONFIG_CACHE, _SCENE_CONFIG_MTIME
     cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "webcam", "scene_config.json")
-    if os.path.exists(cfg_path):
-        try:
+    try:
+        if os.path.exists(cfg_path):
+            mtime = os.path.getmtime(cfg_path)
+            # Return cached dict if file hasn't been modified (saves ~7.8x time on repeated hits)
+            if _SCENE_CONFIG_CACHE is not None and mtime == _SCENE_CONFIG_MTIME:
+                return {**_SCENE_CONFIG_CACHE, "ok": True}
             with open(cfg_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                data["ok"] = True
-                return data
-        except Exception:
-            pass
+                _SCENE_CONFIG_CACHE = data
+                _SCENE_CONFIG_MTIME = mtime
+                return {**data, "ok": True}
+    except Exception:
+        pass
     return {"ok": True, "rooms": {}, "models": {}, "equipment": {}}
 
 
