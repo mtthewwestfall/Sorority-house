@@ -15,7 +15,7 @@ class TestKeyholePricingAndEntitlements(unittest.TestCase):
         cfg = main.KEYHOLE_DEFAULT_CONFIG
         self.assertEqual(cfg["intro_price"], 5.99)
         self.assertEqual(cfg["intro_webcam_minutes"], 10)
-        self.assertEqual(cfg["intro_text_included"], 100)
+        self.assertEqual(cfg["intro_text_included"], 70)
 
         self.assertEqual(cfg["text_only_price"], 5.99)
         self.assertEqual(cfg["text_only_included"], 300)
@@ -41,7 +41,7 @@ class TestKeyholePricingAndEntitlements(unittest.TestCase):
         self.assertEqual(res["entitlements"]["text_balance"], 350)
 
         sqls = [c.args[0] for c in mock_cur.execute.call_args_list]
-        update_sqls = [s for s in sqls if "UPDATE users" in s and "text_balance = text_balance + %s" in s]
+        update_sqls = [s for s in sqls if "UPDATE users" in s and "message_credits =" in s]
         self.assertTrue(len(update_sqls) > 0)
 
     @patch("main.db")

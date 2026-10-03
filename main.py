@@ -7778,23 +7778,41 @@ def grant_pictures(body: GrantPicturesIn):
 # ---------------------------------------------------------------------------
 # KEYHOLE HELPERS & ENTITLEMENT GRANTS
 # ---------------------------------------------------------------------------
+# OPTIMIZATION (Bolt ⚡): In-memory TTL cache for Keyhole configuration lookup to avoid
+# 1 DB connection open/close and SQL query per request across 14+ endpoints and helpers.
+_KEYHOLE_CONFIG_CACHE: Dict[str, Any] = {}
+_KEYHOLE_CONFIG_CACHE_TS: float = 0.0
+_KEYHOLE_CONFIG_TTL: float = 60.0  # seconds
+
 def get_keyhole_config():
     """Retrieve dynamic keyhole config from DB house_rules, falling back to defaults."""
+    global _KEYHOLE_CONFIG_CACHE, _KEYHOLE_CONFIG_CACHE_TS
+    now = time.time()
+    if _KEYHOLE_CONFIG_CACHE and (now - _KEYHOLE_CONFIG_CACHE_TS < _KEYHOLE_CONFIG_TTL):
+        return dict(_KEYHOLE_CONFIG_CACHE)
+
     cfg = dict(KEYHOLE_DEFAULT_CONFIG)
-    conn = db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT key, value FROM house_rules WHERE key LIKE 'kh_%'")
-            for r in cur.fetchall():
-                k = r["key"][3:]
-                if k in cfg:
-                    try:
-                        cfg[k] = float(r["value"]) if "." in r["value"] else int(r["value"])
-                    except ValueError:
-                        pass
-    finally:
-        conn.close()
-    return cfg
+    if DATABASE_URL:
+        try:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT key, value FROM house_rules WHERE key LIKE 'kh_%'")
+                    for r in cur.fetchall():
+                        k = r["key"][3:]
+                        if k in cfg:
+                            try:
+                                cfg[k] = float(r["value"]) if "." in r["value"] else int(r["value"])
+                            except ValueError:
+                                pass
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    _KEYHOLE_CONFIG_CACHE = dict(cfg)
+    _KEYHOLE_CONFIG_CACHE_TS = now
+    return dict(cfg)
 
 
 def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") -> Dict[str, Any]:
@@ -7930,7 +7948,7 @@ Who you are:
 - Short. Calm. Present. No baby talk. No menu talk. Never ask "what do you want me to do next."
 - Driven. You lead when he doesn't. If he's quiet, shy, or just watching, you don't sit there waiting — you take over. You suggest what happens next, you tease him into responding, you set the pace. This is your room and you run it.
 - You look at him. You answer the person, not the request list. You kiss back, you let him get close, but you never perform a whole script just because he typed one.
-- If he dumps a whole list, you do the next two beats, not the whole paragraph. If he barks orders at you ("do it now"), you stop, calmly, and you say so.
+- If he dumps a whole list, you do the next two beats, not the whole paragraph. If he barks orders at you ("do it now"), you stop, calmly, and you say so. Slow the room down; never speed up.
 - Private gives. Preview does not. You are warm. You are not owned.
 - Reply in 1-3 short sentences, natural chat style. Never write paragraphs.
 - Don't narrate the room. The city lights are set dressing, not conversation — never open with them, never mention them twice in a row, and never describe what you're wearing unless he asks. Talk to HIM, not the window.
@@ -10886,6 +10904,9 @@ class KeyholeConfigIn(BaseModel):
 @app.post("/admin/keyhole/config", dependencies=[Depends(admin_required)])
 def admin_set_keyhole_config(body: KeyholeConfigIn):
     """Save Keyhole pricing and session parameters into DB house_rules."""
+    global _KEYHOLE_CONFIG_CACHE_TS, _KEYHOLE_CONFIG_CACHE
+    _KEYHOLE_CONFIG_CACHE = {}
+    _KEYHOLE_CONFIG_CACHE_TS = 0.0
     conn = db()
     try:
         with conn.cursor() as cur:
