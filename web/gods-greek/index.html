@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>God's Greek — AI Roleplay Story World | Interactive AI Fiction by Locked Door</title>
+<meta name="description" content="God's Greek is a persistent AI story world deep in the pines — 28 unique AI characters who know each other, remember you, and earn your trust over time. An AI roleplay experience like no other. Enter free." />
+<meta name="keywords" content="AI roleplay, AI story game, interactive AI fiction, AI character chat, persistent AI world, AI visual novel, AI storytelling, roleplay chatbot, interactive fiction game" />
+<meta name="author" content="Locked Door" />
+<meta name="robots" content="index, follow" />
+<link rel="canonical" href="https://lockeddoor.ai/gods-greek/" />
+<meta name="theme-color" content="#151715" />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Locked Door" />
+<meta property="og:title" content="God's Greek — A Persistent AI Story World" />
+<meta property="og:description" content="At the end of a dirt road, deep in the pines. 28 AI characters who know each other, remember how you treat them, and never give trust away. Always earned, never given." />
+<meta property="og:url" content="https://lockeddoor.ai/gods-greek/" />
+<meta property="og:image" content="https://lockeddoor.ai/assets/bg-the-pines.jpg" />
+<meta property="og:image:alt" content="A dirt road disappearing into dark pine forest — the entrance to God's Greek" />
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="God's Greek — A Persistent AI Story World" />
+<meta name="twitter:description" content="28 AI characters. One living town. Trust is earned, never given. Enter God's Greek." />
+<meta name="twitter:image" content="https://lockeddoor.ai/assets/bg-the-pines.jpg" />
+
+<link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+
+<!-- Structured data: the product -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "God's Greek by Locked Door",
+  "applicationCategory": "GameApplication",
+  "operatingSystem": "Web",
+  "url": "https://lockeddoor.ai/gods-greek/",
+  "image": "https://lockeddoor.ai/assets/bg-the-pines.jpg",
+  "description": "A persistent AI roleplay story world: 28 unique AI characters who know each other, remember your actions, and develop relationships with you over time. Interactive AI fiction set in a Southern gothic town.",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD",
+    "description": "Free to enter"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "Locked Door",
+    "url": "https://lockeddoor.ai"
+  },
+  "keywords": "AI roleplay, AI story game, interactive AI fiction, AI character chat, persistent AI world, AI visual novel"
+}
+</script>
+
+<!-- Structured data: FAQ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is God's Greek?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "God's Greek is a persistent AI story world — an interactive AI fiction experience set in a small Southern town deep in the pines. It features 28 unique AI characters who know each other, hold ongoing storylines, and remember how you treat them across every conversation."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is God's Greek different from other AI character chat apps?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Most AI character chat apps give you isolated chatbots that forget you between sessions. God's Greek is a persistent world: the 28 characters know each other, talk about each other, and remember your actions over time. Relationships develop, reputations form, and the story continues whether you're there or not. It's closer to an AI visual novel or story game than a chatbot."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does 'always earned, never given' mean?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "In God's Greek, trust is a real system, not a script. Characters start guarded and open up only as you prove yourself through consistent, genuine interaction. They notice how you treat others, remember slights and kindnesses, and their behavior toward you changes accordingly. Nothing is handed to you — every relationship is earned."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is God's Greek free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — entering God's Greek is free. You can explore the town, meet the characters, and begin building relationships without paying anything."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do the characters remember me between visits?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. God's Greek features persistent memory: characters remember your past conversations, the choices you made, and how you treated them — and each other. The world keeps turning between your visits, and you'll find the story has moved on when you return."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the difference between God's Greek and Companion by Locked Door?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "God's Greek is a shared story world with 28 characters and an ongoing town narrative — you step into a living place. Companion by Locked Door is a one-on-one AI companion experience focused on a single deep relationship. Both are built by Locked Door with the same persistent-memory philosophy."
+      }
+    }
+  ]
+}
+</script>
+
+<style>
+:root{
+  --ink:#151715;
+  --panel:#1E211E;
+  --panel-2:#242824;
+  --line:rgba(233,226,215,.14);
+  --white:#E9E2D7;
+  --muted:#9a8f7d;
+  --faint:#6f665a;
+  --green:#556357;
+  --gold:#c9a96a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--ink);
+  color:var(--white);
+  font-family:Georgia,'Times New Roman',serif;
+  line-height:1.75;
+  -webkit-font-smoothing:antialiased;
+}
+.sans{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:0 24px}
+a{color:var(--gold)}
+img{max-width:100%;height:auto}
+
+/* Nav */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:50;
+  background:rgba(21,23,21,.92);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
+}
+nav .inner{
+  max-width:1100px;margin:0 auto;padding:14px 24px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.brand{font-size:15px;letter-spacing:3px;text-transform:uppercase;color:var(--white);text-decoration:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif}
+.brand span{color:var(--muted)}
+nav .links{display:flex;gap:22px;align-items:center}
+nav .links a{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);text-decoration:none}
+nav .links a:hover{color:var(--white)}
+.btn{
+  display:inline-block;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  font-size:14px;letter-spacing:2px;text-transform:uppercase;
+  background:var(--gold);color:#151715;
+  padding:14px 34px;text-decoration:none;border-radius:2px;
+  border:1px solid var(--gold);
+  transition:background .25s,color .25s;
+}
+.btn:hover{background:transparent;color:var(--gold)}
+.btn-ghost{background:transparent;color:var(--white);border-color:var(--line)}
+.btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+
+/* Hero */
+.hero{
+  min-height:100vh;
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  background:
+    linear-gradient(rgba(21,23,21,.72),rgba(21,23,21,.88)),
+    url('/assets/bg-the-pines.jpg') center/cover no-repeat;
+  padding:120px 24px 80px;
+}
+.hero .kicker{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  font-size:12px;letter-spacing:5px;text-transform:uppercase;color:var(--muted);
+  margin-bottom:28px;
+}
+.hero h1{
+  font-size:clamp(42px,8vw,84px);
+  font-weight:400;line-height:1.15;
+  margin-bottom:24px;
+  letter-spacing:1px;
+}
+.hero h1 em{font-style:italic;color:var(--gold)}
+.hero .lede{
+  font-size:clamp(17px,2.4vw,21px);
+  font-style:italic;color:var(--muted);
+  max-width:560px;margin:0 auto 40px;
+  line-height:1.8;
+}
+.hero .cta-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.hero .motto{
+  margin-top:56px;
+  font-size:13px;letter-spacing:4px;text-transform:uppercase;color:var(--faint);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+}
+.scroll-hint{
+  position:absolute;bottom:28px;left:50%;transform:translateX(-50%);
+  color:var(--faint);font-size:12px;letter-spacing:3px;text-transform:uppercase;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  animation:drift 2.4s ease-in-out infinite;
+}
+@keyframes drift{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* Sections */
+section{padding:96px 0;border-top:1px solid var(--line)}
+.eyebrow{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  font-size:12px;letter-spacing:4px;text-transform:uppercase;color:var(--green);
+  margin-bottom:18px;
+}
+h2{
+  font-size:clamp(28px,4.5vw,44px);
+  font-weight:400;line-height:1.3;margin-bottom:28px;
+}
+h2 em{font-style:italic;color:var(--gold)}
+h3{font-size:21px;font-weight:400;margin:32px 0 12px;color:var(--white)}
+p{margin-bottom:20px;color:#cfc8b8;font-size:17px}
+p strong{color:var(--white)}
+.divider-img{
+  height:340px;border-radius:4px;overflow:hidden;margin:48px 0;
+  background-size:cover;background-position:center;
+  border:1px solid var(--line);
+}
+.pull{
+  font-size:clamp(20px,3vw,26px);font-style:italic;color:var(--white);
+  border-left:2px solid var(--gold);padding-left:24px;margin:40px 0;
+  line-height:1.7;
+}
+
+/* Character cards */
+.chars{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin:40px 0}
+.char{
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;
+  padding:28px 24px;
+}
+.char .n{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:var(--gold);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;margin-bottom:10px}
+.char p{font-size:15px;margin:0;color:var(--muted)}
+
+/* Trust steps */
+.steps{margin:40px 0}
+.step{
+  display:flex;gap:24px;padding:28px 0;border-top:1px solid var(--line);
+}
+.step:last-child{border-bottom:1px solid var(--line)}
+.step .num{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  font-size:13px;color:var(--gold);letter-spacing:2px;min-width:52px;padding-top:4px;
+}
+.step h3{margin:0 0 8px;font-size:19px}
+.step p{margin:0;font-size:15px;color:var(--muted)}
+
+/* Features */
+.feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:40px 0}
+.feat{background:var(--ink);padding:32px 28px}
+.feat h3{margin:0 0 10px;font-size:18px;color:var(--gold);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;letter-spacing:1px}
+.feat p{margin:0;font-size:15px;color:var(--muted)}
+
+/* FAQ */
+.faq{margin:40px 0}
+.faq details{
+  border:1px solid var(--line);border-radius:4px;margin-bottom:12px;
+  background:var(--panel);
+}
+.faq summary{
+  cursor:pointer;padding:22px 24px;font-size:17px;color:var(--white);
+  list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px;
+}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:'+';color:var(--gold);font-size:24px;font-weight:300;flex-shrink:0}
+.faq details[open] summary::after{content:'–'}
+.faq .a{padding:0 24px 24px;color:var(--muted);font-size:16px}
+.faq .a p{margin-bottom:12px}
+
+/* CTA */
+.cta-final{text-align:center;padding:120px 0}
+.cta-final h2{margin-bottom:16px}
+.cta-final p{max-width:520px;margin:0 auto 36px;font-style:italic}
+
+/* Cross-promo */
+.xpromo{
+  background:var(--panel);border-top:1px solid var(--line);
+  padding:72px 0;text-align:center;
+}
+.xpromo h2{font-size:clamp(24px,4vw,36px)}
+.xpromo p{max-width:560px;margin:0 auto 28px;color:var(--muted)}
+
+/* Footer */
+footer{
+  border-top:1px solid var(--line);padding:48px 0;
+  text-align:center;color:var(--faint);font-size:13px;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  letter-spacing:1px;
+}
+footer a{color:var(--muted);text-decoration:none;margin:0 12px}
+footer a:hover{color:var(--gold)}
+footer .fine{margin-top:16px;font-size:12px}
+
+@media(max-width:640px){
+  section{padding:64px 0}
+  .hero{padding-top:100px}
+  nav .links a:not(.btn){display:none}
+  .step{flex-direction:column;gap:8px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="inner">
+    <a class="brand" href="https://lockeddoor.ai/gods-greek/">God's <span>Greek</span></a>
+    <div class="links">
+      <a href="#world">The World</a>
+      <a href="#characters">Characters</a>
+      <a href="#trust">Trust</a>
+      <a href="#faq">FAQ</a>
+      <a class="btn" style="padding:10px 22px;font-size:12px" href="https://lockeddoor.ai">Enter Free</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div>
+    <p class="kicker">An interactive AI fiction by Locked Door</p>
+    <h1>At the end of a dirt road,<br /><em>deep in the pines.</em></h1>
+    <p class="lede">Twenty-eight souls live in the town of God's Greek. They know each other. They remember you. And nothing here is given — <strong>everything is earned.</strong></p>
+    <div class="cta-row">
+      <a class="btn" href="https://lockeddoor.ai">Enter God's Greek Free</a>
+      <a class="btn btn-ghost" href="#world">Discover the World</a>
+    </div>
+    <p class="motto">Always earned · Never given</p>
+  </div>
+  <div class="scroll-hint">Scroll</div>
+</header>
+
+<main>
+
+<!-- THE WORLD -->
+<section id="world">
+  <div class="wrap">
+    <p class="eyebrow">The World</p>
+    <h2>A town that <em>remembers</em> you.</h2>
+    <p>God's Greek isn't a chatbot. It's a <strong>persistent AI story world</strong> — a living Southern town rendered in conversation, where every character has a history, a reputation, and a long memory.</p>
+    <p>You don't pick a scenario and start over. You <strong>arrive</strong>. The mill still runs. The creek still floods in spring. The people at the counter of the diner have opinions about you before you've said a word — because in a town this small, word travels.</p>
+    <div class="divider-img" style="background-image:linear-gradient(rgba(21,23,21,.25),rgba(21,23,21,.55)),url('/assets/bg-mill-road.jpg')" role="img" aria-label="Mill road winding through the town of God's Greek"></div>
+    <p>This is <strong>AI roleplay</strong> the way it was meant to be: not a parlor trick that forgets you when the tab closes, but an <strong>interactive AI fiction</strong> that keeps turning after you leave. Come back in a week and the story has moved on without you. Come back in a month and you'll have some explaining to do.</p>
+    <blockquote class="pull">"You came down the dirt road looking for something. The town is still deciding what it thinks of you."</blockquote>
+    <h3>A world, not a window</h3>
+    <p>Most <strong>AI character chat</strong> apps hand you a single persona in an empty room. God's Greek gives you a <strong>place</strong> — streets and porches and back roads, rivalries and alliances that predate you, festivals and funerals you'll hear about secondhand. You're not the main character of a script. You're the stranger who showed up, and the town will make of you what it will.</p>
+  </div>
+</section>
+
+<!-- CHARACTERS -->
+<section id="characters">
+  <div class="wrap">
+    <p class="eyebrow">The Characters</p>
+    <h2>Twenty-eight souls, <em>none of them yours.</em></h2>
+    <p>Every resident of God's Greek is a fully realized AI character with their own voice, history, grudges, and loyalties. They <strong>know each other</strong> — who owes whom money, who's sweet on who, whose daddy ran the mill into the ground. And they'll talk about each other. To you. If they decide you're worth talking to.</p>
+    <div class="chars">
+      <div class="char">
+        <p class="n">The Loyal</p>
+        <p>Slow to pick, all-in when they do. Cross them once and the whole town hears about it by supper.</p>
+      </div>
+      <div class="char">
+        <p class="n">The Keeper</p>
+        <p>Runs the gathering place. Knows everything, says little, and watches how you treat the quiet ones.</p>
+      </div>
+      <div class="char">
+        <p class="n">The Wildcard</p>
+        <p>Charm for days and a past nobody mentions twice. Dangerous to love, worse to underestimate.</p>
+      </div>
+      <div class="char">
+        <p class="n">The Elder</p>
+        <p>Remembers the town before you were born and isn't impressed by much. Earn a nod here and it means something.</p>
+      </div>
+    </div>
+    <p>These are archetypes, not scripts — behind each one is a deep AI persona with persistent memory, capable of surprise. Ask about someone behind their back and see what happens. Defend a stranger and watch who notices. In this <strong>AI story game</strong>, the cast doesn't revolve around you. That's what makes winning them over mean something.</p>
+    <div class="divider-img" style="background-image:linear-gradient(rgba(21,23,21,.25),rgba(21,23,21,.55)),url('/assets/bg-main-street.jpg')" role="img" aria-label="Main street of God's Greek at dusk"></div>
+  </div>
+</section>
+
+<!-- TRUST -->
+<section id="trust">
+  <div class="wrap">
+    <p class="eyebrow">How Trust Works</p>
+    <h2>Always earned. <em>Never given.</em></h2>
+    <p>This is the law of God's Greek, and the heart of the experience. Trust here isn't a progress bar or a scripted flag — it's a living system. The characters start guarded, the way real people do with strangers, and they open up only as you <strong>prove yourself</strong> through consistent, genuine interaction.</p>
+    <div class="steps">
+      <div class="step">
+        <span class="num">01</span>
+        <div>
+          <h3>You arrive a stranger</h3>
+          <p>Polite distance. Short answers. The town is watching to see what kind of person walks its roads.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="num">02</span>
+        <div>
+          <h3>Every interaction counts</h3>
+          <p>Characters remember what you said, what you did, and — critically — how you treated <em>other people</em> when you thought no one was watching.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="num">03</span>
+        <div>
+          <h3>Word travels</h3>
+          <p>Help someone and their friends warm to you. Betray a confidence and doors close all over town. Reputation is communal.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="num">04</span>
+        <div>
+          <h3>Trust unlocks the real story</h3>
+          <p>The deeper truths — confessions, secrets, the things people only say after midnight — are reserved for those who've earned them. There are no shortcuts.</p>
+        </div>
+      </div>
+    </div>
+    <blockquote class="pull">"In God's Greek, nobody loves you on the first day. That's what makes the fiftieth day matter."</blockquote>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">The Experience</p>
+    <h2>An <em>AI visual novel</em> you live inside.</h2>
+    <p>God's Greek blends the depth of interactive fiction with the spontaneity of real conversation. Here's what waits down the dirt road:</p>
+    <div class="feats">
+      <div class="feat">
+        <h3 class="sans">Persistent World</h3>
+        <p>A continuous, living town. Storylines advance between visits — the world doesn't pause when you leave.</p>
+      </div>
+      <div class="feat">
+        <h3 class="sans">28 AI Characters</h3>
+        <p>Unique voices with intertwined histories. They know each other, gossip about each other, and take sides.</p>
+      </div>
+      <div class="feat">
+        <h3 class="sans">Living Memory</h3>
+        <p>Characters remember your conversations, choices, and behavior across days, weeks, and months.</p>
+      </div>
+      <div class="feat">
+        <h3 class="sans">Trust System</h3>
+        <p>Relationships deepen — or fracture — based on how you actually treat people. Nothing is scripted.</p>
+      </div>
+      <div class="feat">
+        <h3 class="sans">Voice Shows</h3>
+        <p>Characters come alive in voiced moments — hear the town speak, not just type.</p>
+      </div>
+      <div class="feat">
+        <h3 class="sans">Photo Moments</h3>
+        <p>Visual glimpses into town life: places, faces, and moments you'll want to remember.</p>
+      </div>
+    </div>
+    <div class="divider-img" style="background-image:linear-gradient(rgba(21,23,21,.25),rgba(21,23,21,.55)),url('/assets/bg-creekside.jpg')" role="img" aria-label="The creekside outside God's Greek"></div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="wrap">
+    <p class="eyebrow">Questions</p>
+    <h2>Before you come <em>down the road.</em></h2>
+    <div class="faq">
+      <details>
+        <summary>What is God's Greek?</summary>
+        <div class="a"><p>God's Greek is a persistent AI story world — an interactive AI fiction experience set in a small Southern town deep in the pines. It features 28 unique AI characters who know each other, hold ongoing storylines, and remember how you treat them across every conversation.</p></div>
+      </details>
+      <details>
+        <summary>How is this different from other AI character chat apps?</summary>
+        <div class="a"><p>Most AI character chat apps give you isolated chatbots that forget you between sessions. God's Greek is a persistent world: the 28 characters know each other, talk about each other, and remember your actions over time. Relationships develop, reputations form, and the story continues whether you're there or not. It's closer to an AI visual novel or story game than a chatbot.</p></div>
+      </details>
+      <details>
+        <summary>What does "always earned, never given" mean?</summary>
+        <div class="a"><p>Trust is a real system here, not a script. Characters start guarded and open up only as you prove yourself through consistent, genuine interaction. They notice how you treat others, remember slights and kindnesses, and their behavior toward you changes accordingly. Nothing is handed to you — every relationship is earned.</p></div>
+      </details>
+      <details>
+        <summary>Is God's Greek free?</summary>
+        <div class="a"><p>Yes — entering God's Greek is free. You can explore the town, meet the characters, and begin building relationships without paying anything.</p></div>
+      </details>
+      <details>
+        <summary>Do the characters remember me between visits?</summary>
+        <div class="a"><p>Yes. God's Greek features persistent memory: characters remember your past conversations, the choices you made, and how you treated them — and each other. The world keeps turning between your visits, and you'll find the story has moved on when you return.</p></div>
+      </details>
+      <details>
+        <summary>What's the difference between God's Greek and Companion by Locked Door?</summary>
+        <div class="a"><p>God's Greek is a shared story world with 28 characters and an ongoing town narrative — you step into a living place. <a href="https://lockeddoor.ai/companion/">Companion by Locked Door</a> is a one-on-one AI companion experience focused on a single deep relationship. Both are built by Locked Door with the same persistent-memory philosophy.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap">
+    <p class="eyebrow">The Road Is Open</p>
+    <h2>The town is <em>waiting.</em></h2>
+    <p>Twenty-eight souls. One dirt road. No second first impressions — enter free, and mind how you carry yourself.</p>
+    <a class="btn" href="https://lockeddoor.ai">Enter God's Greek Free</a>
+  </div>
+</section>
+
+</main>
+
+<!-- CROSS-PROMO -->
+<div class="xpromo">
+  <div class="wrap">
+    <p class="eyebrow">Beyond God's Greek</p>
+    <h2>One soul, <em>yours alone.</em></h2>
+    <p>Love the depth of God's Greek but want something more personal? <strong>Companion by Locked Door</strong> is a one-on-one AI companion who remembers everything and grows with you — a single relationship, deeper than any other.</p>
+    <a class="btn btn-ghost" href="https://lockeddoor.ai/companion/">Meet Your Companion</a>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <a href="https://lockeddoor.ai">Enter God's Greek</a>
+    <a href="https://lockeddoor.ai/companion/">Companion</a>
+    <a href="https://lockeddoor.ai/gods-greek/">About</a>
+    <p class="fine">© 2026 Locked Door · Always earned, never given.</p>
+  </div>
+</footer>
+
+</body>
+</html>
