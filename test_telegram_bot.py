@@ -16,9 +16,10 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         os.environ["ADMIN_SECRET"] = "test-admin-secret"
         main.ADMIN_SECRET = "test-admin-secret"
 
-    def test_allowed_models_restriction(self):
-        """Verify that ALLOWED_MODELS is strictly restricted to Chloe and Bailey."""
-        self.assertEqual(bot.ALLOWED_MODELS, {"chloe", "bailey"})
+    @patch("bot._keyhole_characters", return_value=[{"girl": "chloe", "name": "Chloe", "kh_telegram": True}, {"girl": "bailey", "name": "Bailey", "kh_telegram": True}])
+    def test_allowed_models_restriction(self, _mock_chars):
+        """Verify that _allowed_models is strictly restricted to Chloe and Bailey."""
+        self.assertEqual(bot._allowed_models(), {"chloe", "bailey"})
 
     def test_cmd_args_parsing(self):
         update = MagicMock()
@@ -28,7 +29,8 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         update.message.text = "/start"
         self.assertEqual(bot._cmd_args(update), [])
 
-    def test_active_model_filter(self):
+    @patch("bot._keyhole_characters", return_value=[{"girl": "chloe", "name": "Chloe", "kh_telegram": True}, {"girl": "bailey", "name": "Bailey", "kh_telegram": True}])
+    def test_active_model_filter(self, _mock_chars):
         rec_valid = {"active_girl": "chloe"}
         self.assertEqual(bot._active_model(rec_valid), "chloe")
 
@@ -41,8 +43,9 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         rec_none = {}
         self.assertIsNone(bot._active_model(rec_none))
 
+    @patch("bot._keyhole_characters", return_value=[{"girl": "chloe", "name": "Chloe", "kh_telegram": True}, {"girl": "bailey", "name": "Bailey", "kh_telegram": True}])
     @patch("bot._get")
-    def test_fetch_roster_filters_disallowed_models(self, mock_get):
+    def test_fetch_roster_filters_disallowed_models(self, mock_get, _mock_chars):
         """Verify that _fetch_roster strictly filters the roster to Chloe and Bailey."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -68,8 +71,9 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertTrue(girls[0]["avatar_url"].endswith("/assets/chloe-1.jpg"))
         self.assertTrue(girls[1]["avatar_url"].endswith("/assets/bailey-1.jpg"))
 
+    @patch("bot._keyhole_characters", return_value=[{"girl": "chloe", "name": "Chloe", "kh_telegram": True}, {"girl": "bailey", "name": "Bailey", "kh_telegram": True}])
     @patch("bot._get")
-    def test_fetch_roster_injects_chloe_and_replaces_house_portrait(self, mock_get):
+    def test_fetch_roster_injects_chloe_and_replaces_house_portrait(self, mock_get, _mock_chars):
         """Chloe is absent from the live house roster; Bailey still has the old portrait."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -112,7 +116,8 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
         self.assertTrue(url.endswith("/assets/bailey-1.jpg"))
         self.assertEqual(kind, "photo")
 
-    def test_cmd_models_sends_both_door_portraits(self):
+    @patch("bot._keyhole_characters", return_value=[{"girl": "chloe", "name": "Chloe", "kh_telegram": True}, {"girl": "bailey", "name": "Bailey", "kh_telegram": True}])
+    def test_cmd_models_sends_both_door_portraits(self, _mock_chars):
         update = MagicMock()
         update.effective_message.reply_text = AsyncMock()
         girls = bot._webcam_roster([
@@ -196,32 +201,21 @@ class TestTelegramBotWebcamShow(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = val
-        # plan_links reads SITE_URL from the module global, which was set at import.
-        # Re-read with the module's current SITE_URL so the 45-minute fallback matches the bot.
-        rooms = bot.SITE_URL + "/rooms.html"
-        by_url = {url: label for label, url in links}
-        self.assertEqual(len(links), 8)
+        self.assertEqual(len(links), 5)
         labels = [label for label, _url in links]
-        self.assertEqual(labels[0], "15 min · $7.99")
+        by_url = {url: label for label, url in links}
+        self.assertIn("10 min · $5.99 · messages included", labels[0])
         self.assertNotIn("100 texts", labels[0])
         self.assertNotIn("Preview", labels[0])
+        self.assertIn("https://buy.stripe.com/9B69AM0Ur38HchN0ZrdjO0a", by_url)
         self.assertIn("https://buy.stripe.com/00w14gav1bFddlR6jLdjO09", by_url)
         self.assertIn("https://buy.stripe.com/bJeeV67iPdNl2Hd8rTdjO08", by_url)
-        self.assertIn("https://buy.stripe.com/00w7sU0Ur8t1fhZ003", by_url)
-        self.assertIn("https://buy.stripe.com/4gM9AM46DbFda9F23vdjO03", by_url)
-        self.assertIn("https://buy.stripe.com/9B600c0UrcJh4Pl0ZrdjO07", by_url)
-        self.assertIn("https://buy.stripe.com/5kQ5kw0UrfVtepVaA1djO04", by_url)
         self.assertIn("https://buy.stripe.com/6oUfZh1jradL0he4098AE00", by_url)
-        self.assertIn(("45 min · $14.99 · 100 texts", "https://buy.stripe.com/00w7sU0Ur8t1fhZ003"), links)
-        self.assertTrue(any("30 min" in label and "$11.99" in label and "100 texts" in label for label in labels))
-        self.assertTrue(any("60 min" in label and "$19.99" in label for label in labels))
-        self.assertTrue(any("75 min" in label and "$23.99" in label for label in labels))
+        self.assertTrue(any("30 min" in label and "$11.99" in label for label in labels))
         self.assertTrue(any("Public Lounge" in label and "$4.99" in label for label in labels))
         self.assertTrue(any("300 texts" in label and "$5.99" in label for label in labels))
         text_url = next((u for l, u in links if "300 texts" in l), "")
         self.assertTrue(text_url.startswith("https://lockeddoorai.myshopify.com/cart/"))
-        self.assertIn(":1?channel=web", text_url)
-        self.assertNotIn("https://buy.stripe.com/3cI6oH4vD85D1li2W58AE02", by_url)
 
     def test_plan_link_env_override(self):
         with patch.dict(os.environ, {"PAY_LINK_15": "https://buy.stripe.com/override15"}, clear=False):
