@@ -268,7 +268,19 @@
     }
     /* iMessage-style layout: avatar + name header, tailed bubbles, pill composer. */
     .chat-panel { --bubble-her: #2a2d2a; --bubble-me: #556357; --panel: #151715; }
-    .chat-head { position: relative; display: flex; align-items: center; gap: 18px; padding: 18px 22px 8px 72px; }
+    .chat-head { position: relative; display: flex; align-items: center; gap: 18px; padding: 18px 22px 8px 72px; overflow: hidden; }
+    .castle-banner {
+      position: absolute; inset: 0; z-index: 0;
+      background-size: cover; background-position: center;
+      opacity: 0.35; pointer-events: none;
+    }
+    .castle-banner span {
+      position: absolute; right: 10px; bottom: 6px;
+      font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase;
+      color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    .chat-head > *:not(.castle-banner):not(.chat-close) { position: relative; z-index: 1; }
+    .chat-head > .chat-close { z-index: 2; }
     .chat-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex: none; background: linear-gradient(160deg, #556357, #8A7D6B); color: transparent; border: 2px solid rgba(255,255,255,.08); }
     .chat-head .who { flex: 1; min-width: 0; }
     .chat-head .who strong { display: block; font-size: 1.55rem; font-weight: 700; letter-spacing: -.01em; }
@@ -1139,6 +1151,7 @@
   <div class="chat-backdrop" id="chat" role="dialog" aria-modal="true" aria-labelledby="chat-name">
     <div class="chat-panel">
       <div class="chat-head">
+        <div class="castle-banner" id="castle-banner" hidden><span id="castle-name"></span></div>
         <button class="chat-close" id="chat-close" type="button" aria-label="Back">&lsaquo;</button>
         <img id="chat-avatar" src="" alt="" />
         <div class="who">
@@ -1701,6 +1714,17 @@ const PRESET_FACES = {
       avatar.classList.remove('is-broken');
       avatar.src = card.dataset.avatar;
       avatar.alt = card.dataset.name;
+      const castleBanner = document.getElementById('castle-banner');
+      if (castleBanner) {
+        if (card.dataset.castle) {
+          castleBanner.style.backgroundImage = 'url(' + card.dataset.castle + ')';
+          document.getElementById('castle-name').textContent = card.dataset.castleName || '';
+          castleBanner.hidden = false;
+        } else {
+          castleBanner.hidden = true;
+          castleBanner.style.backgroundImage = '';
+        }
+      }
 
       const actionsBar = document.getElementById('companion-actions-bar');
       const photoBtn = document.getElementById('chat-photo-btn');
@@ -1846,6 +1870,20 @@ const PRESET_FACES = {
       return String(text == null ? '' : text).replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     }
+    const GOD_CASTLES = {
+      athena: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      artemis: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      aphrodite: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      persephone: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      zeus: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      apollo: { img: '/assets/olympus-palace.jpg', name: 'The Olympian Palace' },
+      minerva: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      diana: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      venus: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      vesta: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      jupiter: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+      mars: { img: '/assets/roman-citadel.jpg', name: 'The Aurelian Citadel' },
+    };
     function renderRoster(girls) {
       doorsGrid.innerHTML = girls.map((g) => {
         const name = escapeHtml(g.name || g.girl);
@@ -1853,7 +1891,8 @@ const PRESET_FACES = {
         return '<article id="door-' + escapeHtml(g.girl) + '" class="door-card open" data-girl="' + escapeHtml(g.girl) + '"' +
           ' data-min-tier="' + escapeHtml(g.min_tier || 'visitor') + '"' +
           ' data-name="' + name + '" data-title="' + escapeHtml(g.role_title) + '"' +
-          ' data-avatar="' + avatar + '">' +
+          ' data-avatar="' + avatar + '"' +
+          (GOD_CASTLES[g.girl] ? ' data-castle="' + GOD_CASTLES[g.girl].img + '" data-castle-name="' + escapeHtml(GOD_CASTLES[g.girl].name) + '"' : '') + '>' +
           '<div class="door-art" data-initial="' + escapeHtml((g.name || g.girl).charAt(0).toUpperCase()) + '">' +
           (avatar ? '<img src="' + avatar + '" alt="Portrait of ' + name + '" />' : '') + '</div>' +
           '<div class="door-copy">' +
@@ -2250,6 +2289,8 @@ const PRESET_FACES = {
         document.getElementById('chat-name').textContent = comp.first_name;
         document.getElementById('chat-title').textContent = titleText;
 
+        const castleBanner = document.getElementById('castle-banner');
+        if (castleBanner) { castleBanner.hidden = true; castleBanner.style.backgroundImage = ''; }
         const avatar = document.getElementById('chat-avatar');
         avatar.classList.remove('is-broken');
         avatar.src = comp.portrait_url ? (comp.portrait_url.startsWith('data:') ? comp.portrait_url : 'data:image/png;base64,' + comp.portrait_url) : '';
