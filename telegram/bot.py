@@ -51,6 +51,7 @@ import logging
 import os
 import time
 import urllib.parse
+from typing import Dict, List, Optional, Set, Any, Tuple
 
 try:
     import requests
@@ -85,9 +86,11 @@ KEYHOLE_ASSET_ORIGIN = os.environ.get(
     "KEYHOLE_ASSET_ORIGIN", "https://keyhole-latest-production.up.railway.app"
 ).rstrip("/")
 
+ALLOWED_MODELS = {"chloe", "bailey"}
+
 # Keyhole Characters (admin console): the live Telegram cast.
 # The owner ticks "Telegram" per character; the bot refreshes from
-# GET /keyhole/characters (public) every few minutes. Fallback is Chloe.
+# GET /keyhole/characters (public) every few minutes. Fallback is Chloe & Bailey.
 _KH_CHARS = {"at": 0.0, "chars": []}
 _KH_CHARS_TTL = 300.0
 
@@ -107,13 +110,21 @@ def _keyhole_characters():
     if chars:
         _KH_CHARS["at"] = now
         _KH_CHARS["chars"] = chars
-    return _KH_CHARS["chars"] or [{"girl": "chloe", "name": "Chloe"}]
+    return _KH_CHARS["chars"] or [{"girl": "chloe", "name": "Chloe"}, {"girl": "bailey", "name": "Bailey"}]
 
 
 def _allowed_models():
     """Slugs the owner enabled for Telegram in the admin console."""
-    return {str(c.get("girl") or "").strip().lower()
-            for c in _keyhole_characters() if c.get("girl")}
+    kh = {str(c.get("girl") or "").strip().lower()
+          for c in _keyhole_characters() if c.get("girl")}
+    return kh if kh else ALLOWED_MODELS
+
+
+def _active_model(rec: dict) -> Optional[str]:
+    if not isinstance(rec, dict):
+        return None
+    girl = (rec.get("active_girl") or rec.get("model") or rec.get("girl") or "").strip().lower()
+    return girl if girl in ALLOWED_MODELS else None
 
 # Same character photos as the Keyhole rooms.html doors and main.py
 # KEYHOLE_DOOR_AVATARS. Filenames are per-character (chloe-1.jpg is Chloe,
@@ -170,7 +181,7 @@ def text_pack_url() -> str:
     configured variant id when the storefront cannot be reached."""
     if _TEXT_CACHE["url"] and time.time() - _TEXT_CACHE["at"] < 300:
         return _TEXT_CACHE["url"]
-    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1"
+    url = f"{_TEXT_STORE.rstrip('/')}/cart/{_TEXT_VARIANT_FALLBACK}:1?channel=web"
     if requests is not None:
         try:
             r = requests.get(f"{_TEXT_STORE.rstrip('/')}/products/{_TEXT_HANDLE}.js",
@@ -178,7 +189,7 @@ def text_pack_url() -> str:
             if r.status_code == 200:
                 variants = [v for v in (r.json().get("variants") or []) if v.get("available", True)]
                 if variants:
-                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1"
+                    url = f"{_TEXT_STORE.rstrip('/')}/cart/{variants[0]['id']}:1?channel=web"
         except Exception:
             pass
     _TEXT_CACHE.update({"url": url, "at": time.time()})
@@ -188,9 +199,12 @@ def text_pack_url() -> str:
 def plan_links():
     """Website checkout links. Env vars override a single package without forking products."""
     return [
-        ("10 min · $5.99 · messages included", os.environ.get("PAY_LINK_10", "https://buy.stripe.com/9B69AM0Ur38HchN0ZrdjO0a")),
-        ("15 min · $7.99 · messages included", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
-        ("30 min · $11.99 · messages included", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
+        ("15 min · $7.99", os.environ.get("PAY_LINK_15", _ROOMS_STRIPE["15"])),
+        ("30 min · $11.99 · 100 texts", os.environ.get("PAY_LINK_30", _ROOMS_STRIPE["30"])),
+        ("45 min · $14.99 · 100 texts", os.environ.get("PAY_LINK_45", _ROOMS_STRIPE["45"])),
+        ("55 min · $17.99 · 100 texts", os.environ.get("PAY_LINK_55", _ROOMS_STRIPE["55"])),
+        ("60 min · $19.99 · 100 texts", os.environ.get("PAY_LINK_60", _ROOMS_STRIPE["60"])),
+        ("75 min · $23.99 · 100 texts", os.environ.get("PAY_LINK_75", _ROOMS_STRIPE["75"])),
         ("Public Lounge · $4.99", os.environ.get("PAY_LINK_PUBLIC", _PUBLIC_LOUNGE_LINK)),
         ("300 texts · $5.99", os.environ.get("PAY_LINK_TEXT", text_pack_url())),
     ]
@@ -339,22 +353,21 @@ def _signup(email, password, display_name):
 
 
 def _webcam_roster(girls):
-    """Models the owner enabled for Telegram (admin console), in admin order.
+    """Filters house roster strictly to Chloe and Bailey in ALLOWED_MODELS, injecting missing door entries."""
+    by_slug = {}
+    for g in (girls or []):
+        slug = str(g.get("girl") or "").strip().lower()
+        if slug in ALLOWED_MODELS:
+            entry = dict(g)
+            entry["avatar_url"] = DOOR_PHOTOS.get(slug, _portrait_url(entry))
+            by_slug[slug] = entry
 
-    `girls` (house roster) is kept for signature compatibility but unused:
-    the Keyhole Characters endpoint is the source of truth now.
-    """
-    out = []
-    for c in _keyhole_characters():
-        slug = str(c.get("girl") or "").strip().lower()
-        if not slug:
-            continue
-        g = dict(c)
-        g["girl"] = slug
-        g["name"] = g.get("name") or slug.capitalize()
-        g["avatar_url"] = _portrait_url(g)
-        out.append(g)
-    return out
+    if "chloe" not in by_slug:
+        by_slug["chloe"] = {"girl": "chloe", "name": "Chloe", "avatar_url": DOOR_PHOTOS["chloe"]}
+    if "bailey" not in by_slug:
+        by_slug["bailey"] = {"girl": "bailey", "name": "Bailey", "avatar_url": DOOR_PHOTOS["bailey"]}
+
+    return [by_slug["chloe"], by_slug["bailey"]]
 
 
 def _fetch_roster(token):

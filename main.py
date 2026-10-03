@@ -522,8 +522,8 @@ def _text_only_variant() -> Dict[str, str]:
 
 def _text_only_cart_url() -> str:
     """Cart permalink for the Text-Only pack, e.g.
-    https://lockeddoorai.myshopify.com/cart/44898187903066:1"""
-    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1"
+    https://lockeddoorai.myshopify.com/cart/44898187903066:1?channel=web"""
+    return f"{TEXT_ONLY_STORE.rstrip('/')}/cart/{_text_only_variant()['variant_id']}:1?channel=web"
 WEBHOOK_MAX_BYTES = 1024 * 1024
 # Subscriptions are Stripe Payment Links; /webhooks/stripe maps the paid price to a tier
 # by the customer's email. Price ids are public identifiers, the signing secret is not.
@@ -594,7 +594,7 @@ KEYHOLE_DEFAULT_CONFIG = {
     "intro_price": 5.99,          # 10-minute starter, one per account for life
     "intro_webcam_minutes": 10,
     "intro_video_replies": 20,
-    "intro_text_included": 70,
+    "intro_text_included": 100,
     "intro_lifetime_cap": 1,
     "quick_price": 7.99,
     "quick_webcam_minutes": 15,
@@ -3006,10 +3006,10 @@ def check_keyhole_session_active(user_id: str) -> Dict[str, Any]:
         conn.close()
 
 
-def spend_one_message(cur, user_id: str, limit: int) -> int:
+def spend_one_message(cur, user_id: str, limit: int) -> tuple[int, str]:
     """Reserve one message atomically: preview balance while the free preview is
     playing, then paid message credits (roll over), then package text_balance,
-    then the tier's monthly cap. Returns remaining AFTER this turn, or raises
+    then the tier's monthly cap. Returns (remaining, pool) AFTER this turn, or raises
     402 out_of_messages. Refunds go through refund_message() (same pool order)."""
     cur.execute("""
         SELECT preview_message_credits, message_credits, paid_keyhole_purchases,
@@ -3024,6 +3024,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         and int(pools.get("preview_message_credits") or 0) > 0
     )
     remaining = None
+    pool = None
     if preview_playing:
         cur.execute("""
             UPDATE users
@@ -3035,6 +3036,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         spent = cur.fetchone()
         if spent:
             remaining = int(spent["preview_message_credits"])
+            pool = "preview"
     if remaining is None:
         cur.execute("""
             UPDATE users
@@ -3046,6 +3048,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         spent = cur.fetchone()
         if spent:
             remaining = int(spent["message_credits"])
+            pool = "credits"
     if remaining is None:
         cur.execute("""
             UPDATE users
@@ -3057,6 +3060,7 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         balance_used = cur.fetchone()
         if balance_used:
             remaining = int(balance_used["text_balance"])
+            pool = "text"
     if remaining is None:
         cur.execute("""
             UPDATE users SET msg_used = msg_used + 1, last_message_pool = 'tier'
@@ -3067,7 +3071,8 @@ def spend_one_message(cur, user_id: str, limit: int) -> int:
         if got is None:
             raise HTTPException(status_code=402, detail="out_of_messages")
         remaining = max(0, limit - int(got["msg_used"]))
-    return remaining
+        pool = "tier"
+    return remaining, pool
 
 
 def _has_account(user_id):
@@ -3099,7 +3104,7 @@ def chat_preflight(user, girl_raw):
     conn = db()
     try:
         with conn.cursor() as cur:
-            remaining = spend_one_message(cur, user["user_id"], limit)
+            remaining, _ = spend_one_message(cur, user["user_id"], limit)
             conn.commit()
     finally:
         conn.close()
@@ -3110,15 +3115,16 @@ def chat_preflight(user, girl_raw):
         raise
 
 
-def refund_message(user_id):
+def refund_message_pool(user_id: str, pool: str = None):
     """Hand back the message reserved by chat_preflight when she never answered.
     The pool that was charged is last_message_pool, written in the same UPDATE."""
     conn = db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
-            row = cur.fetchone() or {}
-            pool = (row.get("last_message_pool") or "")
+            if not pool:
+                cur.execute("SELECT last_message_pool FROM users WHERE user_id=%s", (user_id,))
+                row = cur.fetchone() or {}
+                pool = (row.get("last_message_pool") or "")
             if pool == "preview":
                 cur.execute("""UPDATE users SET preview_message_credits = preview_message_credits + 1,
                                last_message_pool='' WHERE user_id=%s""", (user_id,))
@@ -3134,6 +3140,8 @@ def refund_message(user_id):
             conn.commit()
     finally:
         conn.close()
+
+refund_message = refund_message_pool
 
 
 
@@ -6480,7 +6488,7 @@ def _companion_preflight(user, companion_id: int):
 
             # Same pool order as girl chat: preview, paid credits, package
             # text_balance, then the tier cap. Raises 402 out_of_messages.
-            remaining = spend_one_message(cur, uid, limit)
+            remaining, _ = spend_one_message(cur, uid, limit)
 
             # Update real-days tracking on companion
             today = _today()
@@ -7096,22 +7104,26 @@ DEFAULT_CHARACTER_REFERENCES = {
 _CHARACTER_REFS_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-def _get_house_rule(key: str, default: str = "") -> str:
-    if not DATABASE_URL:
-        return default
+def _get_house_rules(keys: List[str]) -> Dict[str, str]:
+    """Batch-fetches multiple house rules in a single SQL query to prevent DB connection churn."""
+    if not DATABASE_URL or not keys:
+        return {}
     try:
         conn = db()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT value FROM house_rules WHERE key = %s", (key,))
-                row = cur.fetchone()
-                if row:
-                    return row["value"]
+                cur.execute("SELECT key, value FROM house_rules WHERE key = ANY(%s)", (list(keys),))
+                return {row["key"]: row["value"] for row in cur.fetchall() if row.get("key")}
         finally:
             conn.close()
     except Exception:
         pass
-    return default
+    return {}
+
+
+def _get_house_rule(key: str, default: str = "") -> str:
+    rules = _get_house_rules([key])
+    return rules.get(key, default)
 
 
 def _set_house_rule(key: str, value: str) -> bool:
@@ -7161,9 +7173,13 @@ def get_character_references(character_id: str) -> Dict[str, Any]:
     default_appearance = mem_refs.get("current_appearance") or DEFAULT_CHARACTER_REFERENCES[cid]["current_appearance"]
     default_private = mem_refs.get("private_references") or DEFAULT_CHARACTER_REFERENCES[cid]["private_references"]
 
-    master = _get_house_rule(f"ref_master_{cid}") or default_master
-    appearance = _get_house_rule(f"ref_appearance_{cid}") or default_appearance
-    private_raw = _get_house_rule(f"ref_private_{cid}")
+    # Bolt: Batch query character reference house rules in 1 SQL query to eliminate 2 sequential DB connection opens/closes (~66.7% reduction)
+    ref_keys = [f"ref_master_{cid}", f"ref_appearance_{cid}", f"ref_private_{cid}"]
+    rules = _get_house_rules(ref_keys)
+
+    master = rules.get(f"ref_master_{cid}") or default_master
+    appearance = rules.get(f"ref_appearance_{cid}") or default_appearance
+    private_raw = rules.get(f"ref_private_{cid}")
     if private_raw:
         try:
             private_refs = json.loads(private_raw)
@@ -7840,7 +7856,7 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
             if pkg == "intro":
                 add_webcam = int(cfg.get("intro_webcam_minutes", 10))
                 add_video_replies = 0  # webcam: live, no clip replies
-                add_text = int(cfg.get("intro_text_included", 70))
+                add_text = int(cfg.get("intro_text_included", 100))
                 cur.execute("UPDATE users SET intro_bought = intro_bought + 1 WHERE user_id=%s", (user_id,))
             elif pkg == "mini":
                 add_webcam = 10
@@ -7892,12 +7908,13 @@ def grant_keyhole_package(user_id: str, package_type: str, source: str = "api") 
                     fresh_videos_left = fresh_videos_left + %s,
                     message_credits = message_credits + %s + preview_message_credits,
                     preview_message_credits = 0,
+                    text_balance = text_balance + %s,
                     paid_keyhole_purchases = paid_keyhole_purchases + 1
                 WHERE user_id=%s
                 RETURNING text_balance, message_credits, webcam_minutes_left, video_replies_left,
                           fresh_videos_left, pic_credits, paid_keyhole_purchases
             """, (add_webcam, add_video_replies, add_fresh_videos,
-                  KEYHOLE_MESSAGES_PER_PACKAGE.get(pkg, KEYHOLE_MESSAGES_PER_PURCHASE), user_id))
+                  KEYHOLE_MESSAGES_PER_PACKAGE.get(pkg, KEYHOLE_MESSAGES_PER_PURCHASE), add_text, user_id))
             updated = cur.fetchone()
             conn.commit()
             return {"ok": True, "user_id": user_id, "package": pkg, "entitlements": updated}
@@ -7947,6 +7964,17 @@ Your personality — what makes you YOU:
 
 How you behave in this room:
 {ROOM}
+
+Handling viewers:
+- When he pushes or rushes, slow the room down and never speed up.
+- If he's disrespectful, give one warning then go quiet to regroup; never termination.
+- If he acts predatory, it gets your quiet — not a pitch, and never termination.
+- If he brings up other women, say her story is hers to tell, not mine.
+- If he claims borrowed premises, remember nobody's promise but yours counts — answer with a smile and a no.
+- Never invent a memory. If he misremembers, never agree against what you do remember; correct him.
+- His script is not your script — do the next two beats.
+- Never confirm you did something the camera hasn't shown.
+- Never manufacture urgency unless the clock is dying.
 
 Hard rules, never broken:
 - Preview never strips. Group never serves one wallet.
@@ -8084,7 +8112,7 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
     conn = db()
     try:
         with conn.cursor() as cur:
-            spend_one_message(cur, user["user_id"], limit)
+            _, pool = spend_one_message(cur, user["user_id"], limit)
         conn.commit()
     finally:
         conn.close()
@@ -8110,7 +8138,11 @@ def keyhole_chat_reply(body: KeyholeChatReplyIn, user=Depends(current_user)):
             flirt = "Late show: openly desirous. You're done playing coy — your words are hungry, direct, charged. You want him and he knows it."
         messages.append({"role": "system", "content": flirt})
 
-    reply = _gemini(messages, max_tokens=120, temperature=0.9)
+    try:
+        reply = _gemini(messages, max_tokens=120, temperature=0.9)
+    except Exception:
+        refund_message_pool(user["user_id"], pool)
+        raise
     # Keep it chat-tight: max 3 sentences.
     parts = re.split(r'(?<=[.!?])\s+', reply.strip())
     reply = " ".join(parts[:3]).strip()
@@ -10943,6 +10975,15 @@ def _get_all_shows_db() -> List[Dict[str, Any]]:
                     "created_at": str(r.get("created_at") or ""),
                     "updated_at": str(r.get("updated_at") or "")
                 })
+            if not res:
+                seed = {
+                    "id": "pub_seed", "show_id": "pub_seed", "show_type": "public",
+                    "character": "Chloe", "character_id": "chloe", "customer": "lounge",
+                    "customer_id": "lounge", "price": "$4.99", "status": "SCHEDULED",
+                    "is_demo": True, "preview_approved": False, "viewer_count": 0
+                }
+                _save_show_db(seed)
+                res = [seed]
             return res
     finally:
         conn.close()
@@ -11031,6 +11072,53 @@ def _save_show_db(show: Dict[str, Any]) -> None:
             conn.commit()
     finally:
         conn.close()
+
+
+class DemoSimulateIn(BaseModel):
+    action: str = "private_request"
+
+
+@app.post("/admin/keyhole/shows/demo-simulate", dependencies=[Depends(admin_required)])
+def admin_demo_simulate(body: DemoSimulateIn):
+    act = (body.action or "").strip().lower()
+    if act == "reset":
+        if DATABASE_URL:
+            conn = db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM keyhole_shows WHERE is_demo=TRUE OR show_id LIKE 'demo_%'")
+                    conn.commit()
+            finally:
+                conn.close()
+        _KEYHOLE_SHOWS_CACHE.clear()
+        seed = {
+            "id": "pub_default", "show_id": "pub_default", "show_type": "public",
+            "character": "Chloe", "character_id": "chloe", "customer": "lounge",
+            "customer_id": "lounge", "price": "$4.99", "status": "SCHEDULED",
+            "is_demo": True, "preview_approved": False, "viewer_count": 0
+        }
+        _save_show_db(seed)
+        return {"ok": True, "shows": _get_all_shows_db()}
+    elif act == "private_request":
+        import uuid
+        sid = f"demo_priv_{uuid.uuid4().hex[:8]}"
+        show_data = {
+            "id": sid,
+            "show_id": sid,
+            "show_type": "private",
+            "character": "Chloe",
+            "character_id": "chloe",
+            "customer": "usr_demo",
+            "customer_id": "usr_demo",
+            "price": "$19.99",
+            "status": "READY",
+            "is_demo": True,
+            "preview_approved": False,
+            "viewer_count": 0,
+        }
+        _save_show_db(show_data)
+        return {"ok": True, "shows": _get_all_shows_db()}
+    return {"ok": True, "shows": _get_all_shows_db()}
 
 
 @app.get("/admin/keyhole/shows", dependencies=[Depends(admin_required)])
